@@ -1,6 +1,6 @@
 export const manifest = {
   id: "movement",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -30,6 +30,7 @@ export async function setup(ctx) {
     });
     ctx.components.add(entityId, "Input", {
       forward: 0,
+      strafe: 0,
       turn: 0,
       sprint: false,
       fireHeld: false,
@@ -47,6 +48,7 @@ export async function setup(ctx) {
       const state = ctx.components.get(entityId, "Input");
       if (!state) return;
       state.forward = Math.max(-1, Math.min(1, Number(input.forward) || 0));
+      state.strafe = Math.max(-1, Math.min(1, Number(input.strafe) || 0));
       state.turn = Math.max(-1, Math.min(1, Number(input.turn) || 0));
       state.sprint = Boolean(input.sprint);
       state.fireHeld = Boolean(input.fireHeld);
@@ -70,11 +72,25 @@ export async function setup(ctx) {
 
         transform.angle += input.turn * 2.6 * safeDt;
         const speed = input.sprint ? 5.4 : 3.25;
-        const distance = input.forward * speed * safeDt;
-        if (Math.abs(distance) < 0.0001) continue;
+        const rawForward = input.forward;
+        const rawStrafe = input.strafe;
+        const inputLength = Math.hypot(rawForward, rawStrafe);
+        const scale = inputLength > 1 ? 1 / inputLength : 1;
+        const forward = rawForward * scale;
+        const strafe = rawStrafe * scale;
 
-        const dx = Math.sin(transform.angle) * distance;
-        const dz = -Math.cos(transform.angle) * distance;
+        const distance = speed * safeDt;
+        const dx = (
+          Math.sin(transform.angle) * forward +
+          Math.cos(transform.angle) * strafe
+        ) * distance;
+        const dz = (
+          -Math.cos(transform.angle) * forward +
+          Math.sin(transform.angle) * strafe
+        ) * distance;
+
+        if (Math.hypot(dx, dz) < 0.0001) continue;
+
         const moved = physics.move(entityId, dx, dz);
         const pos = physics.position(entityId);
         if (pos) {

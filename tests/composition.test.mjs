@@ -36,6 +36,7 @@ test("Echo Front preset composes full prototype", () => {
     "rapier-physics",
     "movement",
     "weapons",
+    "weapon-progression",
     "health",
     "armor",
     "spawn-protection",

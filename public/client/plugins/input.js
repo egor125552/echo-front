@@ -12,7 +12,7 @@ export async function setup(ctx) {
 
   const handled = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR",
+    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyQ", "KeyE",
   ]);
 
   function stopFireIfNeeded() {
@@ -62,7 +62,8 @@ export async function setup(ctx) {
       const weaponModifier = pressed.has("KeyZ");
       const sample = {
         forward: (pressed.has("ArrowUp") ? 1 : 0) - (pressed.has("ArrowDown") ? 1 : 0),
-        turn: weaponModifier ? 0 : (pressed.has("ArrowRight") ? 1 : 0) - (pressed.has("ArrowLeft") ? 1 : 0),
+        strafe: weaponModifier ? 0 : (pressed.has("ArrowRight") ? 1 : 0) - (pressed.has("ArrowLeft") ? 1 : 0),
+        turn: (pressed.has("KeyE") ? 1 : 0) - (pressed.has("KeyQ") ? 1 : 0),
         sprint: pressed.has("ShiftLeft") || pressed.has("ShiftRight"),
         fireHeld: pressed.has("KeyX"),
         firePressed,
