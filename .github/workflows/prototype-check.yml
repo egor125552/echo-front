@@ -20,10 +20,10 @@ jobs:
       - run: npx wrangler deploy --dry-run
       - name: Start local Worker
         run: |
-          npx wrangler dev --port 8787 > /tmp/echo-front-wrangler.log 2>&1 &
+          timeout 90s npx wrangler dev --port 8787 > /tmp/echo-front-wrangler.log 2>&1 &
           echo $! > /tmp/echo-front-wrangler.pid
           for i in {1..30}; do
-            if curl --fail --silent http://127.0.0.1:8787/api/health > /dev/null; then
+            if curl --max-time 2 --fail --silent http://127.0.0.1:8787/api/health > /dev/null; then
               exit 0
             fi
             sleep 1
