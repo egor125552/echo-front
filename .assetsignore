@@ -1,6 +1,7 @@
 .git/
 .github/
 node_modules/
+.wrangler/
 src/
 .assetsignore
 .gitignore
