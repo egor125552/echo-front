@@ -10,6 +10,7 @@ import * as weapons from "../plugins/weapons/server.js";
 import * as respawn from "../plugins/respawn/server.js";
 import * as tdm from "../plugins/tdm/server.js";
 import * as botController from "../plugins/bot-controller/server.js";
+import * as botLoadouts from "../plugins/bot-loadouts/server.js";
 import * as botPerception from "../plugins/bot-perception/server.js";
 import * as botCombat from "../plugins/bot-combat/server.js";
 import * as botFill from "../plugins/bot-fill/server.js";
@@ -28,6 +29,7 @@ export const echoFrontPreset = [
   respawn,
   tdm,
   botController,
+  botLoadouts,
   botPerception,
   botCombat,
   botFill,
