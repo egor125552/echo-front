@@ -3,6 +3,8 @@
 node_modules/
 .wrangler/
 src/
+scripts/
+tests/
 .assetsignore
 .gitignore
 package.json

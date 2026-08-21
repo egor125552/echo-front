@@ -3,34 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Echo Front — прототип</title>
+  <title>Echo Front — игровой прототип</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <main>
-    <h1>Echo Front</h1>
-    <p>Первый технический прототип аудиошутера.</p>
+    <header>
+      <p class="eyebrow">Игровой прототип</p>
+      <h1>Echo Front</h1>
+      <p>Маленький сетевой аудиошутер. Для игры лучше использовать наушники.</p>
+      <button id="play-button" type="button">Играть</button>
+    </header>
 
-    <section aria-labelledby="server-title">
-      <h2 id="server-title">Сервер</h2>
-      <p id="server-status" role="status" aria-live="polite">Проверяю соединение с Worker…</p>
-      <button id="check-server" type="button">Проверить сервер</button>
+    <section id="game-panel" aria-labelledby="game-title" hidden>
+      <h2 id="game-title">Матч</h2>
+      <p id="connection-status" role="status">Подготовка</p>
+      <dl class="hud">
+        <div><dt>Команда</dt><dd id="team-value">-</dd></div>
+        <div><dt>Счёт</dt><dd id="score-value">0 : 0</dd></div>
+        <div><dt>Оружие</dt><dd id="weapon-value">-</dd></div>
+        <div><dt>Патроны</dt><dd id="ammo-value">-</dd></div>
+        <div><dt>Здоровье</dt><dd id="health-value">-</dd></div>
+        <div><dt>Броня</dt><dd id="armor-value">-</dd></div>
+      </dl>
+
+      <h3>Управление</h3>
+      <p>Стрелки вверх и вниз — движение. Стрелки влево и вправо — поворот. Shift — бег. X — огонь. R — перезарядка. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы менять оружие.</p>
     </section>
 
-    <section aria-labelledby="audio-title">
-      <h2 id="audio-title">Аудио</h2>
-      <p>Эти кнопки проверяют, что боевые MP3 доступны после деплоя.</p>
-      <button type="button" data-sound="/assets/audio/core/pistol-shot.mp3">Проверить пистолет</button>
-      <button type="button" data-sound="/assets/audio/core/armor-hit-1.mp3">Проверить попадание по броне</button>
-      <button type="button" data-sound="/assets/audio/core/enemy-killed.mp3">Проверить убийство</button>
-      <p id="audio-status" role="status" aria-live="polite"></p>
-    </section>
+    <p id="announcer" class="sr-only" aria-live="assertive" aria-atomic="true"></p>
 
-    <section aria-labelledby="next-title">
-      <h2 id="next-title">Следующий этап</h2>
-      <p>Движение, пространственный звук, стрельба, здоровье, броня, бот и первый сетевой матч.</p>
-    </section>
+    <details>
+      <summary>О прототипе</summary>
+      <p>Матч рассчитан на четыре слота. Пустые места занимают боты. Некоторые боты имеют броню, некоторые нет. Физика работает на Rapier 3D, а игровой код собирается из независимых плагинов.</p>
+    </details>
   </main>
-  <script type="module" src="/app.js"></script>
+  <script type="module" src="/client/bootstrap.js"></script>
 </body>
 </html>

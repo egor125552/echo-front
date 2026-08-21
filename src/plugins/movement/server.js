@@ -1,0 +1,103 @@
+export const manifest = {
+  id: "movement",
+  version: "1.0.0",
+  requires: ["entities", "rapier-physics", "map-test-arena"],
+  capabilities: [
+    "services.consume", "services.provide",
+    "components.register", "components.read", "components.write",
+    "events.on", "events.emit",
+  ],
+};
+
+export async function setup(ctx) {
+  const entities = ctx.services.get("entities");
+  const physics = ctx.services.get("physics");
+  const map = ctx.services.get("map");
+
+  ctx.components.register("Transform");
+  ctx.components.register("Input");
+
+  ctx.events.on("entity:spawned", ({ entityId, spec }) => {
+    if (spec.movable === false) return;
+    const spawn = spec.position ?? map.nextSpawn(spec.team ?? 1);
+    physics.createCharacter(entityId, spawn);
+    ctx.components.add(entityId, "Transform", {
+      x: spawn.x,
+      z: spawn.z,
+      angle: spawn.angle ?? 0,
+      stepDistance: 0,
+      stepIndex: 0,
+    });
+    ctx.components.add(entityId, "Input", {
+      forward: 0,
+      turn: 0,
+      sprint: false,
+      fireHeld: false,
+    });
+  });
+
+  ctx.events.on("entity:removed", ({ entityId }) => {
+    physics.removeCharacter(entityId);
+    ctx.components.remove(entityId, "Transform");
+    ctx.components.remove(entityId, "Input");
+  });
+
+  const api = {
+    setInput(entityId, input = {}) {
+      const state = ctx.components.get(entityId, "Input");
+      if (!state) return;
+      state.forward = Math.max(-1, Math.min(1, Number(input.forward) || 0));
+      state.turn = Math.max(-1, Math.min(1, Number(input.turn) || 0));
+      state.sprint = Boolean(input.sprint);
+      state.fireHeld = Boolean(input.fireHeld);
+    },
+    teleport(entityId, position) {
+      const transform = ctx.components.get(entityId, "Transform");
+      if (!transform) return;
+      physics.teleport(entityId, position);
+      transform.x = position.x;
+      transform.z = position.z;
+      if (Number.isFinite(position.angle)) transform.angle = position.angle;
+      transform.stepDistance = 0;
+    },
+    tick(dt) {
+      const safeDt = Math.max(0, Math.min(0.1, dt));
+      for (const [entityId, transform] of ctx.components.entries("Transform")) {
+        const entity = entities.get(entityId);
+        if (!entity?.alive) continue;
+        const input = ctx.components.get(entityId, "Input");
+        if (!input) continue;
+
+        transform.angle += input.turn * 2.6 * safeDt;
+        const speed = input.sprint ? 5.4 : 3.25;
+        const distance = input.forward * speed * safeDt;
+        if (Math.abs(distance) < 0.0001) continue;
+
+        const dx = Math.sin(transform.angle) * distance;
+        const dz = -Math.cos(transform.angle) * distance;
+        const moved = physics.move(entityId, dx, dz);
+        const pos = physics.position(entityId);
+        if (pos) {
+          transform.x = pos.x;
+          transform.z = pos.z;
+        }
+
+        transform.stepDistance += Math.hypot(moved.x, moved.z);
+        const threshold = input.sprint ? 1.15 : 1.55;
+        if (transform.stepDistance >= threshold) {
+          transform.stepDistance %= threshold;
+          transform.stepIndex = (transform.stepIndex % 4) + 1;
+          ctx.events.emit("sound:spatial", {
+            entityId,
+            key: `step.${transform.stepIndex}`,
+            x: transform.x,
+            z: transform.z,
+            radius: input.sprint ? 22 : 14,
+          });
+        }
+      }
+    },
+  };
+
+  ctx.services.provide("movement", api);
+}
