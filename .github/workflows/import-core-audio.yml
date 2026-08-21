@@ -1,0 +1,65 @@
+name: Import core audio
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/import-core-audio.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  import-audio:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download reusable audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p assets/audio/core
+
+          BASE='https://raw.githubusercontent.com/egor125552/-archipelago-/main/public/assets/audio/free-roam-v25'
+          curl -L --fail --retry 3 "$BASE/automatic-shot.mp3" -o assets/audio/core/automatic-shot.mp3
+          curl -L --fail --retry 3 "$BASE/death-full.mp3" -o assets/audio/core/death-full.mp3
+          curl -L --fail --retry 3 "$BASE/step-1.mp3" -o assets/audio/core/step-1.mp3
+          curl -L --fail --retry 3 "$BASE/step-2.mp3" -o assets/audio/core/step-2.mp3
+          curl -L --fail --retry 3 "$BASE/step-3.mp3" -o assets/audio/core/step-3.mp3
+          curl -L --fail --retry 3 "$BASE/step-4.mp3" -o assets/audio/core/step-4.mp3
+
+          PISTOL='https://raw.githubusercontent.com/Gabrielsgp/hand-shotter/a9e2dac862291cbff1af8e2c3e82922c3aeb726c/songs/163456__lemudcrab__pistol-shot.wav'
+          curl -L --fail --retry 3 "$PISTOL" -o /tmp/pistol-shot.wav
+          ffmpeg -hide_banner -loglevel error -y -i /tmp/pistol-shot.wav -codec:a libmp3lame -q:a 2 assets/audio/core/pistol-shot.mp3
+
+      - name: Save source map
+        shell: bash
+        run: |
+          cat > assets/audio/core/SOURCES.md <<'EOF'
+          # Core audio sources
+
+          These files are the reusable starting audio set for Echo Front.
+
+          - `automatic-shot.mp3` — reused from `egor125552/-archipelago-/public/assets/audio/free-roam-v25/automatic-shot.mp3`.
+          - `death-full.mp3` — reused from `egor125552/-archipelago-/public/assets/audio/free-roam-v25/death-full.mp3`.
+          - `step-1.mp3` through `step-4.mp3` — reused from `egor125552/-archipelago-/public/assets/audio/free-roam-v25/`.
+          - `pistol-shot.mp3` — MP3 conversion of the exact pistol recording used by Archipelago: `Gabrielsgp/hand-shotter`, commit `a9e2dac862291cbff1af8e2c3e82922c3aeb726c`, `songs/163456__lemudcrab__pistol-shot.wav`.
+
+          Keep gameplay code referring to these stable paths under `assets/audio/core/`.
+          EOF
+
+      - name: Commit imported audio
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add assets/audio/core
+          if git diff --cached --quiet; then
+            echo 'Audio is already up to date.'
+            exit 0
+          fi
+          git commit -m 'Add reusable core audio from Archipelago'
+          git push
