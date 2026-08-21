@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Echo Front — прототип</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <main>
+    <h1>Echo Front</h1>
+    <p>Первый технический прототип аудиошутера.</p>
+
+    <section aria-labelledby="server-title">
+      <h2 id="server-title">Сервер</h2>
+      <p id="server-status" role="status" aria-live="polite">Проверяю соединение с Worker…</p>
+      <button id="check-server" type="button">Проверить сервер</button>
+    </section>
+
+    <section aria-labelledby="audio-title">
+      <h2 id="audio-title">Аудио</h2>
+      <p>Эти кнопки проверяют, что боевые MP3 доступны после деплоя.</p>
+      <button type="button" data-sound="/assets/audio/core/pistol-shot.mp3">Проверить пистолет</button>
+      <button type="button" data-sound="/assets/audio/core/armor-hit-1.mp3">Проверить попадание по броне</button>
+      <button type="button" data-sound="/assets/audio/core/enemy-killed.mp3">Проверить убийство</button>
+      <p id="audio-status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section aria-labelledby="next-title">
+      <h2 id="next-title">Следующий этап</h2>
+      <p>Движение, пространственный звук, стрельба, здоровье, броня, бот и первый сетевой матч.</p>
+    </section>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+.git/
+.github/
+node_modules/
+src/
+.assetsignore
+.gitignore
+package.json
+package-lock.json
+wrangler.jsonc
+README.md
+AUDIO.md
