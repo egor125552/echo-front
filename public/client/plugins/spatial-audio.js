@@ -23,6 +23,7 @@ export async function setup(ctx) {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   const audioContext = new AudioContextClass();
   const buffers = new Map();
+  const activeChannels = new Map();
   let listener = { x: 0, z: 0, angle: 0 };
 
   ctx.events.on("game:snapshot", (snapshot) => {
@@ -42,12 +43,36 @@ export async function setup(ctx) {
     return promise;
   }
 
-  function playCenteredBuffer(buffer, gainValue = 1) {
+  function stopChannel(channel) {
+    const sources = activeChannels.get(channel);
+    if (!sources) return;
+    activeChannels.delete(channel);
+    for (const source of sources) {
+      try { source.stop(); } catch {}
+    }
+  }
+
+  function trackSource(source, channel, replace = false) {
+    if (!channel) return;
+    if (replace) stopChannel(channel);
+    const sources = activeChannels.get(channel) ?? new Set();
+    sources.add(source);
+    activeChannels.set(channel, sources);
+    source.addEventListener("ended", () => {
+      const current = activeChannels.get(channel);
+      if (!current) return;
+      current.delete(source);
+      if (!current.size) activeChannels.delete(channel);
+    }, { once: true });
+  }
+
+  function playCenteredBuffer(buffer, { gain = 1, channel = null, replace = false } = {}) {
     const source = audioContext.createBufferSource();
-    const gain = audioContext.createGain();
+    const gainNode = audioContext.createGain();
     source.buffer = buffer;
-    gain.gain.value = gainValue;
-    source.connect(gain).connect(audioContext.destination);
+    gainNode.gain.value = gain;
+    source.connect(gainNode).connect(audioContext.destination);
+    trackSource(source, channel, replace);
     source.start();
     return source;
   }
@@ -61,7 +86,18 @@ export async function setup(ctx) {
     return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
   }
 
-  function playSpatialBuffer(buffer, position, { radius = 40, gain = 1 } = {}) {
+  function rearCutoff(local) {
+    if (local.distance < 0.001) return 18000;
+    const rearAmount = Math.max(0, Math.min(1, -local.localForward / local.distance));
+    return 18000 - rearAmount * 7000;
+  }
+
+  function playSpatialBuffer(buffer, position, {
+    radius = 40,
+    gain = 1,
+    channel = null,
+    replace = false,
+  } = {}) {
     const local = localize(position);
     if (local.distance > radius) return null;
 
@@ -73,6 +109,7 @@ export async function setup(ctx) {
     const stereoPanner = audioContext.createStereoPanner();
     const stereoGain = audioContext.createGain();
     const hrtfPanner = audioContext.createPanner();
+    const rearFilter = audioContext.createBiquadFilter();
     const hrtfGain = audioContext.createGain();
 
     source.buffer = buffer;
@@ -88,13 +125,18 @@ export async function setup(ctx) {
     hrtfPanner.positionY.value = 0;
     hrtfPanner.positionZ.value = -local.localForward;
 
+    rearFilter.type = "lowpass";
+    rearFilter.Q.value = 0.35;
+    rearFilter.frequency.value = rearCutoff(local);
+
     const now = audioContext.currentTime;
     stereoGain.gain.setValueAtTime(mix.stereo, now);
     hrtfGain.gain.setValueAtTime(mix.hrtf, now);
 
     source.connect(distanceGain);
     distanceGain.connect(stereoPanner).connect(stereoGain).connect(audioContext.destination);
-    distanceGain.connect(hrtfPanner).connect(hrtfGain).connect(audioContext.destination);
+    distanceGain.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(audioContext.destination);
+    trackSource(source, channel, replace);
     source.start();
 
     return {
@@ -108,6 +150,7 @@ export async function setup(ctx) {
         hrtfGain.gain.linearRampToValueAtTime(nextMix.hrtf, at);
         hrtfPanner.positionX.linearRampToValueAtTime(next.localRight, at);
         hrtfPanner.positionZ.linearRampToValueAtTime(-next.localForward, at);
+        rearFilter.frequency.linearRampToValueAtTime(rearCutoff(next), at);
         distanceGain.gain.linearRampToValueAtTime(
           gain * Math.max(0.025, 1 / (1 + next.distance * 0.16)),
           at,
@@ -122,9 +165,10 @@ export async function setup(ctx) {
       if (audioContext.state !== "running") await audioContext.resume();
     },
     load,
+    stopChannel,
     async playCentered(url, options = {}) {
       const buffer = await load(url);
-      return playCenteredBuffer(buffer, options.gain ?? 1);
+      return playCenteredBuffer(buffer, options);
     },
     async playSpatial(url, position, options = {}) {
       const buffer = await load(url);

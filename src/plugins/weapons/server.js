@@ -29,6 +29,7 @@ export const manifest = {
   id: "weapons",
   version: "1.0.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
+  optional: ["aim-assist"],
   capabilities: [
     "services.consume", "services.provide",
     "components.register", "components.read", "components.write",
@@ -51,6 +52,7 @@ export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const combat = ctx.services.get("combat");
   const teams = ctx.services.get("teams");
+  const targeting = ctx.services.has("targeting") ? ctx.services.get("targeting") : null;
 
   ctx.components.register("Weapons");
 
@@ -92,11 +94,15 @@ export async function setup(ctx) {
     weapon.lastFireAt = now;
     weapon.ammo -= 1;
 
-    const direction = {
+    const baseDirection = {
       x: Math.sin(transform.angle),
       y: 0,
       z: -Math.cos(transform.angle),
     };
+    const direction = targeting
+      ? targeting.adjustDirection(entityId, baseDirection, definition.range)
+      : baseDirection;
+
     ctx.events.emit("sound:spatial", {
       entityId,
       key: definition.soundKey,
@@ -119,6 +125,7 @@ export async function setup(ctx) {
         combat.damage(hit.entityId, definition.damage, {
           attackerId: entityId,
           weaponId: weapon.id,
+          now,
         });
       }
     }

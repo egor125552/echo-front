@@ -15,30 +15,46 @@ export async function setup(ctx) {
     "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR",
   ]);
 
+  function stopFireIfNeeded() {
+    if (!pressed.has("KeyX")) return;
+    pressed.delete("KeyX");
+    if (enabled) ctx.events.emit("input:fire-stop", {});
+  }
+
   window.addEventListener("keydown", (event) => {
     if (!enabled) return;
     if (handled.has(event.code)) event.preventDefault();
     if (!pressed.has(event.code)) {
-      if (event.code === "KeyX") firePressed = true;
+      if (event.code === "KeyX") {
+        firePressed = true;
+        ctx.events.emit("input:fire-start", {});
+      }
       if (event.code === "KeyR") reload = true;
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
       if (pressed.has("KeyZ") && event.code === "ArrowRight") selectDelta = 1;
     }
     pressed.add(event.code);
-  }, { passive: false });
+  }, { capture: true, passive: false });
 
   window.addEventListener("keyup", (event) => {
     if (handled.has(event.code) && enabled) event.preventDefault();
-    pressed.delete(event.code);
-  }, { passive: false });
+    const wasPressed = pressed.delete(event.code);
+    if (enabled && wasPressed && event.code === "KeyX") {
+      ctx.events.emit("input:fire-stop", {});
+    }
+  }, { capture: true, passive: false });
 
-  window.addEventListener("blur", () => pressed.clear());
+  window.addEventListener("blur", () => {
+    stopFireIfNeeded();
+    pressed.clear();
+  });
 
   ctx.services.provide("input", {
     enable() {
       enabled = true;
     },
     disable() {
+      stopFireIfNeeded();
       enabled = false;
       pressed.clear();
     },

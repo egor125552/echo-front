@@ -38,6 +38,8 @@ test("Echo Front preset composes full prototype", () => {
     "weapons",
     "health",
     "armor",
+    "spawn-protection",
+    "aim-assist",
     "bot-controller",
     "bot-perception",
     "bot-combat",
