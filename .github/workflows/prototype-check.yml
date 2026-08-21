@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - main
-      - playable-plugin-prototype-final
+      - runtime-smoke-fix
   pull_request:
 
 jobs:
@@ -18,3 +18,20 @@ jobs:
       - run: npm install
       - run: npm test
       - run: npx wrangler deploy --dry-run
+      - name: Start local Worker
+        run: |
+          npx wrangler dev --port 8787 > /tmp/echo-front-wrangler.log 2>&1 &
+          echo $! > /tmp/echo-front-wrangler.pid
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8787/api/health > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/echo-front-wrangler.log
+          exit 1
+      - name: Smoke playable WebSocket runtime
+        run: node scripts/smoke-play.mjs
+      - name: Show Worker log on failure
+        if: failure()
+        run: cat /tmp/echo-front-wrangler.log || true
