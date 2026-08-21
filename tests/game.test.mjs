@@ -38,3 +38,24 @@ test("weapon selection is independent from movement", async () => {
   assert.equal(self.weapon, "rifle");
   await game.host.stop();
 });
+
+test("human spawn protection blocks immediate damage", async () => {
+  const game = await createEchoFrontGame();
+  game.api.connectHuman("human-protected");
+  const protection = game.host.services.get("spawn-protection");
+  const combat = game.host.services.get("combat");
+
+  assert.equal(protection.isProtected("human-protected"), true);
+  combat.damage("human-protected", 999);
+
+  let self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
+  assert.equal(self.health, 100);
+  assert.equal(self.armor, 50);
+
+  protection.clear("human-protected");
+  combat.damage("human-protected", 60);
+  self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
+  assert.equal(self.armor, 0);
+  assert.equal(self.health, 90);
+  await game.host.stop();
+});

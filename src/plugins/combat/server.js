@@ -17,23 +17,26 @@ export async function setup(ctx) {
         remaining: amount,
         attackerId: source.attackerId ?? null,
         weaponId: source.weaponId ?? null,
+        now: source.now ?? Date.now(),
         armorAbsorbed: 0,
         armorBroke: false,
+        spawnProtected: false,
       };
       ctx.events.emit("combat:damage:before", packet);
       const result = health.applyDamage(targetId, packet.remaining, source);
 
       if (packet.attackerId) {
         if (packet.armorAbsorbed > 0) {
-          armorVariant = (armorVariant % 2) + 1;
-          ctx.events.emit("feedback:sound", {
-            recipientId: packet.attackerId,
-            key: `armor.hit${armorVariant}`,
-          });
           if (packet.armorBroke) {
             ctx.events.emit("feedback:sound", {
               recipientId: packet.attackerId,
               key: "armor.break",
+            });
+          } else {
+            armorVariant = (armorVariant % 2) + 1;
+            ctx.events.emit("feedback:sound", {
+              recipientId: packet.attackerId,
+              key: `armor.hit${armorVariant}`,
             });
           }
         } else if (result.applied > 0) {
@@ -64,7 +67,12 @@ export async function setup(ctx) {
         });
       }
 
-      return { ...result, armorAbsorbed: packet.armorAbsorbed, armorBroke: packet.armorBroke };
+      return {
+        ...result,
+        armorAbsorbed: packet.armorAbsorbed,
+        armorBroke: packet.armorBroke,
+        spawnProtected: packet.spawnProtected,
+      };
     },
   });
 }
