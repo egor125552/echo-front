@@ -65,9 +65,41 @@ button:disabled {
 }
 
 button:focus-visible,
-summary:focus-visible {
+summary:focus-visible,
+input:focus-visible {
   outline: 3px solid currentColor;
   outline-offset: 4px;
+}
+
+.settings-grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.setting-row {
+  display: grid;
+  gap: 0.6rem;
+  font-weight: 650;
+}
+
+.setting-row input[type="checkbox"] {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.setting-range {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.setting-range input {
+  grid-column: 1 / -1;
+  width: 100%;
+}
+
+.setting-range output {
+  font-variant-numeric: tabular-nums;
 }
 
 .hud {

@@ -13,7 +13,7 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
-  const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.13);
+  const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.2);
 
   function adjustDirection(entityId, direction, maxDistance) {
     const shooter = entities.get(entityId);
@@ -40,7 +40,7 @@ export async function setup(ctx) {
       const tz = dz / distance;
       const dot = clamp(base.x * tx + base.z * tz, -1, 1);
       const angle = Math.acos(dot);
-      const distanceBonus = distance < 10 ? 0.035 : distance < 18 ? 0.015 : 0;
+      const distanceBonus = distance < 8 ? 0.07 : distance < 15 ? 0.04 : 0.015;
       const allowed = defaultMaxAngle + distanceBonus;
       if (angle > allowed || (best && angle >= best.angle)) continue;
 

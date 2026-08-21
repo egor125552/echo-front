@@ -25,18 +25,17 @@ export async function setup(ctx) {
       ctx.events.emit("combat:damage:before", packet);
       const result = health.applyDamage(targetId, packet.remaining, source);
 
-      if (packet.attackerId) {
+      if (packet.attackerId && !packet.spawnProtected) {
         if (packet.armorAbsorbed > 0) {
+          armorVariant = (armorVariant % 2) + 1;
+          ctx.events.emit("feedback:sound", {
+            recipientId: packet.attackerId,
+            key: `armor.hit${armorVariant}`,
+          });
           if (packet.armorBroke) {
             ctx.events.emit("feedback:sound", {
               recipientId: packet.attackerId,
               key: "armor.break",
-            });
-          } else {
-            armorVariant = (armorVariant % 2) + 1;
-            ctx.events.emit("feedback:sound", {
-              recipientId: packet.attackerId,
-              key: `armor.hit${armorVariant}`,
             });
           }
         } else if (result.applied > 0) {
