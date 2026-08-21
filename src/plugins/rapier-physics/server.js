@@ -1,4 +1,4 @@
-import RAPIER from "@dimforge/rapier3d-compat";
+import RAPIER from "@dimforge/rapier3d";
 
 export const manifest = {
   id: "rapier-physics",
@@ -8,8 +8,6 @@ export const manifest = {
 };
 
 export async function setup(ctx) {
-  await RAPIER.init();
-
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const controller = world.createCharacterController(0.02);
   const characters = new Map();
