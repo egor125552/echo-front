@@ -19,6 +19,11 @@ export async function setup(ctx) {
     socket.send(JSON.stringify({ type: "input", input: input.sample() }));
   }
 
+  function emitSnapshot(snapshot) {
+    if (ctx.services.has("snapshot-smoothing")) ctx.events.emit("game:snapshot:raw", snapshot);
+    else ctx.events.emit("game:snapshot", snapshot);
+  }
+
   function connect(room = "public") {
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -42,9 +47,9 @@ export async function setup(ctx) {
       if (data.type === "welcome") {
         playerId = data.playerId;
         ctx.events.emit("network:welcome", data);
-        if (data.snapshot) ctx.events.emit("game:snapshot", data.snapshot);
+        if (data.snapshot) emitSnapshot(data.snapshot);
       } else if (data.type === "snapshot") {
-        ctx.events.emit("game:snapshot", data.snapshot);
+        emitSnapshot(data.snapshot);
       } else if (data.type === "event") {
         ctx.events.emit("game:event", data);
       }

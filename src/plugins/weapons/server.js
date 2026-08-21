@@ -3,8 +3,8 @@ const DEFINITIONS = {
     id: "pistol",
     name: "Пистолет",
     automatic: false,
-    magazine: 12,
-    reserve: 48,
+    magazine: 50,
+    reserve: 150,
     damage: 28,
     rpm: 300,
     range: 28,
@@ -27,7 +27,7 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
   optional: ["aim-assist"],
   capabilities: [
@@ -74,6 +74,16 @@ export async function setup(ctx) {
     weapon.ammo += loaded;
     weapon.reserve -= loaded;
     weapon.reloadUntil = 0;
+  }
+
+  function grant(entityId, weaponId) {
+    const inventory = ctx.components.get(entityId, "Weapons");
+    const definition = DEFINITIONS[weaponId];
+    if (!inventory || !definition) return false;
+    if (inventory.items.some((item) => item.id === weaponId)) return false;
+    inventory.items.push(createWeapon(definition));
+    ctx.events.emit("weapon:unlocked", { entityId, weaponId });
+    return true;
   }
 
   function fire(entityId, now = Date.now()) {
@@ -135,6 +145,10 @@ export async function setup(ctx) {
   const api = {
     definitions: DEFINITIONS,
     fire,
+    grant,
+    has(entityId, weaponId) {
+      return Boolean(ctx.components.get(entityId, "Weapons")?.items?.some((item) => item.id === weaponId));
+    },
     reload(entityId, now = Date.now()) {
       const inventory = ctx.components.get(entityId, "Weapons");
       if (!inventory?.items.length) return;
@@ -146,7 +160,7 @@ export async function setup(ctx) {
     },
     select(entityId, delta) {
       const inventory = ctx.components.get(entityId, "Weapons");
-      if (!inventory?.items.length) return;
+      if (!inventory?.items.length || inventory.items.length < 2) return;
       const count = inventory.items.length;
       inventory.selected = (inventory.selected + Math.sign(delta || 0) + count) % count;
       ctx.events.emit("weapon:selected", {

@@ -32,9 +32,10 @@ export async function setup(ctx) {
   ctx.events.on("network:welcome", ({ team: joinedTeam }) => {
     team = joinedTeam;
     announce(
-      `Вы в команде ${team}. Задача: уничтожить десять противников раньше другой команды. ` +
-      "Слушайте шаги и выстрелы. Стрелки вверх и вниз — движение, влево и вправо — поворот. " +
-      "Shift — бег, X — огонь. Удерживайте Z и нажимайте влево или вправо, чтобы сменить оружие.",
+      `Вы в команде ${team}. Первый раунд начинаете с пистолетом: пятьдесят патронов в магазине и сто пятьдесят в запасе. ` +
+      "После первого раунда откроется автомат. Задача: набрать десять убийств раньше другой команды. " +
+      "Стрелки вверх и вниз — вперёд и назад, влево и вправо — боковые шаги. Q и E — поворот. " +
+      "Shift — бег, X — огонь. Удерживайте Z и нажимайте влево или вправо, чтобы сменить открытое оружие.",
       { interrupt: true },
     );
   });
@@ -56,6 +57,10 @@ export async function setup(ctx) {
       announce(payload.weaponId === "rifle" ? "Автомат" : "Пистолет", { interrupt: true });
     }
 
+    if (packet.event === "weapon:unlocked" && payload.entityId === network.playerId && payload.weaponId === "rifle") {
+      announce("Открыт автомат", { interrupt: false });
+    }
+
     if (packet.event === "match:score") {
       const own = Number(payload.score?.[team] ?? 0);
       const enemyTeam = team === 1 ? 2 : 1;
@@ -66,13 +71,14 @@ export async function setup(ctx) {
     }
 
     if (packet.event === "match:ended") {
-      if (payload.winner === 0) announce("Раунд завершён вничью. Новый раунд через пять секунд", { interrupt: true });
-      else if (payload.winner === team) announce("Победа. Новый раунд через пять секунд", { interrupt: true });
-      else announce("Поражение. Новый раунд через пять секунд", { interrupt: true });
+      const unlock = Number(payload.roundNumber) === 1 ? " Автомат открыт." : "";
+      if (payload.winner === 0) announce(`Раунд завершён вничью.${unlock} Новый раунд через пять секунд`, { interrupt: true });
+      else if (payload.winner === team) announce(`Победа.${unlock} Новый раунд через пять секунд`, { interrupt: true });
+      else announce(`Поражение.${unlock} Новый раунд через пять секунд`, { interrupt: true });
     }
 
     if (packet.event === "match:started") {
-      announce("Новый раунд. В бой", { interrupt: true });
+      announce(`Раунд ${payload.roundNumber ?? ""}. В бой`, { interrupt: true });
     }
   });
 }

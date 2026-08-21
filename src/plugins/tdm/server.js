@@ -1,6 +1,6 @@
 export const manifest = {
   id: "team-deathmatch",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["teams", "entities"],
   capabilities: ["services.consume", "services.provide", "events.on", "events.emit"],
 };
@@ -14,6 +14,7 @@ export async function setup(ctx) {
   let roundStartedAt = Date.now();
   let endedUntil = 0;
   let winner = 0;
+  let roundNumber = 1;
 
   function endRound(now, winningTeam) {
     if (endedUntil) return;
@@ -23,16 +24,18 @@ export async function setup(ctx) {
       winner,
       score: { ...score },
       restartAt: endedUntil,
+      roundNumber,
     });
   }
 
   function reset(now = Date.now()) {
+    if (endedUntil) roundNumber += 1;
     score[1] = 0;
     score[2] = 0;
     winner = 0;
     endedUntil = 0;
     roundStartedAt = now;
-    ctx.events.emit("match:started", { startedAt: roundStartedAt });
+    ctx.events.emit("match:started", { startedAt: roundStartedAt, roundNumber });
   }
 
   ctx.events.on("entity:died", ({ entityId, killerId }) => {
@@ -41,7 +44,7 @@ export async function setup(ctx) {
     const victimTeam = teams.teamOf(entityId);
     if (!killerTeam || killerTeam === victimTeam) return;
     score[killerTeam] += 1;
-    ctx.events.emit("match:score", { score: { ...score } });
+    ctx.events.emit("match:score", { score: { ...score }, roundNumber });
     if (score[killerTeam] >= targetScore) endRound(Date.now(), killerTeam);
   });
 
@@ -67,6 +70,7 @@ export async function setup(ctx) {
         ended: Boolean(endedUntil),
         winner,
         restartAt: endedUntil || null,
+        roundNumber,
       };
     },
     reset,

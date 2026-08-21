@@ -14,7 +14,8 @@ export async function createEchoFrontGame() {
       packet.event === "match:score" ||
       packet.event === "match:ended" ||
       packet.event === "match:started" ||
-      packet.event === "weapon:selected"
+      packet.event === "weapon:selected" ||
+      packet.event === "weapon:unlocked"
     ) {
       events.push(packet);
       if (events.length > 200) events.shift();
