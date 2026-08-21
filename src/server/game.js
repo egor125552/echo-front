@@ -12,6 +12,8 @@ export async function createEchoFrontGame() {
       packet.event === "entity:died" ||
       packet.event === "entity:respawned" ||
       packet.event === "match:score" ||
+      packet.event === "match:ended" ||
+      packet.event === "match:started" ||
       packet.event === "weapon:selected"
     ) {
       events.push(packet);
