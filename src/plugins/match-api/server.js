@@ -48,7 +48,7 @@ export async function setup(ctx) {
 
   function handleInput(playerId, input = {}, now = Date.now()) {
     const entity = entities.get(playerId);
-    if (!entity?.alive) return;
+    if (!entity?.alive || tdm.status(now).ended) return;
     movement.setInput(playerId, input);
     if (input.firePressed) weapons.fire(playerId, now);
     if (input.reload) weapons.reload(playerId, now);
@@ -56,9 +56,12 @@ export async function setup(ctx) {
   }
 
   function step(dt, now = Date.now()) {
-    botCombat.tick(dt, now);
-    movement.tick(dt);
-    weapons.tickAutomatic(now);
+    tdm.tick(now);
+    if (!tdm.status(now).ended) {
+      botCombat.tick(dt, now);
+      movement.tick(dt);
+      weapons.tickAutomatic(now);
+    }
     respawn.tick(now);
   }
 
