@@ -8,6 +8,16 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
+export function hybridSpatialMix(azimuth) {
+  const side = Math.abs(Math.sin(azimuth));
+  const blend = smoothstep(0.58, 0.97, side);
+  return {
+    pan: Math.max(-1, Math.min(1, Math.sin(azimuth))),
+    stereo: Math.sin(blend * Math.PI / 2),
+    hrtf: Math.cos(blend * Math.PI / 2),
+  };
+}
+
 export async function setup(ctx) {
   const network = ctx.services.get("network");
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -42,24 +52,21 @@ export async function setup(ctx) {
     return source;
   }
 
-  function playSpatialBuffer(buffer, position, { radius = 40, gainValue = 1 } = {}) {
+  function localize(position) {
     const dx = position.x - listener.x;
     const dz = position.z - listener.z;
-    const distance = Math.hypot(dx, dz);
-    if (distance > radius) return null;
-
-    const rightX = Math.cos(listener.angle);
-    const rightZ = Math.sin(listener.angle);
-    const forwardX = Math.sin(listener.angle);
-    const forwardZ = -Math.cos(listener.angle);
-    const localRight = dx * rightX + dz * rightZ;
-    const localForward = dx * forwardX + dz * forwardZ;
+    const localRight = dx * Math.cos(listener.angle) + dz * Math.sin(listener.angle);
+    const localForward = dx * Math.sin(listener.angle) - dz * Math.cos(listener.angle);
     const azimuth = Math.atan2(localRight, localForward || 0.000001);
-    const side = Math.abs(Math.sin(azimuth));
-    const stereoBlend = smoothstep(0.58, 0.97, side);
-    const stereoTarget = Math.sin(stereoBlend * Math.PI / 2);
-    const hrtfTarget = Math.cos(stereoBlend * Math.PI / 2);
-    const attenuation = gainValue * Math.max(0.025, 1 / (1 + distance * 0.16));
+    return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
+  }
+
+  function playSpatialBuffer(buffer, position, { radius = 40, gain = 1 } = {}) {
+    const local = localize(position);
+    if (local.distance > radius) return null;
+
+    const mix = hybridSpatialMix(local.azimuth);
+    const attenuation = gain * Math.max(0.025, 1 / (1 + local.distance * 0.16));
 
     const source = audioContext.createBufferSource();
     const distanceGain = audioContext.createGain();
@@ -70,20 +77,20 @@ export async function setup(ctx) {
 
     source.buffer = buffer;
     distanceGain.gain.value = attenuation;
-    stereoPanner.pan.value = Math.max(-1, Math.min(1, Math.sin(azimuth)));
+    stereoPanner.pan.value = mix.pan;
 
     hrtfPanner.panningModel = "HRTF";
     hrtfPanner.distanceModel = "inverse";
     hrtfPanner.refDistance = 1;
     hrtfPanner.maxDistance = 10000;
     hrtfPanner.rolloffFactor = 0;
-    hrtfPanner.positionX.value = localRight;
+    hrtfPanner.positionX.value = local.localRight;
     hrtfPanner.positionY.value = 0;
-    hrtfPanner.positionZ.value = -localForward;
+    hrtfPanner.positionZ.value = -local.localForward;
 
     const now = audioContext.currentTime;
-    stereoGain.gain.setValueAtTime(stereoTarget, now);
-    hrtfGain.gain.setValueAtTime(hrtfTarget, now);
+    stereoGain.gain.setValueAtTime(mix.stereo, now);
+    hrtfGain.gain.setValueAtTime(mix.hrtf, now);
 
     source.connect(distanceGain);
     distanceGain.connect(stereoPanner).connect(stereoGain).connect(audioContext.destination);
@@ -93,21 +100,18 @@ export async function setup(ctx) {
     return {
       source,
       update(nextPosition) {
-        const ndx = nextPosition.x - listener.x;
-        const ndz = nextPosition.z - listener.z;
-        const nr = ndx * Math.cos(listener.angle) + ndz * Math.sin(listener.angle);
-        const nf = ndx * Math.sin(listener.angle) - ndz * Math.cos(listener.angle);
-        const nextAzimuth = Math.atan2(nr, nf || 0.000001);
-        const nextSide = Math.abs(Math.sin(nextAzimuth));
-        const nextBlend = smoothstep(0.58, 0.97, nextSide);
-        const nextStereo = Math.sin(nextBlend * Math.PI / 2);
-        const nextHrtf = Math.cos(nextBlend * Math.PI / 2);
+        const next = localize(nextPosition);
+        const nextMix = hybridSpatialMix(next.azimuth);
         const at = audioContext.currentTime + 0.035;
-        stereoPanner.pan.linearRampToValueAtTime(Math.sin(nextAzimuth), at);
-        stereoGain.gain.linearRampToValueAtTime(nextStereo, at);
-        hrtfGain.gain.linearRampToValueAtTime(nextHrtf, at);
-        hrtfPanner.positionX.linearRampToValueAtTime(nr, at);
-        hrtfPanner.positionZ.linearRampToValueAtTime(-nf, at);
+        stereoPanner.pan.linearRampToValueAtTime(nextMix.pan, at);
+        stereoGain.gain.linearRampToValueAtTime(nextMix.stereo, at);
+        hrtfGain.gain.linearRampToValueAtTime(nextMix.hrtf, at);
+        hrtfPanner.positionX.linearRampToValueAtTime(next.localRight, at);
+        hrtfPanner.positionZ.linearRampToValueAtTime(-next.localForward, at);
+        distanceGain.gain.linearRampToValueAtTime(
+          gain * Math.max(0.025, 1 / (1 + next.distance * 0.16)),
+          at,
+        );
       },
     };
   }
