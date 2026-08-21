@@ -59,3 +59,33 @@ test("human spawn protection blocks immediate damage", async () => {
   assert.equal(self.health, 90);
   await game.host.stop();
 });
+
+test("armor break and kill produce distinct attacker feedback", async () => {
+  const game = await createEchoFrontGame();
+  game.api.connectHuman("human-feedback");
+  const combat = game.host.services.get("combat");
+  const armored = game.api.snapshot().entities.find((entity) => entity.bot && entity.armor != null);
+  assert.ok(armored);
+
+  const feedback = [];
+  const off = game.host.events.on("feedback:sound", (payload) => {
+    if (payload.recipientId === "human-feedback") feedback.push(payload.key);
+  });
+
+  const armor = game.host.components.get(armored.id, "Armor");
+  armor.current = 10;
+  combat.damage(armored.id, 20, { attackerId: "human-feedback", weaponId: "pistol" });
+  assert.ok(feedback.some((key) => key.startsWith("armor.hit")));
+  assert.ok(feedback.includes("armor.break"));
+
+  feedback.length = 0;
+  armor.current = 0;
+  const health = game.host.components.get(armored.id, "Health");
+  health.current = 10;
+  combat.damage(armored.id, 20, { attackerId: "human-feedback", weaponId: "pistol" });
+  assert.ok(feedback.includes("hit.enemy"));
+  assert.ok(feedback.includes("enemy.killed"));
+
+  off();
+  await game.host.stop();
+});

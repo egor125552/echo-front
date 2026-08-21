@@ -26,7 +26,14 @@ export async function setup(ctx) {
         if (!bot.alive) continue;
         const transform = ctx.components.get(bot.id, "Transform");
         const botState = ctx.components.get(bot.id, "Bot");
+        const inventory = ctx.components.get(bot.id, "Weapons");
         if (!transform || !botState) continue;
+
+        const selected = inventory?.items?.[inventory.selected] ?? null;
+        if (selected && selected.ammo <= 2 && selected.reserve > 0) {
+          weapons.reload(bot.id, now);
+        }
+
         const target = perception.nearestVisibleEnemy(bot.id);
 
         if (!target) {
@@ -55,6 +62,8 @@ export async function setup(ctx) {
           sprint: target.distance > 13,
           fireHeld: false,
         });
+
+        if (selected?.reloadUntil > now) continue;
 
         if (Math.abs(error) < 0.13 && target.distance < 17) {
           if (botState.reactionUntil === 0) {

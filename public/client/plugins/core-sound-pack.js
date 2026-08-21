@@ -52,6 +52,46 @@ export async function setup(ctx) {
     }, 100);
   }
 
+  async function playFeedback(key, url) {
+    if (key === "death.full") {
+      stopAutomatic();
+      audio.stopChannel("own-weapon");
+      audio.stopChannel("feedback-received");
+      await audio.playCentered(url, { gain: 1.15, channel: "death", replace: true });
+      return;
+    }
+
+    if (key === "hit.player") {
+      await audio.playCentered(url, { gain: 1.0, channel: "feedback-received", replace: true });
+      return;
+    }
+
+    if (key === "hit.enemy") {
+      await audio.playCentered(url, { gain: 1.3, channel: "feedback-flesh", replace: true });
+      return;
+    }
+
+    if (key === "armor.hit1" || key === "armor.hit2") {
+      await audio.playCentered(url, { gain: 1.25, channel: "feedback-armor-hit", replace: true });
+      return;
+    }
+
+    if (key === "armor.break") {
+      setTimeout(() => {
+        audio.playCentered(url, { gain: 1.4, channel: "feedback-armor-break", replace: true })
+          .catch((error) => console.error("Armor break audio", error));
+      }, 65);
+      return;
+    }
+
+    if (key === "enemy.killed") {
+      await audio.playCentered(url, { gain: 1.35, channel: "feedback-kill", replace: true });
+      return;
+    }
+
+    await audio.playCentered(url);
+  }
+
   ctx.events.on("game:snapshot", (snapshot) => {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
     if (!self) return;
@@ -96,22 +136,7 @@ export async function setup(ctx) {
     try {
       if (packet.event === "feedback:sound") {
         if (payload.recipientId !== network.playerId) return;
-
-        if (payload.key === "death.full") {
-          stopAutomatic();
-          audio.stopChannel("own-weapon");
-          audio.stopChannel("feedback-hit");
-          audio.stopChannel("feedback-received");
-          await audio.playCentered(url, { channel: "death", replace: true });
-          return;
-        }
-
-        if (payload.key === "hit.player") {
-          await audio.playCentered(url, { channel: "feedback-received", replace: true });
-          return;
-        }
-
-        await audio.playCentered(url, { channel: "feedback-hit", replace: true });
+        await playFeedback(payload.key, url);
         return;
       }
 

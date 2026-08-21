@@ -15,6 +15,22 @@
       <button id="play-button" type="button">Играть</button>
     </header>
 
+    <details id="settings-panel">
+      <summary>Настройки озвучки</summary>
+      <div class="settings-grid">
+        <label class="setting-row">
+          <span>Игровая озвучка</span>
+          <input id="speech-enabled" type="checkbox" checked>
+        </label>
+        <label class="setting-row setting-range" for="speech-rate">
+          <span>Скорость речи</span>
+          <input id="speech-rate" type="range" min="0.7" max="2.5" step="0.1" value="1.7">
+          <output id="speech-rate-value" for="speech-rate">1.7×</output>
+        </label>
+        <button id="speech-test" type="button">Проверить озвучку</button>
+      </div>
+    </details>
+
     <section id="game-panel" aria-labelledby="game-title" hidden>
       <h2 id="game-title">Матч</h2>
       <p id="connection-status" role="status">Подготовка</p>
