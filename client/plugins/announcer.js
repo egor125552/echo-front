@@ -31,5 +31,12 @@ export async function setup(ctx) {
     if (packet.event === "weapon:selected" && payload.entityId === network.playerId) {
       announce(payload.weaponId === "rifle" ? "Автомат" : "Пистолет");
     }
+    if (packet.event === "match:ended") {
+      if (payload.winner === 0) announce("Раунд завершён вничью. Новый раунд через пять секунд.");
+      else announce(`Раунд завершён. Победила команда ${payload.winner}. Новый раунд через пять секунд.`);
+    }
+    if (packet.event === "match:started") {
+      announce("Новый раунд начался");
+    }
   });
 }
