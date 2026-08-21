@@ -10,7 +10,6 @@
     "check": "npm test && wrangler deploy --dry-run"
   },
   "dependencies": {
-    "@dimforge/rapier3d": "0.19.3",
     "@dimforge/rapier3d-compat": "0.19.3"
   },
   "devDependencies": {
