@@ -1,5 +1,3 @@
-import RAPIER from "@dimforge/rapier3d";
-
 export const manifest = {
   id: "rapier-physics",
   version: "1.0.0",
@@ -7,7 +5,20 @@ export const manifest = {
   capabilities: ["services.provide"],
 };
 
+async function loadRapier() {
+  if (typeof WebSocketPair !== "undefined") {
+    const module = await import("@dimforge/rapier3d/rapier.js");
+    return module.default;
+  }
+
+  const module = await import("@dimforge/rapier3d-compat");
+  const RAPIER = module.default;
+  await RAPIER.init();
+  return RAPIER;
+}
+
 export async function setup(ctx) {
+  const RAPIER = await loadRapier();
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const controller = world.createCharacterController(0.02);
   const characters = new Map();
