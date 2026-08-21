@@ -15,10 +15,16 @@ export async function setup(ctx) {
   const characters = new Map();
   const colliderToEntity = new Map();
 
+  function syncQueries() {
+    world.step();
+  }
+
   function createWall({ x, z, hx, hz, height = 2 }) {
     const desc = RAPIER.ColliderDesc.cuboid(hx, height / 2, hz)
       .setTranslation(x, height / 2, z);
-    return world.createCollider(desc);
+    const collider = world.createCollider(desc);
+    syncQueries();
+    return collider;
   }
 
   function createCharacter(entityId, { x = 0, z = 0 } = {}) {
@@ -29,6 +35,7 @@ export async function setup(ctx) {
     const entry = { collider };
     characters.set(entityId, entry);
     colliderToEntity.set(collider.handle, entityId);
+    syncQueries();
     return entry;
   }
 
@@ -38,6 +45,7 @@ export async function setup(ctx) {
     colliderToEntity.delete(entry.collider.handle);
     world.removeCollider(entry.collider, true);
     characters.delete(entityId);
+    syncQueries();
   }
 
   function position(entityId) {
@@ -51,12 +59,19 @@ export async function setup(ctx) {
     const entry = characters.get(entityId);
     if (!entry) return;
     entry.collider.setTranslation({ x, y: 1.0, z });
+    syncQueries();
   }
 
   function move(entityId, dx, dz) {
     const entry = characters.get(entityId);
     if (!entry) return { x: 0, z: 0 };
-    controller.computeColliderMovement(entry.collider, { x: dx, y: 0, z: dz });
+    controller.computeColliderMovement(
+      entry.collider,
+      { x: dx, y: 0, z: dz },
+      undefined,
+      undefined,
+      (collider) => collider.handle !== entry.collider.handle,
+    );
     const corrected = controller.computedMovement();
     const p = entry.collider.translation();
     entry.collider.setTranslation({
@@ -64,6 +79,7 @@ export async function setup(ctx) {
       y: 1.0,
       z: p.z + corrected.z,
     });
+    syncQueries();
     return { x: corrected.x, z: corrected.z };
   }
 
@@ -114,5 +130,6 @@ export async function setup(ctx) {
     move,
     raycast,
     lineOfSight,
+    syncQueries,
   });
 }
