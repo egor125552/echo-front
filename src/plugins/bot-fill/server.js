@@ -1,7 +1,7 @@
 export const manifest = {
   id: "bot-fill",
   version: "1.0.0",
-  requires: ["bot-controller", "entities", "teams"],
+  requires: ["bot-controller", "bot-loadouts", "entities", "teams"],
   capabilities: ["services.consume", "services.provide"],
 };
 
@@ -9,24 +9,15 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const bots = ctx.services.get("bots");
   const teams = ctx.services.get("teams");
+  const loadouts = ctx.services.get("bot-loadouts");
   const targetPlayers = 4;
   let serial = 0;
 
   function spawnBot() {
     const team = teams.pickBalancedTeam();
-    const armored = serial % 2 === 1;
-    const id = `bot-${++serial}`;
-    entities.spawn({
-      id,
-      kind: "bot",
-      name: armored ? `Бот ${serial} в броне` : `Бот ${serial}`,
-      bot: true,
-      team,
-      health: 100,
-      armor: armored ? 50 : 0,
-      weapons: armored ? ["rifle", "pistol"] : ["pistol", "rifle"],
-    });
-    return id;
+    const spec = loadouts.create(++serial, team);
+    entities.spawn(spec);
+    return spec.id;
   }
 
   function removeOneBot() {
