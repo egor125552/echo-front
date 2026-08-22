@@ -3,6 +3,26 @@ export const manifest = {
   requires: [],
 };
 
+export function sampleKeyboardState(pressed, {
+  firePressed = false,
+  reload = false,
+  selectDelta = 0,
+} = {}) {
+  const weaponModifier = pressed.has("KeyZ");
+  return {
+    forward: (pressed.has("ArrowUp") ? 1 : 0) - (pressed.has("ArrowDown") ? 1 : 0),
+    strafe: (pressed.has("KeyE") ? 1 : 0) - (pressed.has("KeyQ") ? 1 : 0),
+    turn: weaponModifier
+      ? 0
+      : (pressed.has("ArrowRight") ? 1 : 0) - (pressed.has("ArrowLeft") ? 1 : 0),
+    sprint: pressed.has("ShiftLeft") || pressed.has("ShiftRight"),
+    fireHeld: pressed.has("KeyX"),
+    firePressed,
+    reload,
+    selectDelta,
+  };
+}
+
 export async function setup(ctx) {
   const pressed = new Set();
   let enabled = false;
@@ -59,17 +79,7 @@ export async function setup(ctx) {
       pressed.clear();
     },
     sample() {
-      const weaponModifier = pressed.has("KeyZ");
-      const sample = {
-        forward: (pressed.has("ArrowUp") ? 1 : 0) - (pressed.has("ArrowDown") ? 1 : 0),
-        strafe: weaponModifier ? 0 : (pressed.has("ArrowRight") ? 1 : 0) - (pressed.has("ArrowLeft") ? 1 : 0),
-        turn: (pressed.has("KeyE") ? 1 : 0) - (pressed.has("KeyQ") ? 1 : 0),
-        sprint: pressed.has("ShiftLeft") || pressed.has("ShiftRight"),
-        fireHeld: pressed.has("KeyX"),
-        firePressed,
-        reload,
-        selectDelta,
-      };
+      const sample = sampleKeyboardState(pressed, { firePressed, reload, selectDelta });
       firePressed = false;
       reload = false;
       selectDelta = 0;
