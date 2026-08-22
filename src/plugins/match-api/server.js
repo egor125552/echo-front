@@ -1,11 +1,11 @@
 export const manifest = {
   id: "match-api",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
   ],
-  optional: ["armor", "weapon-progression"],
+  optional: ["armor", "weapon-progression", "opening-round"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read",
@@ -21,6 +21,7 @@ export async function setup(ctx) {
   const tdm = ctx.services.get("tdm");
   const botFill = ctx.services.get("bot-fill");
   const botCombat = ctx.services.get("bot-combat");
+  const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
 
   botFill.ensure();
 
@@ -38,6 +39,7 @@ export async function setup(ctx) {
       weapons: ["pistol"],
     });
     botFill.ensure();
+    opening?.arrangeForHuman(playerId);
     return { playerId, team };
   }
 

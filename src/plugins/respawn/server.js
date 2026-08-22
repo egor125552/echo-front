@@ -1,7 +1,8 @@
 export const manifest = {
   id: "respawn",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "health", "movement", "map-test-arena", "teams"],
+  optional: ["opening-round"],
   capabilities: [
     "services.consume", "services.provide",
     "events.on", "events.emit",
@@ -14,6 +15,7 @@ export async function setup(ctx) {
   const movement = ctx.services.get("movement");
   const map = ctx.services.get("map");
   const teams = ctx.services.get("teams");
+  const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
   const pending = new Map();
 
   ctx.events.on("entity:died", ({ entityId }) => {
@@ -28,7 +30,7 @@ export async function setup(ctx) {
         if (now < at || !entities.get(entityId)) continue;
         pending.delete(entityId);
         const team = teams.teamOf(entityId) || 1;
-        const spawn = map.nextSpawn(team);
+        const spawn = opening?.respawnFor(entityId, now) ?? map.nextSpawn(team);
         ctx.events.emit("respawn:before", { entityId });
         health.reset(entityId);
         movement.teleport(entityId, spawn);
