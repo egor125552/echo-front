@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { createEchoFrontGame } from "./game.js";
+import { activeSocketCount, cleanupDeadline } from "./room-lifecycle.js";
 
 export class MatchRoom extends DurableObject {
   constructor(ctx, env) {
@@ -9,23 +10,38 @@ export class MatchRoom extends DurableObject {
     this.lastSnapshotAt = 0;
 
     ctx.blockConcurrencyWhile(async () => {
-      this.game = await createEchoFrontGame();
-      for (const ws of this.ctx.getWebSockets()) {
+      const sockets = this.ctx.getWebSockets();
+      if (!activeSocketCount(sockets)) return;
+
+      await this.ensureGame();
+      for (const ws of sockets) {
+        if (ws.readyState === 3) continue;
         const attachment = ws.deserializeAttachment();
-        if (attachment?.playerId) {
-          try {
-            this.game.api.connectHuman(attachment.playerId);
-          } catch {
-          }
+        if (!attachment?.playerId) continue;
+        try {
+          this.game.api.connectHuman(attachment.playerId);
+        } catch {
         }
       }
     });
+  }
+
+  async ensureGame() {
+    if (!this.game) {
+      this.game = await createEchoFrontGame();
+      this.lastStepAt = Date.now();
+      this.lastSnapshotAt = 0;
+    }
+    return this.game;
   }
 
   async fetch(request) {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket required", { status: 426 });
     }
+
+    await this.ctx.storage.deleteAlarm();
+    await this.ensureGame();
 
     const [client, server] = Object.values(new WebSocketPair());
     const playerId = crypto.randomUUID();
@@ -42,8 +58,10 @@ export class MatchRoom extends DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  webSocketMessage(ws, message) {
+  async webSocketMessage(ws, message) {
     if (typeof message !== "string") return;
+    await this.ensureGame();
+
     let data;
     try {
       data = JSON.parse(message);
@@ -68,18 +86,44 @@ export class MatchRoom extends DurableObject {
     if (now - this.lastSnapshotAt >= 100) this.broadcastSnapshot();
   }
 
-  webSocketClose(ws) {
+  async webSocketClose(ws) {
     const playerId = ws.deserializeAttachment()?.playerId;
-    if (playerId) this.game.api.disconnectHuman(playerId);
+    if (playerId && this.game) this.game.api.disconnectHuman(playerId);
     this.broadcastSnapshot(true);
+    await this.scheduleCleanupIfEmpty(ws);
   }
 
-  webSocketError(ws) {
+  async webSocketError(ws) {
     const playerId = ws.deserializeAttachment()?.playerId;
-    if (playerId) this.game.api.disconnectHuman(playerId);
+    if (playerId && this.game) this.game.api.disconnectHuman(playerId);
+    await this.scheduleCleanupIfEmpty(ws);
+  }
+
+  async scheduleCleanupIfEmpty(closingSocket = null) {
+    const sockets = this.ctx.getWebSockets();
+    if (activeSocketCount(sockets, closingSocket) > 0) return;
+    await this.ctx.storage.setAlarm(cleanupDeadline());
+  }
+
+  async alarm() {
+    if (activeSocketCount(this.ctx.getWebSockets()) > 0) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+
+    if (this.game) {
+      await this.game.host.stop();
+      this.game = null;
+    }
+
+    this.lastStepAt = Date.now();
+    this.lastSnapshotAt = 0;
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
   }
 
   broadcastEvents() {
+    if (!this.game) return;
     for (const packet of this.game.drainEvents()) {
       const message = JSON.stringify({ type: "event", ...packet });
       for (const socket of this.ctx.getWebSockets()) {
@@ -92,6 +136,7 @@ export class MatchRoom extends DurableObject {
   }
 
   broadcastSnapshot(force = false) {
+    if (!this.game) return;
     const now = Date.now();
     if (!force && now - this.lastSnapshotAt < 100) return;
     this.lastSnapshotAt = now;
