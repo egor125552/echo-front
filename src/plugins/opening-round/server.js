@@ -1,4 +1,4 @@
-export const TRAINING_AIM_CONE_RADIANS = 0.40;
+export const TRAINING_AIM_CONE_RADIANS = 0.60;
 
 const TRAINING_LAYOUTS = {
   1: {
@@ -21,7 +21,7 @@ const TRAINING_LAYOUTS = {
 
 export const manifest = {
   id: "opening-round",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities", "teams", "movement", "team-deathmatch"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
@@ -83,15 +83,15 @@ export async function setup(ctx) {
     steeringTuning(now = Date.now()) {
       if (!isActive(now)) return null;
       return {
-        outerAngleRadians: 0.85,
-        innerAngleRadians: 0.15,
-        minimumTurnScale: 0.20,
+        outerAngleRadians: 0.95,
+        innerAngleRadians: 0.18,
+        minimumTurnScale: 0.18,
       };
     },
     botTuning(now = Date.now()) {
       if (!isActive(now)) return null;
       return {
-        reactionBaseMs: 1100,
+        reactionBaseMs: 1300,
         fireConeRadians: 0.045,
         aimResetRadians: 0.09,
         aimWobble: 0.075,

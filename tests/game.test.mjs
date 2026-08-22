@@ -42,6 +42,23 @@ test("human starts with pistol and 500 total rounds, then unlocks rifle after fi
   await game.host.stop();
 });
 
+test("holding X repeats pistol fire at the weapon cadence", async () => {
+  const game = await createEchoFrontGame();
+  game.api.connectHuman("human-held-pistol");
+  const weapons = game.host.services.get("weapons");
+  assert.equal(weapons.definitions.pistol.automatic, false);
+  assert.equal(weapons.definitions.pistol.holdRepeat, true);
+
+  game.api.handleInput("human-held-pistol", { fireHeld: true }, 1000);
+  game.api.step(0.01, 1000);
+  game.api.step(0.10, 1100);
+  game.api.step(0.10, 1200);
+
+  const self = game.api.snapshot(1200).entities.find((entity) => entity.id === "human-held-pistol");
+  assert.equal(self.ammo, 98);
+  await game.host.stop();
+});
+
 test("human replaces a bot and disconnect restores bot fill without creating a second rifle bot", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("human-test");
@@ -81,12 +98,12 @@ test("human strafe is deliberately smaller than forward movement", async () => {
   await forwardGame.host.stop();
 });
 
-test("soft audio aim uses a forgiving assist cone", async () => {
+test("soft audio aim uses a broad forgiving assist cone", async () => {
   const game = await createEchoFrontGame();
   const targeting = game.host.services.get("targeting");
   assert.equal(targeting.mode, "soft-audio-aim");
-  assert.ok(targeting.baseConeRadians >= 0.18);
-  assert.ok(targeting.baseConeRadians <= 0.3);
+  assert.ok(targeting.baseConeRadians >= 0.42);
+  assert.ok(targeting.baseConeRadians <= 0.52);
   assert.ok(targeting.currentConeRadians() >= targeting.baseConeRadians);
   await game.host.stop();
 });

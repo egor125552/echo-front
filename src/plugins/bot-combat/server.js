@@ -6,11 +6,11 @@ function wrapAngle(value) {
 
 export const BOT_FIRE_CONE_RADIANS = 0.065;
 export const BOT_AIM_RESET_RADIANS = 0.11;
-export const BOT_REACTION_BASE_MS = 520;
+export const BOT_REACTION_BASE_MS = 850;
 
 export const manifest = {
   id: "bot-combat",
-  version: "1.5.0",
+  version: "1.6.0",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities"],
   optional: ["opening-round"],
   capabilities: [
@@ -111,7 +111,7 @@ export async function setup(ctx) {
         const reactionBase = training?.reactionBaseMs ?? BOT_REACTION_BASE_MS;
         if (weaponRange > 0 && absoluteError < fireCone && target.distance <= weaponRange) {
           if (botState.reactionUntil === 0) {
-            botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 90 : 70);
+            botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 90 : 80);
           }
           if (now >= botState.reactionUntil) weapons.fire(bot.id, now);
         } else if (absoluteError >= aimReset || target.distance > weaponRange) {
