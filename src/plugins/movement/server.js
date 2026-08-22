@@ -1,6 +1,9 @@
+export const HUMAN_TURN_SPEED = 1.65;
+export const BOT_TURN_SPEED = 2.6;
+
 export const manifest = {
   id: "movement",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -70,7 +73,8 @@ export async function setup(ctx) {
         const input = ctx.components.get(entityId, "Input");
         if (!input) continue;
 
-        transform.angle += input.turn * 2.6 * safeDt;
+        const turnSpeed = entity.bot ? BOT_TURN_SPEED : HUMAN_TURN_SPEED;
+        transform.angle += input.turn * turnSpeed * safeDt;
         const speed = input.sprint ? 5.4 : 3.25;
         const rawForward = input.forward;
         const strafeFactor = entity.bot ? 0.7 : 0.42;

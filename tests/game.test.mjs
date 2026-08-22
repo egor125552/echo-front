@@ -81,12 +81,13 @@ test("human strafe is deliberately smaller than forward movement", async () => {
   await forwardGame.host.stop();
 });
 
-test("mini aim uses a narrow assist cone", async () => {
+test("soft audio aim uses a forgiving assist cone", async () => {
   const game = await createEchoFrontGame();
   const targeting = game.host.services.get("targeting");
-  assert.equal(targeting.mode, "mini-aim");
-  assert.ok(targeting.baseConeRadians > 0.05);
-  assert.ok(targeting.baseConeRadians < 0.15);
+  assert.equal(targeting.mode, "soft-audio-aim");
+  assert.ok(targeting.baseConeRadians >= 0.18);
+  assert.ok(targeting.baseConeRadians <= 0.3);
+  assert.ok(targeting.currentConeRadians() >= targeting.baseConeRadians);
   await game.host.stop();
 });
 
@@ -108,5 +109,35 @@ test("human spawn protection blocks immediate damage", async () => {
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
   assert.equal(self.armor, 0);
   assert.equal(self.health, 90);
+  await game.host.stop();
+});
+
+test("armor break and kill produce distinct attacker feedback", async () => {
+  const game = await createEchoFrontGame();
+  game.api.connectHuman("human-feedback");
+  const combat = game.host.services.get("combat");
+  const armored = game.api.snapshot().entities.find((entity) => entity.bot && entity.armor != null);
+  assert.ok(armored);
+
+  const feedback = [];
+  const off = game.host.events.on("feedback:sound", (payload) => {
+    if (payload.recipientId === "human-feedback") feedback.push(payload.key);
+  });
+
+  const armor = game.host.components.get(armored.id, "Armor");
+  armor.current = 10;
+  combat.damage(armored.id, 20, { attackerId: "human-feedback", weaponId: "pistol" });
+  assert.ok(feedback.some((key) => key.startsWith("armor.hit")));
+  assert.ok(feedback.includes("armor.break"));
+
+  feedback.length = 0;
+  armor.current = 0;
+  const health = game.host.components.get(armored.id, "Health");
+  health.current = 10;
+  combat.damage(armored.id, 20, { attackerId: "human-feedback", weaponId: "pistol" });
+  assert.ok(feedback.includes("hit.enemy"));
+  assert.ok(feedback.includes("enemy.killed"));
+
+  off();
   await game.host.stop();
 });
