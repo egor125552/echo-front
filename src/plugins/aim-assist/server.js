@@ -1,7 +1,8 @@
 export const manifest = {
   id: "aim-assist",
   version: "1.2.0",
-  requires: ["entities", "teams", "rapier-physics", "movement", "training-round"],
+  requires: ["entities", "teams", "rapier-physics", "movement"],
+  optional: ["training-round"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
 
@@ -13,11 +14,11 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
-  const training = ctx.services.get("training-round");
+  const training = ctx.services.has("training-round") ? ctx.services.get("training-round") : null;
   const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.11);
 
   function allowedAngle(distance, now = Date.now()) {
-    const trainingProfile = training.profile(now);
+    const trainingProfile = training?.profile(now) ?? { active: false };
     const base = trainingProfile.active
       ? Math.max(defaultMaxAngle, trainingProfile.humanAimBaseRadians)
       : defaultMaxAngle;
