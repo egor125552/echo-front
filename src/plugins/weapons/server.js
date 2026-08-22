@@ -29,9 +29,9 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.5.0",
+  version: "1.6.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
-  optional: ["aim-assist"],
+  optional: ["aim-assist", "target-assist"],
   capabilities: [
     "services.consume", "services.provide",
     "components.register", "components.read", "components.write",
@@ -111,9 +111,16 @@ export async function setup(ctx) {
       y: 0,
       z: -Math.cos(transform.angle),
     };
-    const direction = targeting
-      ? targeting.adjustDirection(entityId, baseDirection, definition.range)
-      : baseDirection;
+    const resolved = targeting?.resolveShot
+      ? targeting.resolveShot(entityId, baseDirection, definition.range)
+      : {
+          direction: targeting
+            ? targeting.adjustDirection(entityId, baseDirection, definition.range)
+            : baseDirection,
+          targetId: null,
+        };
+    const direction = resolved?.direction ?? baseDirection;
+    const targetId = resolved?.targetId ?? null;
 
     ctx.events.emit("sound:spatial", {
       entityId,
@@ -122,7 +129,12 @@ export async function setup(ctx) {
       z: transform.z,
       radius: definition.range + 6,
     });
-    ctx.events.emit("weapon:fired", { entityId, weaponId: weapon.id, ammo: weapon.ammo });
+    ctx.events.emit("weapon:fired", {
+      entityId,
+      weaponId: weapon.id,
+      ammo: weapon.ammo,
+      targetId,
+    });
 
     const origin = {
       x: transform.x + direction.x * 0.55,

@@ -98,13 +98,33 @@ test("human strafe is deliberately smaller than forward movement", async () => {
   await forwardGame.host.stop();
 });
 
-test("soft audio aim uses a broad forgiving assist cone", async () => {
+test("main combat selects a visible target without requiring a manual aim cone", async () => {
   const game = await createEchoFrontGame();
+  game.api.connectHuman("human-targeting");
   const targeting = game.host.services.get("targeting");
-  assert.equal(targeting.mode, "soft-audio-aim");
-  assert.ok(targeting.baseConeRadians >= 0.42);
-  assert.ok(targeting.baseConeRadians <= 0.52);
-  assert.ok(targeting.currentConeRadians() >= targeting.baseConeRadians);
+  const weapons = game.host.services.get("weapons");
+  const snapshot = game.api.snapshot();
+  const self = snapshot.entities.find((entity) => entity.id === "human-targeting");
+  const enemy = snapshot.entities.find((entity) => entity.bot && entity.team !== self.team);
+  assert.ok(enemy);
+
+  const dx = enemy.x - self.x;
+  const dz = enemy.z - self.z;
+  const length = Math.hypot(dx, dz) || 1;
+  const deliberatelyAway = { x: -dx / length, y: 0, z: -dz / length };
+  const resolved = targeting.resolveShot("human-targeting", deliberatelyAway, weapons.definitions.pistol.range);
+
+  assert.equal(targeting.mode, "assisted-target-selection");
+  assert.equal(targeting.selection, "visible-nearby-with-front-priority");
+  assert.ok(resolved.targetId, "a visible in-range enemy should be selected even when facing away");
+  assert.notDeepEqual(resolved.direction, deliberatelyAway);
+
+  game.drainEvents();
+  const transform = game.host.components.get("human-targeting", "Transform");
+  transform.angle += Math.PI;
+  weapons.fire("human-targeting", 1000);
+  const fired = game.drainEvents().find((packet) => packet.event === "weapon:fired" && packet.payload.entityId === "human-targeting");
+  assert.ok(fired?.payload.targetId, "actual weapon fire should report the assisted target");
   await game.host.stop();
 });
 
