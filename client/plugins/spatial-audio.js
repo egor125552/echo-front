@@ -3,6 +3,9 @@ export const manifest = {
   requires: ["cloudflare-session"],
 };
 
+export const HRTF_START_ANGLE = 0.95;
+export const HRTF_FULL_ANGLE = 1.45;
+
 function smoothstep(edge0, edge1, value) {
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -14,12 +17,21 @@ function wrappedAbsAngle(azimuth) {
 
 export function hybridSpatialMix(azimuth) {
   const angle = wrappedAbsAngle(azimuth);
-  const blend = smoothstep(0.18, 1.05, angle);
+  const blend = smoothstep(HRTF_START_ANGLE, HRTF_FULL_ANGLE, angle);
   return {
     pan: Math.max(-1, Math.min(1, Math.sin(azimuth))),
     stereo: Math.cos(blend * Math.PI / 2),
     hrtf: Math.sin(blend * Math.PI / 2),
   };
+}
+
+export function localizeForListener(listener, position) {
+  const dx = position.x - listener.x;
+  const dz = position.z - listener.z;
+  const localRight = dx * Math.cos(listener.angle) + dz * Math.sin(listener.angle);
+  const localForward = dx * Math.sin(listener.angle) - dz * Math.cos(listener.angle);
+  const azimuth = Math.atan2(localRight, localForward || 0.000001);
+  return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
 }
 
 export async function setup(ctx) {
@@ -82,12 +94,7 @@ export async function setup(ctx) {
   }
 
   function localize(position) {
-    const dx = position.x - listener.x;
-    const dz = position.z - listener.z;
-    const localRight = dx * Math.cos(listener.angle) + dz * Math.sin(listener.angle);
-    const localForward = dx * Math.sin(listener.angle) - dz * Math.cos(listener.angle);
-    const azimuth = Math.atan2(localRight, localForward || 0.000001);
-    return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
+    return localizeForListener(listener, position);
   }
 
   function rearCutoff(local) {

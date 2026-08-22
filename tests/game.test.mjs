@@ -16,6 +16,14 @@ test("full Echo Front preset starts with four varied bots and at most one rifle 
   await game.host.stop();
 });
 
+test("pistol and rifle use the same effective range for humans and bots", async () => {
+  const game = await createEchoFrontGame();
+  const weapons = game.host.services.get("weapons");
+  assert.equal(weapons.definitions.pistol.range, 28);
+  assert.equal(weapons.definitions.rifle.range, weapons.definitions.pistol.range);
+  await game.host.stop();
+});
+
 test("human starts with pistol and 400 total rounds, then unlocks rifle after first round", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("human-progression");
