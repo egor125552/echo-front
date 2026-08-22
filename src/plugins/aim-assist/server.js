@@ -1,6 +1,6 @@
 export const manifest = {
   id: "aim-assist",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "teams", "rapier-physics", "movement"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
@@ -13,7 +13,7 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
-  const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.2);
+  const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.11);
 
   function adjustDirection(entityId, direction, maxDistance) {
     const shooter = entities.get(entityId);
@@ -40,7 +40,7 @@ export async function setup(ctx) {
       const tz = dz / distance;
       const dot = clamp(base.x * tx + base.z * tz, -1, 1);
       const angle = Math.acos(dot);
-      const distanceBonus = distance < 8 ? 0.07 : distance < 15 ? 0.04 : 0.015;
+      const distanceBonus = distance < 7 ? 0.05 : distance < 14 ? 0.025 : 0.01;
       const allowed = defaultMaxAngle + distanceBonus;
       if (angle > allowed || (best && angle >= best.angle)) continue;
 
@@ -53,5 +53,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("targeting", {
     adjustDirection,
+    mode: "mini-aim",
+    baseConeRadians: defaultMaxAngle,
   });
 }

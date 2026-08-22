@@ -1,6 +1,6 @@
 export const manifest = {
   id: "movement",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -73,7 +73,8 @@ export async function setup(ctx) {
         transform.angle += input.turn * 2.6 * safeDt;
         const speed = input.sprint ? 5.4 : 3.25;
         const rawForward = input.forward;
-        const rawStrafe = input.strafe;
+        const strafeFactor = entity.bot ? 0.7 : 0.42;
+        const rawStrafe = input.strafe * strafeFactor;
         const inputLength = Math.hypot(rawForward, rawStrafe);
         const scale = inputLength > 1 ? 1 / inputLength : 1;
         const forward = rawForward * scale;
