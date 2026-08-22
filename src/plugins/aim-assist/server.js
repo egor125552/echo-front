@@ -1,6 +1,6 @@
 export const manifest = {
   id: "aim-assist",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["entities", "teams", "rapier-physics", "movement"],
   optional: ["opening-round"],
   capabilities: ["services.consume", "services.provide", "components.read"],
@@ -15,7 +15,7 @@ export async function setup(ctx) {
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
-  const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.11);
+  const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.22);
 
   function adjustDirection(entityId, direction, maxDistance) {
     const shooter = entities.get(entityId);
@@ -43,7 +43,7 @@ export async function setup(ctx) {
       const tz = dz / distance;
       const dot = clamp(base.x * tx + base.z * tz, -1, 1);
       const angle = Math.acos(dot);
-      const distanceBonus = distance < 7 ? 0.05 : distance < 14 ? 0.025 : 0.01;
+      const distanceBonus = distance < 7 ? 0.07 : distance < 14 ? 0.045 : 0.02;
       const allowed = baseCone + distanceBonus;
       if (angle > allowed || (best && angle >= best.angle)) continue;
 
@@ -56,7 +56,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("targeting", {
     adjustDirection,
-    mode: "mini-aim",
+    mode: "soft-audio-aim",
     baseConeRadians: defaultMaxAngle,
     currentConeRadians() {
       return opening ? opening.aimCone(defaultMaxAngle) : defaultMaxAngle;
