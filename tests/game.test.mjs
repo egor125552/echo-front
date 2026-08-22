@@ -75,7 +75,7 @@ test("human replaces a bot and disconnect restores bot fill without creating a s
   await game.host.stop();
 });
 
-test("human strafe is deliberately smaller than forward movement", async () => {
+test("human lateral movement matches forward movement speed", async () => {
   const strafeGame = await createEchoFrontGame();
   strafeGame.api.connectHuman("human-strafe");
   const strafeBefore = strafeGame.api.snapshot().entities.find((entity) => entity.id === "human-strafe");
@@ -93,7 +93,8 @@ test("human strafe is deliberately smaller than forward movement", async () => {
   const forwardAfter = forwardGame.api.snapshot().entities.find((entity) => entity.id === "human-forward");
   const forwardDistance = Math.hypot(forwardAfter.x - forwardBefore.x, forwardAfter.z - forwardBefore.z);
   assert.ok(strafeDistance > 0);
-  assert.ok(strafeDistance < forwardDistance * 0.6);
+  assert.ok(forwardDistance > 0);
+  assert.ok(Math.abs(strafeDistance - forwardDistance) < 0.02);
   assert.equal(strafeAfter.angle, strafeBefore.angle);
   await forwardGame.host.stop();
 });
