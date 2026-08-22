@@ -8,13 +8,17 @@ function smoothstep(edge0, edge1, value) {
   return t * t * (3 - 2 * t);
 }
 
+function wrappedAbsAngle(azimuth) {
+  return Math.abs(Math.atan2(Math.sin(azimuth), Math.cos(azimuth)));
+}
+
 export function hybridSpatialMix(azimuth) {
-  const side = Math.abs(Math.sin(azimuth));
-  const blend = smoothstep(0.58, 0.97, side);
+  const angle = wrappedAbsAngle(azimuth);
+  const blend = smoothstep(0.18, 1.05, angle);
   return {
     pan: Math.max(-1, Math.min(1, Math.sin(azimuth))),
-    stereo: Math.sin(blend * Math.PI / 2),
-    hrtf: Math.cos(blend * Math.PI / 2),
+    stereo: Math.cos(blend * Math.PI / 2),
+    hrtf: Math.sin(blend * Math.PI / 2),
   };
 }
 
@@ -144,7 +148,7 @@ export async function setup(ctx) {
       update(nextPosition) {
         const next = localize(nextPosition);
         const nextMix = hybridSpatialMix(next.azimuth);
-        const at = audioContext.currentTime + 0.035;
+        const at = audioContext.currentTime + 0.06;
         stereoPanner.pan.linearRampToValueAtTime(nextMix.pan, at);
         stereoGain.gain.linearRampToValueAtTime(nextMix.stereo, at);
         hrtfGain.gain.linearRampToValueAtTime(nextMix.hrtf, at);

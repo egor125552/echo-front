@@ -6,28 +6,32 @@ function nearly(value, expected, tolerance = 0.02) {
   assert.ok(Math.abs(value - expected) <= tolerance, `${value} is not near ${expected}`);
 }
 
-test("front uses HRTF", () => {
+test("exact front is clean centered stereo", () => {
   const mix = hybridSpatialMix(0);
-  nearly(mix.hrtf, 1);
-  nearly(mix.stereo, 0);
+  nearly(mix.stereo, 1);
+  nearly(mix.hrtf, 0);
   nearly(mix.pan, 0);
+});
+
+test("near-front stays mostly stereo", () => {
+  const mix = hybridSpatialMix(0.3);
+  assert.ok(mix.stereo > mix.hrtf);
+  assert.ok(mix.pan > 0);
+});
+
+test("exact sides use HRTF", () => {
+  const right = hybridSpatialMix(Math.PI / 2);
+  const left = hybridSpatialMix(-Math.PI / 2);
+  nearly(right.hrtf, 1);
+  nearly(right.stereo, 0);
+  nearly(left.hrtf, 1);
+  nearly(left.stereo, 0);
 });
 
 test("rear uses HRTF", () => {
   const mix = hybridSpatialMix(Math.PI);
   nearly(mix.hrtf, 1);
   nearly(mix.stereo, 0);
-});
-
-test("exact sides use clean stereo", () => {
-  const right = hybridSpatialMix(Math.PI / 2);
-  const left = hybridSpatialMix(-Math.PI / 2);
-  nearly(right.stereo, 1);
-  nearly(right.hrtf, 0);
-  nearly(right.pan, 1);
-  nearly(left.stereo, 1);
-  nearly(left.hrtf, 0);
-  nearly(left.pan, -1);
 });
 
 test("diagonal transition keeps equal-power energy", () => {
