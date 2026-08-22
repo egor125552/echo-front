@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
 import { TRAINING_AIM_CONE_RADIANS } from "../src/plugins/opening-round/server.js";
 
-test("first round places enemy bots in front and widens player aim assist", async () => {
+test("first round places enemy bots in front and strongly widens player aim assist", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("training-human");
 
@@ -25,7 +25,8 @@ test("first round places enemy bots in front and widens player aim assist", asyn
   const opening = game.host.services.get("opening-round");
   const targeting = game.host.services.get("targeting");
   assert.equal(opening.isActive(), true);
+  assert.ok(TRAINING_AIM_CONE_RADIANS >= 0.55);
   assert.ok(targeting.currentConeRadians() >= TRAINING_AIM_CONE_RADIANS);
-  assert.ok(opening.botTuning().reactionBaseMs >= 1000);
+  assert.ok(opening.botTuning().reactionBaseMs >= 1200);
   await game.host.stop();
 });
