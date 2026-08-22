@@ -3,6 +3,7 @@ const DEFINITIONS = {
     id: "pistol",
     name: "Пистолет",
     automatic: false,
+    holdRepeat: true,
     magazine: 100,
     reserve: 400,
     damage: 28,
@@ -15,6 +16,7 @@ const DEFINITIONS = {
     id: "rifle",
     name: "Автомат",
     automatic: true,
+    holdRepeat: true,
     magazine: 30,
     reserve: 120,
     damage: 17,
@@ -27,7 +29,7 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
   optional: ["aim-assist"],
   capabilities: [
@@ -175,7 +177,7 @@ export async function setup(ctx) {
         const weapon = inventory.items[inventory.selected];
         const definition = DEFINITIONS[weapon.id];
         finishReload(weapon, definition, now);
-        if (input.fireHeld && definition.automatic) fire(entityId, now);
+        if (input.fireHeld && (definition.automatic || definition.holdRepeat)) fire(entityId, now);
       }
     },
   };
