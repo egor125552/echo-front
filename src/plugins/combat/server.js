@@ -1,6 +1,6 @@
 export const manifest = {
   id: "combat",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["health"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -66,12 +66,25 @@ export async function setup(ctx) {
         });
       }
 
-      return {
+      const outcome = {
         ...result,
         armorAbsorbed: packet.armorAbsorbed,
         armorBroke: packet.armorBroke,
         spawnProtected: packet.spawnProtected,
       };
+      ctx.events.emit("combat:damage", {
+        targetId,
+        attackerId: packet.attackerId,
+        weaponId: packet.weaponId,
+        requested: amount,
+        healthApplied: result.applied,
+        armorAbsorbed: packet.armorAbsorbed,
+        armorBroke: packet.armorBroke,
+        spawnProtected: packet.spawnProtected,
+        killed: result.killed,
+        now: packet.now,
+      });
+      return outcome;
     },
   });
 }
