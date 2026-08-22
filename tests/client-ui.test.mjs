@@ -22,3 +22,24 @@ test("public game exposes accessible play journal controls", async () => {
   assert.match(html, /id="journal-clear"/);
   assert.match(html, /id="journal-status"[^>]*role="status"/);
 });
+
+test("public game exposes touch movement and action controls", async () => {
+  const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(html, /id="touch-controls"/);
+  assert.match(html, /data-touch-control="forward"/);
+  assert.match(html, /data-touch-control="back"/);
+  assert.match(html, /data-touch-control="left"/);
+  assert.match(html, /data-touch-control="right"/);
+  assert.match(html, /data-touch-control="stop"/);
+  assert.match(html, /data-touch-action="fire"/);
+  assert.match(html, /data-touch-action="reload"/);
+  assert.match(html, /VoiceOver/);
+});
+
+test("public movement help no longer describes left and right arrows as camera turning", async () => {
+  const html = await readFile(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(html, /стрелка влево — двигаться влево/i);
+  assert.match(html, /стрелка вправо — двигаться вправо/i);
+  assert.match(html, /Камера и поворот мышью не используются/i);
+  assert.doesNotMatch(html, /стрелки влево и вправо — поворот для ориентации/i);
+});
