@@ -1,6 +1,6 @@
 export const manifest = {
   id: "play-journal",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["cloudflare-session"],
 };
 
@@ -10,8 +10,6 @@ const KEY_IDS = {
   ArrowDown: 2,
   ArrowLeft: 3,
   ArrowRight: 4,
-  KeyQ: 5,
-  KeyE: 6,
   KeyX: 7,
   KeyR: 8,
   KeyZ: 9,
@@ -89,14 +87,14 @@ function persistentInputSignature(input = {}) {
 function header(epochMs) {
   return ["EFJ", 1, epochMs, {
     clock: "client milliseconds from journal start",
-    keys: "1 up,2 down,3 left,4 right,5 Q,6 E,7 X,8 R,9 Z,10 left shift,11 right shift",
+    keys: "1 up,2 down,3 left,4 right,7 X,8 R,9 Z,10 left shift,11 right shift",
     k: "[k,t,key,down] exact browser key transition",
     i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta] input sampled for server",
     n: "[n,t,index,id,name,bot,team,healthMax,armorMax] entity dictionary",
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
     c: "change=[entityIndex,bitmask,values...] bits: x,z,angle,alive,health,armor,weapon,ammo,reserve,weapons,team",
     e: "[e,t,event,payload] authoritative game event",
-    m: "[m,t,name,data] journal/network marker",
+    m: "[m,t,name,data] journal/network/input marker",
   }];
 }
 
@@ -266,6 +264,9 @@ export async function setup(ctx) {
   ctx.events.on("input:key", ({ code, down }) => {
     const key = KEY_IDS[code];
     if (key) append(["k", stamp(), key, down ? 1 : 0]);
+  });
+  ctx.events.on("input:touch", ({ control, down } = {}) => {
+    append(["m", stamp(), "touch-input", { control: control ?? "", down: down ? 1 : 0 }]);
   });
   ctx.events.on("input:reset", ({ reason } = {}) => append(["m", stamp(), "input-reset", reason ?? null]));
   ctx.events.on("network:input-sampled", ({ input }) => recordInput(input));
