@@ -9,7 +9,7 @@ test("human keyboard turning is slower than bot turning", () => {
   assert.ok(HUMAN_TURN_SPEED <= 1.7);
 });
 
-test("aim steering progressively brakes while approaching the target", () => {
+test("standalone aim steering progressively brakes while approaching the target", () => {
   const far = steeredTurn(1, NORMAL_STEERING.outerAngleRadians + 0.1);
   const medium = steeredTurn(1, 0.3);
   const near = steeredTurn(1, 0.04);
@@ -22,21 +22,17 @@ test("aim steering progressively brakes while approaching the target", () => {
   assert.equal(centered, 0);
 });
 
-test("aim steering never pulls against the key the player is holding", () => {
+test("standalone aim steering never pulls against the key the player is holding", () => {
   assert.equal(steeredTurn(1, -0.2), 1);
   assert.equal(steeredTurn(-1, 0.2), -1);
 });
 
-test("opening round provides wider aim and stronger steering help", async () => {
+test("main Echo Front preset no longer requires manual aim steering", async () => {
   const game = await createEchoFrontGame();
-  const opening = game.host.services.get("opening-round");
   const targeting = game.host.services.get("targeting");
-  const steering = game.host.services.get("aim-steering");
 
-  assert.ok(targeting.currentConeRadians() >= 0.40);
-  const training = opening.steeringTuning();
-  assert.ok(training.outerAngleRadians > steering.normalTuning.outerAngleRadians);
-  assert.ok(training.minimumTurnScale < steering.normalTuning.minimumTurnScale);
+  assert.equal(game.host.services.has("aim-steering"), false);
+  assert.equal(targeting.mode, "assisted-target-selection");
 
   await game.host.stop();
 });
