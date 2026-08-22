@@ -16,7 +16,9 @@ export async function setup(ctx) {
 
   function sendInput() {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
-    socket.send(JSON.stringify({ type: "input", input: input.sample() }));
+    const sampled = input.sample();
+    ctx.events.emit("network:input-sampled", { input: sampled });
+    socket.send(JSON.stringify({ type: "input", input: sampled }));
   }
 
   function emitSnapshot(snapshot) {
@@ -34,7 +36,7 @@ export async function setup(ctx) {
       input.enable();
       stopTimer();
       timer = setInterval(sendInput, 50);
-      ctx.events.emit("network:connected", {});
+      ctx.events.emit("network:connected", { room });
     });
 
     socket.addEventListener("message", (event) => {

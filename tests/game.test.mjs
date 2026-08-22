@@ -24,7 +24,7 @@ test("pistol and rifle use the same effective range for humans and bots", async 
   await game.host.stop();
 });
 
-test("human starts with pistol and 400 total rounds, then unlocks rifle after first round", async () => {
+test("human starts with pistol and 500 total rounds, then unlocks rifle after first round", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("human-progression");
   const weapons = game.host.services.get("weapons");
@@ -32,9 +32,9 @@ test("human starts with pistol and 400 total rounds, then unlocks rifle after fi
   let self = game.api.snapshot().entities.find((entity) => entity.id === "human-progression");
   assert.equal(self.weapon, "pistol");
   assert.deepEqual(self.weapons, ["pistol"]);
-  assert.equal(self.ammo, 50);
-  assert.equal(self.reserve, 350);
-  assert.equal(self.ammo + self.reserve, 400);
+  assert.equal(self.ammo, 100);
+  assert.equal(self.reserve, 400);
+  assert.equal(self.ammo + self.reserve, 500);
   assert.equal(weapons.has("human-progression", "rifle"), false);
 
   game.host.events.emit("match:ended", { winner: 1, score: { 1: 10, 2: 3 }, roundNumber: 1 });
@@ -138,6 +138,26 @@ test("armor break and kill produce distinct attacker feedback", async () => {
   assert.ok(feedback.includes("hit.enemy"));
   assert.ok(feedback.includes("enemy.killed"));
 
+  off();
+  await game.host.stop();
+});
+
+test("combat emits authoritative damage telemetry", async () => {
+  const game = await createEchoFrontGame();
+  game.api.connectHuman("human-telemetry");
+  const combat = game.host.services.get("combat");
+  const target = game.api.snapshot().entities.find((entity) => entity.bot);
+  assert.ok(target);
+
+  let telemetry = null;
+  const off = game.host.events.on("combat:damage", (payload) => {
+    telemetry = payload;
+  });
+  combat.damage(target.id, 12, { attackerId: "human-telemetry", weaponId: "pistol", now: 1234 });
+  assert.equal(telemetry?.targetId, target.id);
+  assert.equal(telemetry?.attackerId, "human-telemetry");
+  assert.equal(telemetry?.weaponId, "pistol");
+  assert.equal(telemetry?.now, 1234);
   off();
   await game.host.stop();
 });
