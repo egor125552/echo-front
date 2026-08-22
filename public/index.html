@@ -58,8 +58,27 @@
       </dl>
 
       <h3>Управление</h3>
-      <p>Стрелки вверх и вниз — вперёд и назад. Стрелки влево и вправо — поворот для ориентации по звуку. Q и E — короткие боковые шаги. Shift — бег. X — огонь; X можно удерживать. Для выстрела не нужно ловить звук точно по центру: игра сама выбирает доступного противника в радиусе оружия, немного предпочитая тех, кто впереди и ближе. R — перезарядка из запаса. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы менять открытое оружие.</p>
+      <p>Стрелка вверх — идти вперёд, стрелка вниз — назад, стрелка влево — двигаться влево, стрелка вправо — двигаться вправо. Стрелки можно удерживать и сочетать для движения по диагонали. Камера и поворот мышью не используются. Shift — бег. X — огонь; X можно удерживать. R — перезарядка из запаса. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы менять открытое оружие.</p>
       <p>В первом раунде доступен пистолет: 100 патронов в магазине и 400 в запасе, всего 500. После первого раунда открывается автомат.</p>
+
+      <div id="touch-controls" class="touch-controls" aria-labelledby="touch-controls-title">
+        <h3 id="touch-controls-title">Сенсорное управление</h3>
+        <p>На сенсорном экране удерживайте кнопку направления, чтобы двигаться. С VoiceOver двойное касание включает или выключает выбранное направление; кнопка «Стоп» сразу прекращает движение.</p>
+        <div class="touch-grid" role="group" aria-label="Движение">
+          <button class="touch-forward" type="button" data-touch-control="forward" aria-pressed="false">Вперёд</button>
+          <button class="touch-left" type="button" data-touch-control="left" aria-pressed="false">Влево</button>
+          <button class="touch-stop" type="button" data-touch-control="stop">Стоп</button>
+          <button class="touch-right" type="button" data-touch-control="right" aria-pressed="false">Вправо</button>
+          <button class="touch-back" type="button" data-touch-control="back" aria-pressed="false">Назад</button>
+        </div>
+        <div class="touch-actions" role="group" aria-label="Действия">
+          <button type="button" data-touch-action="sprint" aria-pressed="false">Бег</button>
+          <button type="button" data-touch-action="fire" aria-pressed="false">Огонь</button>
+          <button type="button" data-touch-action="reload">Перезарядка</button>
+          <button type="button" data-touch-action="weapon-prev">Предыдущее оружие</button>
+          <button type="button" data-touch-action="weapon-next">Следующее оружие</button>
+        </div>
+      </div>
     </section>
 
     <p id="announcer" class="sr-only" aria-live="assertive" aria-atomic="true"></p>
