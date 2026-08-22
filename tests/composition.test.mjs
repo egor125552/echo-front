@@ -30,7 +30,7 @@ test("combat preset works without armor plugin", () => {
   assert.ok(!loaded.includes("armor"));
 });
 
-test("Echo Front preset composes full prototype", () => {
+test("Echo Front preset composes full prototype with assisted target selection", () => {
   const loaded = ids(echoFrontPreset);
   for (const required of [
     "rapier-physics",
@@ -40,8 +40,7 @@ test("Echo Front preset composes full prototype", () => {
     "health",
     "armor",
     "spawn-protection",
-    "aim-assist",
-    "aim-steering",
+    "target-assist",
     "opening-round",
     "bot-controller",
     "bot-perception",
@@ -52,4 +51,6 @@ test("Echo Front preset composes full prototype", () => {
   ]) {
     assert.ok(loaded.includes(required), `missing ${required}`);
   }
+  assert.ok(!loaded.includes("aim-assist"));
+  assert.ok(!loaded.includes("aim-steering"));
 });
