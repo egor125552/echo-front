@@ -3,8 +3,8 @@ const DEFINITIONS = {
     id: "pistol",
     name: "Пистолет",
     automatic: false,
-    magazine: 50,
-    reserve: 350,
+    magazine: 100,
+    reserve: 400,
     damage: 28,
     rpm: 300,
     range: 28,
@@ -27,7 +27,7 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
   optional: ["aim-assist"],
   capabilities: [
