@@ -4,9 +4,12 @@ function wrapAngle(value) {
   return value;
 }
 
+export const BOT_FIRE_CONE_RADIANS = 0.08;
+export const BOT_AIM_RESET_RADIANS = 0.12;
+
 export const manifest = {
   id: "bot-combat",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -55,9 +58,10 @@ export async function setup(ctx) {
 
         const dx = target.transform.x - transform.x;
         const dz = target.transform.z - transform.z;
-        const aimWobble = Math.sin(now / (300 + seed * 3) + seed) * 0.045;
+        const aimWobble = Math.sin(now / (300 + seed * 3) + seed) * 0.035;
         const desired = Math.atan2(dx, -dz) + aimWobble;
         const error = wrapAngle(desired - transform.angle);
+        const absoluteError = Math.abs(error);
         const turn = Math.max(-1, Math.min(1, error * 2.05));
 
         let forward = 0;
@@ -73,7 +77,7 @@ export async function setup(ctx) {
           strafe = 0.72 * botState.strafeDirection;
         }
 
-        if (Math.abs(error) > 0.85) strafe *= 0.35;
+        if (absoluteError > 0.85) strafe *= 0.35;
 
         movement.setInput(bot.id, {
           forward,
@@ -85,12 +89,12 @@ export async function setup(ctx) {
 
         if (selected?.reloadUntil > now) continue;
 
-        if (Math.abs(error) < 0.14 && target.distance < 20) {
+        if (absoluteError < BOT_FIRE_CONE_RADIANS && target.distance < 20) {
           if (botState.reactionUntil === 0) {
-            botState.reactionUntil = now + 330 + (seed % 7) * 55;
+            botState.reactionUntil = now + 360 + (seed % 7) * 60;
           }
           if (now >= botState.reactionUntil) weapons.fire(bot.id, now);
-        } else if (Math.abs(error) > 0.32) {
+        } else if (absoluteError >= BOT_AIM_RESET_RADIANS) {
           botState.reactionUntil = 0;
         }
       }
