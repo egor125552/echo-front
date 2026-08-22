@@ -1,11 +1,11 @@
 export const manifest = {
   id: "match-api",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
   ],
-  optional: ["armor", "weapon-progression", "opening-round"],
+  optional: ["armor", "weapon-progression", "opening-round", "aim-steering"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read",
@@ -22,6 +22,7 @@ export async function setup(ctx) {
   const botFill = ctx.services.get("bot-fill");
   const botCombat = ctx.services.get("bot-combat");
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
+  const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
 
   botFill.ensure();
 
@@ -51,7 +52,8 @@ export async function setup(ctx) {
   function handleInput(playerId, input = {}, now = Date.now()) {
     const entity = entities.get(playerId);
     if (!entity?.alive || tdm.status(now).ended) return;
-    movement.setInput(playerId, input);
+    const movementInput = aimSteering?.adjustInput(playerId, input, now) ?? input;
+    movement.setInput(playerId, movementInput);
     if (input.firePressed) weapons.fire(playerId, now);
     if (input.reload) weapons.reload(playerId, now);
     if (input.selectDelta) weapons.select(playerId, input.selectDelta);
