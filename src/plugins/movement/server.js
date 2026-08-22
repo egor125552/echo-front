@@ -3,7 +3,7 @@ export const BOT_TURN_SPEED = 2.6;
 
 export const manifest = {
   id: "movement",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -77,7 +77,9 @@ export async function setup(ctx) {
         transform.angle += input.turn * turnSpeed * safeDt;
         const speed = input.sprint ? 5.4 : 3.25;
         const rawForward = input.forward;
-        const strafeFactor = entity.bot ? 0.7 : 0.42;
+        // Human left/right arrows are primary movement now, not short side-steps.
+        // Bots keep a slightly reduced strafe to preserve their current movement style.
+        const strafeFactor = entity.bot ? 0.7 : 1;
         const rawStrafe = input.strafe * strafeFactor;
         const inputLength = Math.hypot(rawForward, rawStrafe);
         const scale = inputLength > 1 ? 1 / inputLength : 1;
