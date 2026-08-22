@@ -8,12 +8,21 @@ export const BOT_FIRE_CONE_RADIANS = 0.065;
 export const BOT_AIM_RESET_RADIANS = 0.11;
 export const BOT_REACTION_BASE_MS = 520;
 
+const NORMAL_PROFILE = {
+  active: false,
+  botFireConeRadians: BOT_FIRE_CONE_RADIANS,
+  botAimResetRadians: BOT_AIM_RESET_RADIANS,
+  botReactionBaseMs: BOT_REACTION_BASE_MS,
+  botRangeScale: 1,
+  botStrafeScale: 1,
+  botSprint: true,
+};
+
 export const manifest = {
   id: "bot-combat",
   version: "1.5.0",
-  requires: [
-    "bot-controller", "bot-perception", "movement", "weapons", "entities", "training-round",
-  ],
+  requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities"],
+  optional: ["training-round"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read",
@@ -25,11 +34,11 @@ export async function setup(ctx) {
   const perception = ctx.services.get("bot-perception");
   const movement = ctx.services.get("movement");
   const weapons = ctx.services.get("weapons");
-  const training = ctx.services.get("training-round");
+  const training = ctx.services.has("training-round") ? ctx.services.get("training-round") : null;
 
   ctx.services.provide("bot-combat", {
     tick(dt, now = Date.now()) {
-      const difficulty = training.profile(now);
+      const difficulty = training?.profile(now) ?? NORMAL_PROFILE;
 
       for (const bot of bots.all()) {
         if (!bot.alive) continue;
