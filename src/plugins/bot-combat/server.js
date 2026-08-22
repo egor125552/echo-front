@@ -4,12 +4,13 @@ function wrapAngle(value) {
   return value;
 }
 
-export const BOT_FIRE_CONE_RADIANS = 0.08;
-export const BOT_AIM_RESET_RADIANS = 0.12;
+export const BOT_FIRE_CONE_RADIANS = 0.065;
+export const BOT_AIM_RESET_RADIANS = 0.11;
+export const BOT_REACTION_BASE_MS = 520;
 
 export const manifest = {
   id: "bot-combat",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -33,11 +34,12 @@ export async function setup(ctx) {
         if (!transform || !botState) continue;
 
         const selected = inventory?.items?.[inventory.selected] ?? null;
+        const weaponRange = Number(weapons.definitions[selected?.id]?.range) || 0;
         if (selected && selected.ammo <= 3 && selected.reserve > 0) {
           weapons.reload(bot.id, now);
         }
 
-        const target = perception.nearestVisibleEnemy(bot.id, 26);
+        const target = perception.nearestVisibleEnemy(bot.id, weaponRange || 22);
         if (!target) {
           movement.setInput(bot.id, {
             forward: 0.5,
@@ -58,7 +60,7 @@ export async function setup(ctx) {
 
         const dx = target.transform.x - transform.x;
         const dz = target.transform.z - transform.z;
-        const aimWobble = Math.sin(now / (300 + seed * 3) + seed) * 0.035;
+        const aimWobble = Math.sin(now / (300 + seed * 3) + seed) * 0.045;
         const desired = Math.atan2(dx, -dz) + aimWobble;
         const error = wrapAngle(desired - transform.angle);
         const absoluteError = Math.abs(error);
@@ -89,12 +91,12 @@ export async function setup(ctx) {
 
         if (selected?.reloadUntil > now) continue;
 
-        if (absoluteError < BOT_FIRE_CONE_RADIANS && target.distance < 20) {
+        if (weaponRange > 0 && absoluteError < BOT_FIRE_CONE_RADIANS && target.distance <= weaponRange) {
           if (botState.reactionUntil === 0) {
-            botState.reactionUntil = now + 360 + (seed % 7) * 60;
+            botState.reactionUntil = now + BOT_REACTION_BASE_MS + (seed % 7) * 70;
           }
           if (now >= botState.reactionUntil) weapons.fire(bot.id, now);
-        } else if (absoluteError >= BOT_AIM_RESET_RADIANS) {
+        } else if (absoluteError >= BOT_AIM_RESET_RADIANS || target.distance > weaponRange) {
           botState.reactionUntil = 0;
         }
       }

@@ -19,7 +19,7 @@ const DEFINITIONS = {
     reserve: 120,
     damage: 17,
     rpm: 600,
-    range: 35,
+    range: 28,
     soundKey: "weapon.rifle",
     reloadMs: 1550,
   },
@@ -27,7 +27,7 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
   optional: ["aim-assist"],
   capabilities: [
@@ -118,7 +118,7 @@ export async function setup(ctx) {
       key: definition.soundKey,
       x: transform.x,
       z: transform.z,
-      radius: 40,
+      radius: definition.range + 6,
     });
     ctx.events.emit("weapon:fired", { entityId, weaponId: weapon.id, ammo: weapon.ammo });
 
