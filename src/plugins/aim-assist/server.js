@@ -1,7 +1,7 @@
 export const manifest = {
   id: "aim-assist",
-  version: "1.1.0",
-  requires: ["entities", "teams", "rapier-physics", "movement"],
+  version: "1.2.0",
+  requires: ["entities", "teams", "rapier-physics", "movement", "training-round"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
 
@@ -13,7 +13,19 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
+  const training = ctx.services.get("training-round");
   const defaultMaxAngle = Math.max(0.02, Number(ctx.config.maxAngle) || 0.11);
+
+  function allowedAngle(distance, now = Date.now()) {
+    const trainingProfile = training.profile(now);
+    const base = trainingProfile.active
+      ? Math.max(defaultMaxAngle, trainingProfile.humanAimBaseRadians)
+      : defaultMaxAngle;
+    const distanceBonus = trainingProfile.active
+      ? distance < 7 ? 0.08 : distance < 14 ? 0.05 : 0.025
+      : distance < 7 ? 0.05 : distance < 14 ? 0.025 : 0.01;
+    return base + distanceBonus;
+  }
 
   function adjustDirection(entityId, direction, maxDistance) {
     const shooter = entities.get(entityId);
@@ -40,8 +52,7 @@ export async function setup(ctx) {
       const tz = dz / distance;
       const dot = clamp(base.x * tx + base.z * tz, -1, 1);
       const angle = Math.acos(dot);
-      const distanceBonus = distance < 7 ? 0.05 : distance < 14 ? 0.025 : 0.01;
-      const allowed = defaultMaxAngle + distanceBonus;
+      const allowed = allowedAngle(distance);
       if (angle > allowed || (best && angle >= best.angle)) continue;
 
       best = { angle, x: tx, z: tz, targetId: enemy.id };
@@ -53,6 +64,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("targeting", {
     adjustDirection,
+    allowedAngle,
     mode: "mini-aim",
     baseConeRadians: defaultMaxAngle,
   });
