@@ -11,6 +11,7 @@ import * as spawnProtection from "../plugins/spawn-protection/server.js";
 import * as aimAssist from "../plugins/aim-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
 import * as weapons from "../plugins/weapons/server.js";
+import * as aimSteering from "../plugins/aim-steering/server.js";
 import * as weaponProgression from "../plugins/weapon-progression/server.js";
 import * as respawn from "../plugins/respawn/server.js";
 import * as botController from "../plugins/bot-controller/server.js";
@@ -34,6 +35,7 @@ export const echoFrontPreset = [
   aimAssist,
   combat,
   weapons,
+  aimSteering,
   weaponProgression,
   respawn,
   botController,
