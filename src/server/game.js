@@ -14,11 +14,13 @@ export async function createEchoFrontGame() {
       packet.event === "match:score" ||
       packet.event === "match:ended" ||
       packet.event === "match:started" ||
+      packet.event === "weapon:fired" ||
       packet.event === "weapon:selected" ||
-      packet.event === "weapon:unlocked"
+      packet.event === "weapon:unlocked" ||
+      packet.event === "combat:damage"
     ) {
       events.push(packet);
-      if (events.length > 200) events.shift();
+      if (events.length > 400) events.shift();
     }
   });
 
