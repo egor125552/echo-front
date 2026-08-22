@@ -43,3 +43,12 @@ test("public movement help no longer describes left and right arrows as camera t
   assert.match(html, /Камера и поворот мышью не используются/i);
   assert.doesNotMatch(html, /стрелки влево и вправо — поворот для ориентации/i);
 });
+
+test("spoken welcome guidance matches the new directional controls", async () => {
+  const announcer = await readFile(new URL("../public/client/plugins/announcer.js", import.meta.url), "utf8");
+  assert.match(announcer, /влево — движение влево/i);
+  assert.match(announcer, /вправо — движение вправо/i);
+  assert.match(announcer, /Поворот камеры не нужен/i);
+  assert.doesNotMatch(announcer, /Q и E делают боковые шаги/i);
+  assert.doesNotMatch(announcer, /поворачивают для ориентации по звуку/i);
+});
