@@ -14,9 +14,11 @@ test("bot avoidance steers away instead of repeatedly pushing into an arena wall
   const transform = game.host.components.get(bot.id, "Transform");
   const botState = game.host.components.get(bot.id, "Bot");
   const start = { x: transform.x, z: transform.z };
+  const stepDistances = [];
 
   let now = 1000;
   for (let step = 0; step < 10; step += 1) {
+    const before = { x: transform.x, z: transform.z };
     const input = applyBotObstacleAvoidance(
       physics,
       bot.id,
@@ -27,13 +29,15 @@ test("bot avoidance steers away instead of repeatedly pushing into an arena wall
     );
     movement.setInput(bot.id, input);
     movement.tick(0.1);
+    stepDistances.push(Math.hypot(transform.x - before.x, transform.z - before.z));
     now += 100;
   }
 
   const travelled = Math.hypot(transform.x - start.x, transform.z - start.z);
+  const nearStoppedSteps = stepDistances.filter((distance) => distance < 0.03).length;
   assert.ok(travelled > 0.45, `bot should escape along the wall, travelled ${travelled}`);
   assert.ok(Math.abs(transform.x - start.x) > 0.35, "bot should take a lateral detour around the obstacle");
-  assert.ok(transform.z < 8.0, "bot should not keep hammering into the wall in front of it");
+  assert.ok(nearStoppedSteps <= 2, `bot should not twitch in place against the wall; near-stopped steps: ${nearStoppedSteps}`);
 
   await game.host.stop();
 });
