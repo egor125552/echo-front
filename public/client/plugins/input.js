@@ -7,6 +7,10 @@ function clampAxis(value) {
   return Math.max(-1, Math.min(1, value));
 }
 
+export function shouldHandleControlClick(detail, now, suppressUntil) {
+  return Number(detail) === 0 || Number(now) >= Number(suppressUntil || 0);
+}
+
 export function sampleKeyboardState(pressed, {
   firePressed = false,
   reload = false,
@@ -57,8 +61,8 @@ export async function setup(ctx) {
   let firePressed = false;
   let reload = false;
   let selectDelta = 0;
-  let suppressClickUntil = 0;
 
+  const clickSuppression = new WeakMap();
   const handled = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
     "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR",
@@ -73,6 +77,22 @@ export async function setup(ctx) {
 
   const movementButtons = [...document.querySelectorAll("[data-touch-control]")];
   const actionButtons = [...document.querySelectorAll("[data-touch-action]")];
+
+  function notifyChanged(reason) {
+    if (enabled) ctx.events.emit("input:changed", { reason });
+  }
+
+  function suppressPointerFollowup(button) {
+    clickSuppression.set(button, performance.now() + 600);
+  }
+
+  function handleControlClick(event, button) {
+    return shouldHandleControlClick(
+      event.detail,
+      performance.now(),
+      clickSuppression.get(button) ?? 0,
+    );
+  }
 
   function emitTouch(control, down) {
     if (enabled) ctx.events.emit("input:touch", { control, down });
@@ -93,22 +113,30 @@ export async function setup(ctx) {
 
   function setTouchDirection(control, down) {
     if (!(control in opposite)) return;
-    if (down) touch[opposite[control]] = false;
+    const previous = touch[control];
+    const oppositeControl = opposite[control];
+    const oppositeWasDown = Boolean(touch[oppositeControl]);
+    if (down) touch[oppositeControl] = false;
     touch[control] = down;
+    if (previous === down && !oppositeWasDown) return;
     syncPressedState();
+    if (oppositeWasDown) emitTouch(oppositeControl, false);
     emitTouch(control, down);
+    notifyChanged(`touch:${control}:${down ? "down" : "up"}`);
   }
 
   function clearTouchMovement() {
     let changed = false;
     for (const control of ["forward", "back", "left", "right"]) {
-      if (touch[control]) {
-        touch[control] = false;
-        emitTouch(control, false);
-        changed = true;
-      }
+      if (!touch[control]) continue;
+      touch[control] = false;
+      emitTouch(control, false);
+      changed = true;
     }
-    if (changed) syncPressedState();
+    if (changed) {
+      syncPressedState();
+      notifyChanged("touch:stop");
+    }
   }
 
   function stopFireIfNeeded() {
@@ -116,6 +144,7 @@ export async function setup(ctx) {
     const touchFire = touch.fireHeld;
     touch.fireHeld = false;
     if ((keyboardFire || touchFire) && enabled) ctx.events.emit("input:fire-stop", {});
+    return keyboardFire || touchFire;
   }
 
   function resetPressed(reason) {
@@ -127,7 +156,10 @@ export async function setup(ctx) {
     reload = false;
     selectDelta = 0;
     syncPressedState();
-    if (hadState) ctx.events.emit("input:reset", { reason });
+    if (hadState) {
+      ctx.events.emit("input:reset", { reason });
+      notifyChanged(`reset:${reason}`);
+    }
   }
 
   window.addEventListener("keydown", (event) => {
@@ -144,7 +176,11 @@ export async function setup(ctx) {
       if (event.code === "KeyR") reload = true;
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
       if (pressed.has("KeyZ") && event.code === "ArrowRight") selectDelta = 1;
+      pressed.add(event.code);
+      notifyChanged(`key:${event.code}:down`);
+      return;
     }
+
     pressed.add(event.code);
   }, { capture: true, passive: false });
 
@@ -159,6 +195,8 @@ export async function setup(ctx) {
       pressed.delete("ArrowLeft");
       pressed.delete("ArrowRight");
     }
+
+    if (wasPressed) notifyChanged(`key:${event.code}:up`);
   }, { capture: true, passive: false });
 
   window.addEventListener("blur", () => resetPressed("blur"));
@@ -169,8 +207,8 @@ export async function setup(ctx) {
   for (const button of movementButtons) {
     const control = button.dataset.touchControl;
     if (control === "stop") {
-      button.addEventListener("click", () => {
-        if (!enabled) return;
+      button.addEventListener("click", (event) => {
+        if (!enabled || !handleControlClick(event, button)) return;
         clearTouchMovement();
       });
       continue;
@@ -178,7 +216,7 @@ export async function setup(ctx) {
 
     const release = (event) => {
       if (!touch[control]) return;
-      suppressClickUntil = performance.now() + 600;
+      suppressPointerFollowup(button);
       setTouchDirection(control, false);
       try { button.releasePointerCapture?.(event.pointerId); } catch {}
     };
@@ -186,14 +224,14 @@ export async function setup(ctx) {
     button.addEventListener("pointerdown", (event) => {
       if (!enabled) return;
       event.preventDefault();
-      suppressClickUntil = performance.now() + 600;
+      suppressPointerFollowup(button);
       try { button.setPointerCapture?.(event.pointerId); } catch {}
       setTouchDirection(control, true);
     });
     button.addEventListener("pointerup", release);
     button.addEventListener("pointercancel", release);
     button.addEventListener("click", (event) => {
-      if (!enabled || performance.now() < suppressClickUntil) return;
+      if (!enabled || !handleControlClick(event, button)) return;
       event.preventDefault();
       setTouchDirection(control, !touch[control]);
     });
@@ -205,30 +243,33 @@ export async function setup(ctx) {
     if (action === "fire") {
       const releaseFire = (event) => {
         if (!touch.fireHeld) return;
-        suppressClickUntil = performance.now() + 600;
+        suppressPointerFollowup(button);
         touch.fireHeld = false;
         syncPressedState();
         if (enabled) ctx.events.emit("input:fire-stop", {});
+        notifyChanged("touch:fire:up");
         try { button.releasePointerCapture?.(event.pointerId); } catch {}
       };
       button.addEventListener("pointerdown", (event) => {
         if (!enabled) return;
         event.preventDefault();
-        suppressClickUntil = performance.now() + 600;
+        suppressPointerFollowup(button);
         try { button.setPointerCapture?.(event.pointerId); } catch {}
         touch.fireHeld = true;
         firePressed = true;
         syncPressedState();
         ctx.events.emit("input:fire-start", {});
+        notifyChanged("touch:fire:down");
       });
       button.addEventListener("pointerup", releaseFire);
       button.addEventListener("pointercancel", releaseFire);
       button.addEventListener("click", (event) => {
-        if (!enabled || performance.now() < suppressClickUntil) return;
+        if (!enabled || !handleControlClick(event, button)) return;
         event.preventDefault();
         firePressed = true;
         ctx.events.emit("input:fire-start", {});
         ctx.events.emit("input:fire-stop", {});
+        notifyChanged("touch:fire:click");
       });
       continue;
     }
@@ -236,39 +277,43 @@ export async function setup(ctx) {
     if (action === "sprint") {
       const releaseSprint = (event) => {
         if (!touch.sprint) return;
-        suppressClickUntil = performance.now() + 600;
+        suppressPointerFollowup(button);
         touch.sprint = false;
         syncPressedState();
         emitTouch("sprint", false);
+        notifyChanged("touch:sprint:up");
         try { button.releasePointerCapture?.(event.pointerId); } catch {}
       };
       button.addEventListener("pointerdown", (event) => {
         if (!enabled) return;
         event.preventDefault();
-        suppressClickUntil = performance.now() + 600;
+        suppressPointerFollowup(button);
         try { button.setPointerCapture?.(event.pointerId); } catch {}
         touch.sprint = true;
         syncPressedState();
         emitTouch("sprint", true);
+        notifyChanged("touch:sprint:down");
       });
       button.addEventListener("pointerup", releaseSprint);
       button.addEventListener("pointercancel", releaseSprint);
       button.addEventListener("click", (event) => {
-        if (!enabled || performance.now() < suppressClickUntil) return;
+        if (!enabled || !handleControlClick(event, button)) return;
         event.preventDefault();
         touch.sprint = !touch.sprint;
         syncPressedState();
         emitTouch("sprint", touch.sprint);
+        notifyChanged(`touch:sprint:${touch.sprint ? "on" : "off"}`);
       });
       continue;
     }
 
-    button.addEventListener("click", () => {
-      if (!enabled) return;
+    button.addEventListener("click", (event) => {
+      if (!enabled || !handleControlClick(event, button)) return;
       if (action === "reload") reload = true;
       if (action === "weapon-prev") selectDelta = -1;
       if (action === "weapon-next") selectDelta = 1;
       emitTouch(action, true);
+      notifyChanged(`touch:${action}`);
     });
   }
 
