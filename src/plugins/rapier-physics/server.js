@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "1.2.1",
+  version: "1.2.2",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -120,7 +120,8 @@ async function createRapierPhysics() {
       distance + 0.15,
       excludeEntityId,
     );
-    return !hit || hit.entityId === targetEntityId;
+    if (!hit) return true;
+    return targetEntityId !== null && hit.entityId === targetEntityId;
   }
 
   return {
