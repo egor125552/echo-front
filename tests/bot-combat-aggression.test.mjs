@@ -51,13 +51,17 @@ test("bots actively damage opposing bots when they see each other", async () => 
   await game.host.stop();
 });
 
-test("a bot hunts a nearby enemy even when a wall temporarily blocks line of sight", async () => {
+test("a bot hunts a nearby enemy even when a temporary wall blocks line of sight", async () => {
   const game = await createEchoFrontGame();
   const [hunter, enemy] = keepOpposingPair(game);
   const movement = game.host.services.get("movement");
   const perception = game.host.services.get("bot-perception");
   const botCombat = game.host.services.get("bot-combat");
+  const physics = game.host.services.get("physics");
 
+  // The production forest map has no interior structures yet. Keep this AI
+  // regression by adding a test-only wall between the pair.
+  physics.createWall({ x: 0, z: -3.5, hx: 2, hz: 0.2 });
   movement.teleport(hunter.id, { x: 0, z: -4.25, angle: 0 });
   movement.teleport(enemy.id, { x: 0, z: -2.75, angle: Math.PI });
 

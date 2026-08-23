@@ -26,7 +26,7 @@ test("Rapier walking preset creates and moves a character", async () => {
   await host.stop();
 });
 
-test("Rapier arena walls block character movement", async () => {
+test("Rapier forest world boundary blocks character movement", async () => {
   const host = await new PluginHost({ plugins: walkingTestPreset }).start();
   const entities = host.services.get("entities");
   const movement = host.services.get("movement");
@@ -35,17 +35,17 @@ test("Rapier arena walls block character movement", async () => {
     id: "wall-test",
     kind: "test",
     team: 1,
-    position: { x: 0, z: -13.8, angle: 0 },
+    position: { x: 0, z: -48.8, angle: 0 },
   });
   movement.setInput(id, { forward: 1, turn: 0, sprint: true });
   for (let i = 0; i < 30; i += 1) movement.tick(0.05);
 
   const after = host.components.get(id, "Transform");
-  assert.ok(after.z > -15, `character escaped arena boundary: ${after.z}`);
+  assert.ok(after.z > -50, `character escaped forest world boundary: ${after.z}`);
   await host.stop();
 });
 
-test("Rapier raycasts hit characters and line of sight is blocked by arena walls", async () => {
+test("Rapier raycasts hit characters and line of sight is blocked by physical walls", async () => {
   const host = await new PluginHost({ plugins: walkingTestPreset }).start();
   const entities = host.services.get("entities");
   const physics = host.services.get("physics");
@@ -82,13 +82,16 @@ test("Rapier raycasts hit characters and line of sight is blocked by arena walls
     true,
   );
 
+  // Production forest has no interior walls yet. Add a test-only collider so
+  // this remains a direct Rapier line-of-sight regression.
+  physics.createWall({ x: -7.5, z: 0, hx: 0.35, hz: 4 });
   assert.equal(
     physics.lineOfSight(
       { x: -9, z: 0 },
       { x: -6, z: 0 },
     ),
     false,
-    "vertical arena wall at x=-7.5 must block line of sight",
+    "physical wall at x=-7.5 must block line of sight",
   );
 
   await host.stop();

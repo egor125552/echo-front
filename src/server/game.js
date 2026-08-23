@@ -9,6 +9,7 @@ export async function createEchoFrontGame() {
     if (
       packet.event === "sound:spatial" ||
       packet.event === "feedback:sound" ||
+      packet.event === "movement:blocked" ||
       packet.event === "entity:died" ||
       packet.event === "entity:respawned" ||
       packet.event === "match:score" ||

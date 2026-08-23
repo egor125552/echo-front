@@ -1,6 +1,6 @@
 export const manifest = {
   id: "match-api",
-  version: "1.4.0",
+  version: "1.4.1",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
@@ -71,7 +71,7 @@ export async function setup(ctx) {
     tdm.tick(now);
     if (!tdm.status(now).ended) {
       botCombat.tick(dt, now);
-      movement.tick(dt);
+      movement.tick(dt, now);
       weapons.tickAutomatic(now);
     }
     respawn.tick(now);

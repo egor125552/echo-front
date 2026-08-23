@@ -1,10 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import {
-  ENVIRONMENT_SOUNDS,
-  ENVIRONMENT_SOURCES,
-} from "../client/plugins/environment-audio.js";
+import { AMBIENT_BED } from "../client/plugins/environment-audio.js";
 import { echoFrontClientPreset } from "../client/presets/echo-front.js";
 
 test("Echo Front client preset enables environment audio after spatial audio", () => {
@@ -15,20 +12,11 @@ test("Echo Front client preset enables environment audio after spatial audio", (
   assert.ok(environmentIndex > spatialIndex);
 });
 
-test("environment pack uses the published MP3 files and fixed arena landmarks", () => {
-  assert.deepEqual(Object.keys(ENVIRONMENT_SOUNDS).sort(), [
-    "electric", "fire", "metal", "wind", "wood",
-  ]);
-  for (const url of Object.values(ENVIRONMENT_SOUNDS)) {
-    assert.match(url, /^\/audio\/environment\/.+\.mp3$/);
-  }
-
-  assert.deepEqual(ENVIRONMENT_SOURCES.electric, { x: -12, z: -6 });
-  assert.deepEqual(ENVIRONMENT_SOURCES.fire, { x: 12, z: 6 });
-  assert.ok(Object.values(ENVIRONMENT_SOURCES).every(({ x, z }) => Math.abs(x) < 15 && Math.abs(z) < 15));
+test("environment uses one continuous published forest ambience bed", () => {
+  assert.equal(AMBIENT_BED, "/audio/environment/arena-ambient.mp3");
 });
 
-test("spatial audio supports looped ambience and public client mirrors source client", async () => {
+test("environment bed loops and public client mirrors source client", async () => {
   const spatial = await readFile(new URL("../client/plugins/spatial-audio.js", import.meta.url), "utf8");
   assert.match(spatial, /source\.loop = Boolean\(loop\)/);
 
@@ -38,6 +26,9 @@ test("spatial audio supports looped ambience and public client mirrors source cl
   const publicPreset = await readFile(new URL("../public/client/presets/echo-front.js", import.meta.url), "utf8");
   const publicSpatial = await readFile(new URL("../public/client/plugins/spatial-audio.js", import.meta.url), "utf8");
 
+  assert.match(sourceEnvironment, /playCentered\(AMBIENT_BED/);
+  assert.match(sourceEnvironment, /loop: true/);
+  assert.doesNotMatch(sourceEnvironment, /scheduleCue|environment-fire|environment-metal|environment-wood/);
   assert.equal(publicEnvironment, sourceEnvironment);
   assert.equal(publicPreset, sourcePreset);
   assert.equal(publicSpatial, spatial);
