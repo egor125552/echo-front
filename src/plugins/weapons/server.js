@@ -29,7 +29,7 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.6.0",
+  version: "1.7.0",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
   optional: ["aim-assist", "target-assist"],
   capabilities: [
@@ -68,6 +68,19 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => ctx.components.remove(entityId, "Weapons"));
+
+  ctx.events.on("respawn:before", ({ entityId }) => {
+    const inventory = ctx.components.get(entityId, "Weapons");
+    if (!inventory?.items.length) return;
+    for (const weapon of inventory.items) {
+      const definition = DEFINITIONS[weapon.id];
+      if (!definition) continue;
+      weapon.ammo = definition.magazine;
+      weapon.reserve = definition.reserve;
+      weapon.lastFireAt = -Infinity;
+      weapon.reloadUntil = 0;
+    }
+  });
 
   function finishReload(weapon, definition, now) {
     if (!weapon.reloadUntil || now < weapon.reloadUntil) return;
@@ -120,7 +133,14 @@ export async function setup(ctx) {
           targetId: null,
         };
     const direction = resolved?.direction ?? baseDirection;
-    const targetId = resolved?.targetId ?? null;
+
+    const origin = {
+      x: transform.x + direction.x * 0.55,
+      y: 1.0,
+      z: transform.z + direction.z * 0.55,
+    };
+    const hit = physics.raycast(origin, direction, definition.range, entityId);
+    const actualTargetId = hit?.entityId ?? null;
 
     ctx.events.emit("sound:spatial", {
       entityId,
@@ -133,20 +153,15 @@ export async function setup(ctx) {
       entityId,
       weaponId: weapon.id,
       ammo: weapon.ammo,
-      targetId,
+      targetId: actualTargetId,
+      assistedTargetId: resolved?.targetId ?? null,
     });
 
-    const origin = {
-      x: transform.x + direction.x * 0.55,
-      y: 1.0,
-      z: transform.z + direction.z * 0.55,
-    };
-    const hit = physics.raycast(origin, direction, definition.range, entityId);
-    if (hit?.entityId) {
-      const target = entities.get(hit.entityId);
-      const sameTeam = teams.teamOf(entityId) === teams.teamOf(hit.entityId);
+    if (actualTargetId) {
+      const target = entities.get(actualTargetId);
+      const sameTeam = teams.teamOf(entityId) === teams.teamOf(actualTargetId);
       if (target?.alive && !sameTeam) {
-        combat.damage(hit.entityId, definition.damage, {
+        combat.damage(actualTargetId, definition.damage, {
           attackerId: entityId,
           weaponId: weapon.id,
           now,
