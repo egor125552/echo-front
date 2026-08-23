@@ -1,8 +1,8 @@
 export const manifest = {
   id: "respawn",
-  version: "1.2.0",
-  requires: ["entities", "health", "movement", "map-test-arena", "teams", "team-deathmatch"],
-  optional: ["opening-round"],
+  version: "1.2.1",
+  requires: ["entities", "health", "movement", "map-test-arena", "teams"],
+  optional: ["opening-round", "team-deathmatch"],
   capabilities: [
     "services.consume", "services.provide",
     "events.on", "events.emit",
@@ -15,7 +15,7 @@ export async function setup(ctx) {
   const movement = ctx.services.get("movement");
   const map = ctx.services.get("map");
   const teams = ctx.services.get("teams");
-  const tdm = ctx.services.get("tdm");
+  const tdm = ctx.services.has("tdm") ? ctx.services.get("tdm") : null;
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
   const pending = new Map();
 
@@ -54,7 +54,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("respawn", {
     tick(now = Date.now()) {
-      if (tdm.status(now).ended) return;
+      if (tdm?.status(now).ended) return;
       for (const [entityId, at] of [...pending]) {
         if (now < at || !entities.get(entityId)) continue;
         respawnEntity(entityId, now, "death");
