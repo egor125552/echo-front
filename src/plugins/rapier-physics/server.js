@@ -1,16 +1,26 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "1.1.0",
+  version: "1.3.0",
   requires: [],
   capabilities: ["services.provide"],
 };
 
 const CHARACTER_RADIUS = 0.32;
 
-async function createRapierPhysics() {
+async function loadRapier() {
+  if (typeof WebSocketPair !== "undefined") {
+    const { getWorkerRapier } = await import("./worker-rapier.js");
+    return getWorkerRapier();
+  }
+
   const module = await import("@dimforge/rapier3d-compat");
   const RAPIER = module.default;
   await RAPIER.init();
+  return RAPIER;
+}
+
+async function createRapierPhysics() {
+  const RAPIER = await loadRapier();
 
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const controller = world.createCharacterController(0.02);
@@ -22,10 +32,12 @@ async function createRapierPhysics() {
   }
 
   function createWall({ x, z, hx, hz, height = 2 }) {
-    return world.createCollider(
+    const collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(hx, height / 2, hz)
         .setTranslation(x, height / 2, z),
     );
+    syncQueries();
+    return collider;
   }
 
   function createCharacter(entityId, { x = 0, z = 0 } = {}) {
@@ -34,10 +46,11 @@ async function createRapierPhysics() {
       RAPIER.ColliderDesc.capsule(0.45, CHARACTER_RADIUS)
         .setTranslation(x, 1, z),
     );
-    characters.set(entityId, { collider });
+    const entry = { collider };
+    characters.set(entityId, entry);
     colliderToEntity.set(collider.handle, entityId);
     syncQueries();
-    return { collider };
+    return entry;
   }
 
   function removeCharacter(entityId) {
@@ -105,8 +118,14 @@ async function createRapierPhysics() {
     const dz = to.z - from.z;
     const distance = Math.hypot(dx, dz);
     if (distance < 0.001) return true;
-    const hit = raycast({ x: from.x, y: 1, z: from.z }, { x: dx, y: 0, z: dz }, distance + 0.15, excludeEntityId);
-    return !hit || hit.entityId === targetEntityId;
+    const hit = raycast(
+      { x: from.x, y: 1, z: from.z },
+      { x: dx, y: 0, z: dz },
+      distance + 0.15,
+      excludeEntityId,
+    );
+    if (!hit) return true;
+    return targetEntityId !== null && hit.entityId === targetEntityId;
   }
 
   return {
