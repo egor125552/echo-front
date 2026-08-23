@@ -9,6 +9,8 @@ import {
   MAX_REVERB_MIX,
   MUFFLE_MIN_HZ,
   MUFFLE_MAX_HZ,
+  MUFFLE_CURVE_POWER,
+  heartbeatGainForRatio,
   lowHealthIntensity,
   muffleCutoffForIntensity,
 } from "../client/plugins/low-health-audio.js";
@@ -67,9 +69,9 @@ test("health regeneration does not silently buff bots", async () => {
   await game.host.stop();
 });
 
-test("low health audio scales reverb and muffling smoothly and uses the selected heartbeat MP3", () => {
+test("low health audio uses the Archipelago-style curved muffling response", () => {
   assert.equal(HEARTBEAT_URL, "/assets/audio/core/heartbeat-fast.mp3");
-  assert.ok(HEARTBEAT_START_RATIO < HEARTBEAT_STOP_RATIO, "heartbeat needs hysteresis");
+  assert.ok(HEARTBEAT_START_RATIO < HEARTBEAT_STOP_RATIO, "heartbeat fade range must be wider than its start threshold");
   assert.equal(lowHealthIntensity(200, 200), 0);
   assert.equal(lowHealthIntensity(130, 200), 0);
   assert.ok(Math.abs(lowHealthIntensity(80, 200) - 0.5) < 1e-9);
@@ -78,13 +80,22 @@ test("low health audio scales reverb and muffling smoothly and uses the selected
 
   assert.equal(MUFFLE_MIN_HZ, 80);
   assert.equal(MUFFLE_MAX_HZ, 18000);
+  assert.equal(MUFFLE_CURVE_POWER, 3.5);
   assert.equal(muffleCutoffForIntensity(0), MUFFLE_MAX_HZ);
-  assert.ok(Math.abs(muffleCutoffForIntensity(1) - MUFFLE_MIN_HZ) < 1e-9);
+  assert.equal(muffleCutoffForIntensity(1), MUFFLE_MIN_HZ);
+
   const halfway = muffleCutoffForIntensity(0.5);
-  assert.ok(halfway > MUFFLE_MIN_HZ && halfway < MUFFLE_MAX_HZ);
+  const archipelagoShape = MUFFLE_MIN_HZ
+    + Math.pow(0.5, 3.5) * (MUFFLE_MAX_HZ - MUFFLE_MIN_HZ);
+  assert.ok(Math.abs(halfway - archipelagoShape) < 1e-9);
+  assert.ok(muffleCutoffForIntensity(0.25) > halfway);
+  assert.ok(halfway > muffleCutoffForIntensity(0.75));
+
+  assert.ok(heartbeatGainForRatio(HEARTBEAT_START_RATIO) > 0.2);
+  assert.equal(heartbeatGainForRatio(HEARTBEAT_STOP_RATIO), 0);
 });
 
-test("low health audio and master effects stay mirrored in the public client", async () => {
+test("wounded audio uses persistent exponential targets instead of restarted linear ramps", async () => {
   const sourceLowHealth = await readFile(new URL("../client/plugins/low-health-audio.js", import.meta.url), "utf8");
   const publicLowHealth = await readFile(new URL("../public/client/plugins/low-health-audio.js", import.meta.url), "utf8");
   const sourceSpatial = await readFile(new URL("../client/plugins/spatial-audio.js", import.meta.url), "utf8");
@@ -95,13 +106,22 @@ test("low health audio and master effects stay mirrored in the public client", a
   assert.equal(publicLowHealth, sourceLowHealth);
   assert.equal(publicSpatial, sourceSpatial);
   assert.equal(publicPreset, sourcePreset);
+
   assert.match(sourceSpatial, /createConvolver\(\)/);
   assert.match(sourceSpatial, /masterLowpass = audioContext\.createBiquadFilter\(\)/);
-  assert.match(sourceSpatial, /setReverbMix/);
-  assert.match(sourceSpatial, /setMuffleCutoff/);
+  assert.match(sourceSpatial, /param\.setTargetAtTime\(value, audioContext\.currentTime, constant\)/);
+  assert.match(sourceSpatial, /targetParam\(masterLowpass\.frequency, muffleCutoff, 0\.36\)/);
+  assert.match(sourceSpatial, /targetParam\(dryGain\.gain, 1 - reverbMix \* 0\.32, 0\.28\)/);
+  assert.match(sourceSpatial, /targetParam\(wetGain\.gain, reverbMix \* 0\.9, 0\.34\)/);
+  assert.doesNotMatch(sourceSpatial, /cancelAndHoldAtTime|cancelScheduledValues/);
+
   assert.match(sourceLowHealth, /MUFFLE_MIN_HZ = 80/);
+  assert.match(sourceLowHealth, /MUFFLE_CURVE_POWER = 3\.5/);
   assert.match(sourceLowHealth, /if \(!self\) return;/);
-  assert.match(sourceLowHealth, /EFFECT_UPDATE_EPSILON/);
+  assert.doesNotMatch(sourceLowHealth, /EFFECT_UPDATE_EPSILON/);
+  assert.match(sourceLowHealth, /if \(lastRatio <= HEARTBEAT_START_RATIO && !heartbeat\)/);
+  assert.match(sourceLowHealth, /heartbeat\.setGain\?\.\(heartbeatGainForRatio\(lastRatio\), 0\.28\)/);
+  assert.doesNotMatch(sourceLowHealth, /lastRatio >= HEARTBEAT_STOP_RATIO\)[\s\S]{0,80}stopHeartbeat/);
   assert.match(sourceLowHealth, /loop: true/);
   assert.match(sourcePreset, /lowHealthAudio/);
 });

@@ -124,37 +124,27 @@ export async function setup(ctx) {
     }, { once: true });
   }
 
-  function rampParam(param, value, seconds = 0.25) {
-    const now = audioContext.currentTime;
-    const duration = Math.max(0.02, Number(seconds) || 0.25);
-    if (typeof param.cancelAndHoldAtTime === "function") {
-      param.cancelAndHoldAtTime(now);
-    } else {
-      param.cancelScheduledValues(now);
-      param.setValueAtTime(param.value, now);
-    }
-    param.linearRampToValueAtTime(value, now + duration);
+  // Archipelago deliberately uses setTargetAtTime for continuously changing
+  // combat audio. A later target bends the same exponential curve instead of
+  // cancelling a finite ramp and starting a new one, which avoids zippering.
+  function targetParam(param, value, timeConstant = 0.25) {
+    const constant = Math.max(0.01, Number(timeConstant) || 0.25);
+    param.setTargetAtTime(value, audioContext.currentTime, constant);
   }
 
-  function setReverbMix(value, transitionSeconds = 0.35) {
-    const next = clamp01(value);
-    if (Math.abs(next - reverbMix) < 0.002) return;
-    reverbMix = next;
-    // Keep a strong dry path so positional information remains readable even
-    // at critical health, while the wet tail creates the wounded-state haze.
-    rampParam(dryGain.gain, 1 - reverbMix * 0.32, transitionSeconds);
-    rampParam(wetGain.gain, reverbMix * 0.9, transitionSeconds);
+  function setReverbMix(value) {
+    reverbMix = clamp01(value);
+    targetParam(dryGain.gain, 1 - reverbMix * 0.32, 0.28);
+    targetParam(wetGain.gain, reverbMix * 0.9, 0.34);
   }
 
-  function setMuffleCutoff(value, transitionSeconds = 0.35) {
+  function setMuffleCutoff(value) {
     const numeric = Number(value);
-    const next = Math.max(
+    muffleCutoff = Math.max(
       MASTER_FILTER_MIN_HZ,
       Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
     );
-    if (Math.abs(next - muffleCutoff) < 1) return;
-    muffleCutoff = next;
-    rampParam(masterLowpass.frequency, muffleCutoff, transitionSeconds);
+    targetParam(masterLowpass.frequency, muffleCutoff, 0.36);
   }
 
   function playCenteredBuffer(buffer, {
@@ -173,8 +163,8 @@ export async function setup(ctx) {
     source.start();
     return {
       source,
-      setGain(nextGain, transitionSeconds = 0.2) {
-        rampParam(gainNode.gain, Math.max(0, Number(nextGain) || 0), transitionSeconds);
+      setGain(nextGain, timeConstant = 0.18) {
+        targetParam(gainNode.gain, Math.max(0, Number(nextGain) || 0), timeConstant);
       },
       stop() {
         try { source.stop(); } catch {}
