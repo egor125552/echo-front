@@ -1,5 +1,5 @@
 export const manifest = {
-  id: "player-input",
+  id: "keyboard-input",
   requires: [],
 };
 

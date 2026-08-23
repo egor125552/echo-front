@@ -1,6 +1,6 @@
 export const manifest = {
   id: "cloudflare-session",
-  requires: ["player-input"],
+  requires: ["keyboard-input"],
 };
 
 export async function setup(ctx) {
