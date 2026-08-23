@@ -10,6 +10,7 @@ import * as armor from "../plugins/armor/server.js";
 import * as spawnProtection from "../plugins/spawn-protection/server.js";
 import * as targetAssist from "../plugins/target-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
+import * as healthRegeneration from "../plugins/health-regeneration/server.js";
 import * as weapons from "../plugins/weapons/server.js";
 import * as weaponProgression from "../plugins/weapon-progression/server.js";
 import * as respawn from "../plugins/respawn/server.js";
@@ -33,6 +34,7 @@ export const echoFrontPreset = [
   spawnProtection,
   targetAssist,
   combat,
+  healthRegeneration,
   weapons,
   weaponProgression,
   respawn,
