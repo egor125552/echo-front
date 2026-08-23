@@ -24,12 +24,16 @@ test("pistol and rifle use the same effective range for humans and bots", async 
   await game.host.stop();
 });
 
-test("human starts with pistol and 500 total rounds, then unlocks rifle after first round", async () => {
+test("human starts sturdier with pistol and 500 total rounds, then unlocks rifle after first round", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("human-progression");
   const weapons = game.host.services.get("weapons");
 
   let self = game.api.snapshot().entities.find((entity) => entity.id === "human-progression");
+  assert.equal(self.health, 200);
+  assert.equal(self.healthMax, 200);
+  assert.equal(self.armor, 125);
+  assert.equal(self.armorMax, 125);
   assert.equal(self.weapon, "pistol");
   assert.deepEqual(self.weapons, ["pistol"]);
   assert.equal(self.ammo, 100);
@@ -139,18 +143,18 @@ test("human spawn protection blocks immediate damage", async () => {
   combat.damage("human-protected", 999);
 
   let self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
-  assert.equal(self.health, 100);
-  assert.equal(self.armor, 50);
+  assert.equal(self.health, 200);
+  assert.equal(self.armor, 125);
 
   protection.clear("human-protected");
-  combat.damage("human-protected", 60);
+  combat.damage("human-protected", 200);
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
   assert.equal(self.armor, 0);
-  assert.equal(self.health, 100, "the armor-breaking hit should not spill into health");
+  assert.equal(self.health, 200, "the armor-breaking hit should not spill into health");
 
   combat.damage("human-protected", 10);
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
-  assert.equal(self.health, 90, "health damage should begin on the hit after armor is gone");
+  assert.equal(self.health, 190, "health damage should begin on the hit after armor is gone");
   await game.host.stop();
 });
 
