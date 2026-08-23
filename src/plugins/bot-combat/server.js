@@ -28,9 +28,9 @@ function rotateDirection(direction, radians) {
   return { x: Math.sin(heading), z: -Math.cos(heading) };
 }
 
-export const BOT_FIRE_CONE_RADIANS = 0.08;
-export const BOT_AIM_RESET_RADIANS = 0.14;
-export const BOT_REACTION_BASE_MS = 500;
+export const BOT_FIRE_CONE_RADIANS = 0.09;
+export const BOT_AIM_RESET_RADIANS = 0.16;
+export const BOT_REACTION_BASE_MS = 420;
 export const BOT_OBSTACLE_PROBE_DISTANCE = 1.45;
 export const BOT_STUCK_SAMPLE_MS = 300;
 export const BOT_STUCK_DISTANCE = 0.055;
@@ -116,7 +116,7 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
 
 export const manifest = {
   id: "bot-combat",
-  version: "2.0.0",
+  version: "2.0.1",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "rapier-physics"],
   optional: ["opening-round"],
   capabilities: [
@@ -192,15 +192,18 @@ export async function setup(ctx) {
 
         if (!visibleTarget) {
           const huntError = wrapAngle(desiredWithoutWobble - transform.angle);
-          const huntTurn = Math.max(-1, Math.min(1, huntError * 2.45));
+          const huntTurn = Math.max(-1, Math.min(1, huntError * 2.7));
+          const turningHard = Math.abs(huntError) > 1.35;
           const huntingInput = applyBotObstacleAvoidance(
             physics,
             bot.id,
             transform,
             botState,
             {
-              forward: Math.abs(huntError) > 1.65 ? 0.35 : 0.98,
-              strafe: 0.18 * botState.strafeDirection,
+              forward: turningHard ? 0.22 : 1,
+              strafe: turningHard
+                ? Math.sign(huntError || 1) * 0.88
+                : 0.22 * botState.strafeDirection,
               turn: huntTurn,
               sprint: true,
               fireHeld: false,
@@ -213,12 +216,12 @@ export async function setup(ctx) {
         }
 
         const target = visibleTarget;
-        const wobbleAmount = training?.aimWobble ?? 0.035;
+        const wobbleAmount = training?.aimWobble ?? 0.03;
         const aimWobble = Math.sin(now / (270 + seed * 3) + seed) * wobbleAmount;
         const desired = desiredWithoutWobble + aimWobble;
         const error = wrapAngle(desired - transform.angle);
         const absoluteError = Math.abs(error);
-        const turn = Math.max(-1, Math.min(1, error * (training ? 1.9 : 2.45)));
+        const turn = Math.max(-1, Math.min(1, error * (training ? 2.1 : 2.6)));
 
         let forward = 0;
         let strafe = 0;
@@ -271,7 +274,7 @@ export async function setup(ctx) {
         const reactionBase = training?.reactionBaseMs ?? BOT_REACTION_BASE_MS;
         if (weaponRange > 0 && absoluteError < fireCone && target.distance <= weaponRange) {
           if (botState.reactionUntil === 0) {
-            botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 45 : 35);
+            botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 35 : 28);
           }
           if (now >= botState.reactionUntil) weapons.fire(bot.id, now);
         } else if (absoluteError >= aimReset || target.distance > weaponRange) {
