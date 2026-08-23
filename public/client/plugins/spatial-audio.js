@@ -5,6 +5,8 @@ export const manifest = {
 
 export const HRTF_START_ANGLE = 0.95;
 export const HRTF_FULL_ANGLE = 1.45;
+export const MASTER_FILTER_MIN_HZ = 80;
+export const MASTER_FILTER_MAX_HZ = 18000;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
@@ -61,18 +63,26 @@ export async function setup(ctx) {
   const activeChannels = new Map();
   let listener = { x: 0, z: 0, angle: 0 };
   let reverbMix = 0;
+  let muffleCutoff = MASTER_FILTER_MAX_HZ;
 
-  // Every game sound is routed through this master bus. Speech synthesis is
-  // outside WebAudio, so accessibility announcements stay clean and readable.
+  // Every game sound is routed through one persistent master bus. The low-pass
+  // lives before both dry and reverb paths, so critical-health muffling affects
+  // the entire game mix without recreating or restarting any audio source.
+  // Speech synthesis is outside WebAudio and stays clear for accessibility.
   const masterInput = audioContext.createGain();
+  const masterLowpass = audioContext.createBiquadFilter();
   const dryGain = audioContext.createGain();
   const reverb = audioContext.createConvolver();
   const wetGain = audioContext.createGain();
+  masterLowpass.type = "lowpass";
+  masterLowpass.Q.value = 0.7;
+  masterLowpass.frequency.value = MASTER_FILTER_MAX_HZ;
   reverb.buffer = createReverbImpulse(audioContext);
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
-  masterInput.connect(dryGain).connect(audioContext.destination);
-  masterInput.connect(reverb).connect(wetGain).connect(audioContext.destination);
+  masterInput.connect(masterLowpass);
+  masterLowpass.connect(dryGain).connect(audioContext.destination);
+  masterLowpass.connect(reverb).connect(wetGain).connect(audioContext.destination);
 
   ctx.events.on("game:snapshot", (snapshot) => {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
@@ -127,11 +137,24 @@ export async function setup(ctx) {
   }
 
   function setReverbMix(value, transitionSeconds = 0.35) {
-    reverbMix = clamp01(value);
+    const next = clamp01(value);
+    if (Math.abs(next - reverbMix) < 0.002) return;
+    reverbMix = next;
     // Keep a strong dry path so positional information remains readable even
     // at critical health, while the wet tail creates the wounded-state haze.
     rampParam(dryGain.gain, 1 - reverbMix * 0.32, transitionSeconds);
     rampParam(wetGain.gain, reverbMix * 0.9, transitionSeconds);
+  }
+
+  function setMuffleCutoff(value, transitionSeconds = 0.35) {
+    const numeric = Number(value);
+    const next = Math.max(
+      MASTER_FILTER_MIN_HZ,
+      Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
+    );
+    if (Math.abs(next - muffleCutoff) < 1) return;
+    muffleCutoff = next;
+    rampParam(masterLowpass.frequency, muffleCutoff, transitionSeconds);
   }
 
   function playCenteredBuffer(buffer, {
@@ -248,6 +271,10 @@ export async function setup(ctx) {
     setReverbMix,
     getReverbMix() {
       return reverbMix;
+    },
+    setMuffleCutoff,
+    getMuffleCutoff() {
+      return muffleCutoff;
     },
     async playCentered(url, options = {}) {
       const buffer = await load(url);
