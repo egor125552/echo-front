@@ -74,8 +74,10 @@ test("a physical pointer follow-up click is suppressed only during its own suppr
   assert.equal(shouldHandleControlClick(1, 701, 700), true);
 });
 
-test("network sends control transitions immediately while retaining the 50 ms heartbeat", async () => {
+test("network sends control transitions immediately without driving the server clock from a browser timer", async () => {
   const source = await readFile(new URL("../client/plugins/network.js", import.meta.url), "utf8");
+  const publicSource = await readFile(new URL("../public/client/plugins/network.js", import.meta.url), "utf8");
   assert.match(source, /ctx\.events\.on\("input:changed", sendInput\)/);
-  assert.match(source, /setInterval\(sendInput, 50\)/);
+  assert.doesNotMatch(source, /setInterval\(sendInput/);
+  assert.equal(publicSource, source);
 });
