@@ -20,6 +20,11 @@ test("dead character colliders stop blocking movement and raycasts until respawn
   const before = physics.raycast({ x: -2, y: 1, z: 0 }, { x: 1, y: 0, z: 0 }, 3, human.id);
   assert.equal(before?.entityId, enemy.id, "living enemy should physically block the ray");
 
+  // This regression is about collider lifecycle, not armor. Remove any bot
+  // armor so the lethal hit reaches health directly under the armor-gate rule.
+  const enemyArmor = game.host.components.get(enemy.id, "Armor");
+  if (enemyArmor) enemyArmor.current = 0;
+
   combat.damage(enemy.id, 999, { attackerId: human.id, weaponId: "pistol" });
   assert.equal(game.api.snapshot().entities.find((entity) => entity.id === enemy.id)?.alive, false);
 
