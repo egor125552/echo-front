@@ -82,10 +82,16 @@ export async function setup(ctx) {
     }, { once: true });
   }
 
-  function playCenteredBuffer(buffer, { gain = 1, channel = null, replace = false } = {}) {
+  function playCenteredBuffer(buffer, {
+    gain = 1,
+    channel = null,
+    replace = false,
+    loop = false,
+  } = {}) {
     const source = audioContext.createBufferSource();
     const gainNode = audioContext.createGain();
     source.buffer = buffer;
+    source.loop = Boolean(loop);
     gainNode.gain.value = gain;
     source.connect(gainNode).connect(audioContext.destination);
     trackSource(source, channel, replace);
@@ -108,6 +114,7 @@ export async function setup(ctx) {
     gain = 1,
     channel = null,
     replace = false,
+    loop = false,
   } = {}) {
     const local = localize(position);
     if (local.distance > radius) return null;
@@ -124,6 +131,7 @@ export async function setup(ctx) {
     const hrtfGain = audioContext.createGain();
 
     source.buffer = buffer;
+    source.loop = Boolean(loop);
     distanceGain.gain.value = attenuation;
     stereoPanner.pan.value = mix.pan;
 
