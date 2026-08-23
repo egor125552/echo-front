@@ -14,8 +14,8 @@ export async function setup(ctx) {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
   }
 
-  function announce(text, { interrupt = false } = {}) {
-    if (!text || text === lastMessage) return;
+  function announce(text, { interrupt = false, repeat = false } = {}) {
+    if (!text || (!repeat && text === lastMessage)) return;
     lastMessage = text;
     if (live) {
       live.textContent = "";
@@ -42,6 +42,14 @@ export async function setup(ctx) {
 
   ctx.events.on("game:event", (packet) => {
     const payload = packet.payload ?? {};
+
+    if (packet.event === "movement:blocked" && payload.recipientId === network.playerId) {
+      const text = payload.kind === "world-boundary"
+        ? "Здесь пройти нельзя. Граница мира"
+        : "Здесь пройти нельзя. Стена";
+      announce(text, { interrupt: true, repeat: true });
+      return;
+    }
 
     if (packet.event === "feedback:sound" && payload.recipientId === network.playerId) {
       if (payload.key === "enemy.killed") announce("Противник уничтожен", { interrupt: true });
