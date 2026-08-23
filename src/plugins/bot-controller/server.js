@@ -1,6 +1,6 @@
 export const manifest = {
   id: "bot-controller",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -21,6 +21,12 @@ export async function setup(ctx) {
       wanderTurn: (seed % 2 ? 1 : -1) * (0.22 + (seed % 4) * 0.06),
       strafeDirection: seed % 2 ? 1 : -1,
       tacticUntil: 0,
+      avoidDirection: seed % 2 ? 1 : -1,
+      avoidUntil: 0,
+      navSampleAt: 0,
+      navSampleX: null,
+      navSampleZ: null,
+      stuckSamples: 0,
     });
   });
 
