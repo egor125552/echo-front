@@ -4,14 +4,120 @@ function wrapAngle(value) {
   return value;
 }
 
+function normalizeDirection(direction) {
+  const length = Math.hypot(direction.x, direction.z) || 1;
+  return { x: direction.x / length, z: direction.z / length };
+}
+
+function localToWorld(angle, forward, strafe) {
+  return normalizeDirection({
+    x: Math.sin(angle) * forward + Math.cos(angle) * strafe,
+    z: -Math.cos(angle) * forward + Math.sin(angle) * strafe,
+  });
+}
+
+function worldToLocal(angle, direction) {
+  return {
+    forward: Math.sin(angle) * direction.x - Math.cos(angle) * direction.z,
+    strafe: Math.cos(angle) * direction.x + Math.sin(angle) * direction.z,
+  };
+}
+
+function rotateDirection(direction, radians) {
+  const heading = Math.atan2(direction.x, -direction.z) + radians;
+  return { x: Math.sin(heading), z: -Math.cos(heading) };
+}
+
 export const BOT_FIRE_CONE_RADIANS = 0.065;
 export const BOT_AIM_RESET_RADIANS = 0.11;
 export const BOT_REACTION_BASE_MS = 850;
+export const BOT_OBSTACLE_PROBE_DISTANCE = 1.45;
+export const BOT_STUCK_SAMPLE_MS = 300;
+export const BOT_STUCK_DISTANCE = 0.055;
+
+function probeClearance(physics, botId, transform, direction) {
+  const hit = physics.raycast(
+    { x: transform.x, y: 1, z: transform.z },
+    { x: direction.x, y: 0, z: direction.z },
+    BOT_OBSTACLE_PROBE_DISTANCE,
+    botId,
+  );
+  return hit?.distance ?? BOT_OBSTACLE_PROBE_DISTANCE;
+}
+
+function sampleStuck(botState, transform, now, movementMagnitude) {
+  if (!Number.isFinite(botState.navSampleX) || !Number.isFinite(botState.navSampleZ)) {
+    botState.navSampleX = transform.x;
+    botState.navSampleZ = transform.z;
+    botState.navSampleAt = now;
+    botState.stuckSamples = 0;
+    return false;
+  }
+  if (now - botState.navSampleAt < BOT_STUCK_SAMPLE_MS) return false;
+
+  const moved = Math.hypot(
+    transform.x - botState.navSampleX,
+    transform.z - botState.navSampleZ,
+  );
+  botState.navSampleX = transform.x;
+  botState.navSampleZ = transform.z;
+  botState.navSampleAt = now;
+
+  if (movementMagnitude < 0.25 || moved >= BOT_STUCK_DISTANCE) {
+    botState.stuckSamples = 0;
+    return false;
+  }
+
+  botState.stuckSamples = (botState.stuckSamples ?? 0) + 1;
+  if (botState.stuckSamples < 2) return false;
+  botState.stuckSamples = 0;
+  return true;
+}
+
+export function applyBotObstacleAvoidance(physics, botId, transform, botState, input, now = Date.now()) {
+  const movementMagnitude = Math.hypot(input.forward, input.strafe);
+  if (movementMagnitude < 0.05) {
+    sampleStuck(botState, transform, now, movementMagnitude);
+    return input;
+  }
+
+  const desiredDirection = localToWorld(transform.angle, input.forward, input.strafe);
+  const forwardClearance = probeClearance(physics, botId, transform, desiredDirection);
+  const blocked = forwardClearance < 0.95;
+  const stuck = sampleStuck(botState, transform, now, movementMagnitude);
+
+  if (blocked || stuck) {
+    const rightDirection = rotateDirection(desiredDirection, 0.9);
+    const leftDirection = rotateDirection(desiredDirection, -0.9);
+    const rightClearance = probeClearance(physics, botId, transform, rightDirection);
+    const leftClearance = probeClearance(physics, botId, transform, leftDirection);
+    const previous = botState.avoidDirection || botState.strafeDirection || 1;
+    botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.08
+      ? previous
+      : (rightClearance > leftClearance ? 1 : -1);
+    botState.avoidUntil = now + (stuck ? 900 : 650);
+  }
+
+  if ((botState.avoidUntil ?? 0) <= now) return input;
+
+  let detour = rotateDirection(desiredDirection, (botState.avoidDirection || 1) * 1.15);
+  if (probeClearance(physics, botId, transform, detour) < 0.42) {
+    botState.avoidDirection *= -1;
+    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.35);
+  }
+  const local = worldToLocal(transform.angle, detour);
+  return {
+    ...input,
+    forward: Math.max(-0.7, Math.min(0.65, local.forward)),
+    strafe: Math.max(-1, Math.min(1, local.strafe)),
+    sprint: false,
+  };
+}
 
 export const manifest = {
   id: "bot-combat",
-  version: "1.6.0",
-  requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities"],
+  version: "1.7.0",
+  requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "rapier-physics"],
   optional: ["opening-round"],
   capabilities: [
     "services.consume", "services.provide",
@@ -24,6 +130,7 @@ export async function setup(ctx) {
   const perception = ctx.services.get("bot-perception");
   const movement = ctx.services.get("movement");
   const weapons = ctx.services.get("weapons");
+  const physics = ctx.services.get("physics");
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
 
   ctx.services.provide("bot-combat", {
@@ -44,13 +151,21 @@ export async function setup(ctx) {
 
         const target = perception.nearestVisibleEnemy(bot.id, weaponRange || 22);
         if (!target) {
-          movement.setInput(bot.id, {
-            forward: training ? 0.28 : 0.5,
-            strafe: training ? 0 : 0.12 * botState.strafeDirection,
-            turn: training ? botState.wanderTurn * 0.35 : botState.wanderTurn,
-            sprint: false,
-            fireHeld: false,
-          });
+          const roamingInput = applyBotObstacleAvoidance(
+            physics,
+            bot.id,
+            transform,
+            botState,
+            {
+              forward: training ? 0.28 : 0.5,
+              strafe: training ? 0 : 0.12 * botState.strafeDirection,
+              turn: training ? botState.wanderTurn * 0.35 : botState.wanderTurn,
+              sprint: false,
+              fireHeld: false,
+            },
+            now,
+          );
+          movement.setInput(bot.id, roamingInput);
           botState.reactionUntil = 0;
           continue;
         }
@@ -96,13 +211,21 @@ export async function setup(ctx) {
 
         if (absoluteError > 0.85) strafe *= 0.35;
 
-        movement.setInput(bot.id, {
-          forward,
-          strafe,
-          turn,
-          sprint: training ? false : target.distance > 18,
-          fireHeld: false,
-        });
+        const combatInput = applyBotObstacleAvoidance(
+          physics,
+          bot.id,
+          transform,
+          botState,
+          {
+            forward,
+            strafe,
+            turn,
+            sprint: training ? false : target.distance > 18,
+            fireHeld: false,
+          },
+          now,
+        );
+        movement.setInput(bot.id, combatInput);
 
         if (selected?.reloadUntil > now) continue;
 
