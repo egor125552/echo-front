@@ -1,6 +1,6 @@
 export const manifest = {
   id: "armor",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["health", "entities"],
   capabilities: [
     "components.register", "components.read", "components.write",
@@ -23,12 +23,18 @@ export async function setup(ctx) {
   ctx.events.on("combat:damage:before", (packet) => {
     const armor = ctx.components.get(packet.targetId, "Armor");
     if (!armor || armor.current <= 0 || packet.remaining <= 0) return;
+
     const before = armor.current;
     const absorbed = Math.min(armor.current, packet.remaining);
     armor.current -= absorbed;
-    packet.remaining -= absorbed;
+
+    // Armor is a hard health gate. If a hit starts while armor is still up,
+    // that entire hit is stopped from reaching health even when it breaks the
+    // final armor point. Health damage can begin with the next hit.
+    packet.remaining = 0;
     packet.armorAbsorbed = absorbed;
     packet.armorBroke = before > 0 && armor.current <= 0;
+
     ctx.events.emit("armor:changed", {
       entityId: packet.targetId,
       armor: armor.current,
