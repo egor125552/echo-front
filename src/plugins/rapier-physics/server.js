@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -8,7 +8,7 @@ export const manifest = {
 const CHARACTER_RADIUS = 0.32;
 
 async function createRapierPhysics() {
-  const module = await import("@dimforge/rapier3d-compat");
+  const module = await import("@dimforge/rapier3d");
   const RAPIER = module.default;
   await RAPIER.init();
 
@@ -22,10 +22,12 @@ async function createRapierPhysics() {
   }
 
   function createWall({ x, z, hx, hz, height = 2 }) {
-    return world.createCollider(
+    const collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(hx, height / 2, hz)
         .setTranslation(x, height / 2, z),
     );
+    syncQueries();
+    return collider;
   }
 
   function createCharacter(entityId, { x = 0, z = 0 } = {}) {
@@ -34,10 +36,11 @@ async function createRapierPhysics() {
       RAPIER.ColliderDesc.capsule(0.45, CHARACTER_RADIUS)
         .setTranslation(x, 1, z),
     );
-    characters.set(entityId, { collider });
+    const entry = { collider };
+    characters.set(entityId, entry);
     colliderToEntity.set(collider.handle, entityId);
     syncQueries();
-    return { collider };
+    return entry;
   }
 
   function removeCharacter(entityId) {
@@ -105,7 +108,12 @@ async function createRapierPhysics() {
     const dz = to.z - from.z;
     const distance = Math.hypot(dx, dz);
     if (distance < 0.001) return true;
-    const hit = raycast({ x: from.x, y: 1, z: from.z }, { x: dx, y: 0, z: dz }, distance + 0.15, excludeEntityId);
+    const hit = raycast(
+      { x: from.x, y: 1, z: from.z },
+      { x: dx, y: 0, z: dz },
+      distance + 0.15,
+      excludeEntityId,
+    );
     return !hit || hit.entityId === targetEntityId;
   }
 
