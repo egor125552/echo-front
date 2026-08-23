@@ -1,6 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { ClientPluginHost } from "../client/core/plugin-host.js";
+import { echoFrontClientPreset } from "../client/presets/echo-front.js";
+
+test("client plugin dependency graph can be constructed before play button wiring", () => {
+  assert.doesNotThrow(() => new ClientPluginHost(echoFrontClientPreset));
+});
 
 test("client preset includes speech settings and play journal plugins", async () => {
   const preset = await readFile(new URL("../client/presets/echo-front.js", import.meta.url), "utf8");
