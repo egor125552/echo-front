@@ -116,7 +116,7 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
 
 export const manifest = {
   id: "bot-combat",
-  version: "1.7.0",
+  version: "1.8.0",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "rapier-physics"],
   optional: ["opening-round"],
   capabilities: [
@@ -157,10 +157,10 @@ export async function setup(ctx) {
             transform,
             botState,
             {
-              forward: training ? 0.28 : 0.5,
-              strafe: training ? 0 : 0.12 * botState.strafeDirection,
-              turn: training ? botState.wanderTurn * 0.35 : botState.wanderTurn,
-              sprint: false,
+              forward: training ? 0.62 : 0.72,
+              strafe: (training ? 0.08 : 0.22) * botState.strafeDirection,
+              turn: training ? botState.wanderTurn * 0.55 : botState.wanderTurn,
+              sprint: true,
               fireHeld: false,
             },
             now,
@@ -187,26 +187,30 @@ export async function setup(ctx) {
 
         let forward = 0;
         let strafe = 0;
+        let sprint = false;
         if (training) {
           if (target.distance > 5.5) {
-            forward = training.approachForward;
-            strafe = training.approachStrafe * botState.strafeDirection;
+            forward = Math.max(0.72, training.approachForward);
+            strafe = Math.max(0.12, training.approachStrafe) * botState.strafeDirection;
+            sprint = true;
           } else if (target.distance < 2.8) {
-            forward = -0.12;
-            strafe = 0.1 * botState.strafeDirection;
+            forward = -0.35;
+            strafe = 0.5 * botState.strafeDirection;
           } else {
-            forward = 0.12;
-            strafe = 0.08 * botState.strafeDirection;
+            forward = 0.3;
+            strafe = 0.42 * botState.strafeDirection;
           }
         } else if (target.distance > 14) {
-          forward = 0.9;
-          strafe = 0.2 * botState.strafeDirection;
+          forward = 0.95;
+          strafe = 0.25 * botState.strafeDirection;
+          sprint = true;
         } else if (target.distance < 5) {
           forward = -0.7;
           strafe = 0.8 * botState.strafeDirection;
         } else {
-          forward = target.distance > 9 ? 0.28 : -0.12;
-          strafe = 0.72 * botState.strafeDirection;
+          forward = target.distance > 9 ? 0.42 : -0.12;
+          strafe = 0.78 * botState.strafeDirection;
+          sprint = target.distance > 7.5;
         }
 
         if (absoluteError > 0.85) strafe *= 0.35;
@@ -220,7 +224,7 @@ export async function setup(ctx) {
             forward,
             strafe,
             turn,
-            sprint: training ? false : target.distance > 18,
+            sprint,
             fireHeld: false,
           },
           now,

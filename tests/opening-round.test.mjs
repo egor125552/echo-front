@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
 
-test("first round places enemy bots in front and slows their opening pressure", async () => {
+test("first round places enemy bots in front without making them passive", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("training-human");
 
@@ -26,5 +26,13 @@ test("first round places enemy bots in front and slows their opening pressure", 
   assert.equal(opening.isActive(), true);
   assert.equal(targeting.mode, "assisted-target-selection");
   assert.ok(opening.botTuning().reactionBaseMs >= 1200);
+
+  game.api.step(0.05, Date.now());
+  const sprintingEnemies = enemies.filter((enemy) => {
+    const input = game.host.components.get(enemy.id, "Input");
+    return Boolean(input?.sprint);
+  });
+  assert.ok(sprintingEnemies.length > 0, "opening-round bots should actively sprint instead of only walking");
+
   await game.host.stop();
 });
