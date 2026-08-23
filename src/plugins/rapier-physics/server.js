@@ -1,15 +1,21 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: [],
   capabilities: ["services.provide"],
 };
 
 const CHARACTER_RADIUS = 0.32;
 
+async function loadRapier() {
+  const module = typeof WebSocketPair !== "undefined"
+    ? await import("@dimforge/rapier3d")
+    : await import("@dimforge/rapier3d-compat");
+  return module.default;
+}
+
 async function createRapierPhysics() {
-  const module = await import("@dimforge/rapier3d");
-  const RAPIER = module.default;
+  const RAPIER = await loadRapier();
   await RAPIER.init();
 
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
