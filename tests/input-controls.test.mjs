@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sampleInputState, sampleKeyboardState } from "../client/plugins/input.js";
+import {
+  sampleInputState,
+  sampleKeyboardState,
+  shouldHandleControlClick,
+} from "../client/plugins/input.js";
 
 test("arrow keys move on both axes without camera turning", () => {
   const up = sampleKeyboardState(new Set(["ArrowUp"]));
@@ -49,4 +53,13 @@ test("touch movement uses the same server input shape as keyboard", () => {
   assert.equal(sample.turn, 0);
   assert.equal(sample.sprint, true);
   assert.equal(sample.fireHeld, true);
+});
+
+test("assistive-technology synthetic clicks are never swallowed by pointer suppression", () => {
+  assert.equal(shouldHandleControlClick(0, 100, 700), true);
+});
+
+test("a physical pointer follow-up click is suppressed only during its own suppression window", () => {
+  assert.equal(shouldHandleControlClick(1, 100, 700), false);
+  assert.equal(shouldHandleControlClick(1, 701, 700), true);
 });
