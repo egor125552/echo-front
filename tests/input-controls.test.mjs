@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   sampleInputState,
   sampleKeyboardState,
@@ -62,4 +63,10 @@ test("assistive-technology synthetic clicks are never swallowed by pointer suppr
 test("a physical pointer follow-up click is suppressed only during its own suppression window", () => {
   assert.equal(shouldHandleControlClick(1, 100, 700), false);
   assert.equal(shouldHandleControlClick(1, 701, 700), true);
+});
+
+test("network sends control transitions immediately while retaining the 50 ms heartbeat", async () => {
+  const source = await readFile(new URL("../client/plugins/network.js", import.meta.url), "utf8");
+  assert.match(source, /ctx\.events\.on\("input:changed", sendInput\)/);
+  assert.match(source, /setInterval\(sendInput, 50\)/);
 });
