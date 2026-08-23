@@ -23,11 +23,15 @@ test("bots actively damage opposing bots when they see each other", async () => 
   movement.teleport(b.id, { x: 0, z: -6, angle: 0 });
 
   const hits = [];
-  const off = game.host.events.on("combat:damage", (packet) => {
+  const shots = [];
+  const offDamage = game.host.events.on("combat:damage", (packet) => {
     if ((packet.attackerId === a.id && packet.targetId === b.id) ||
         (packet.attackerId === b.id && packet.targetId === a.id)) {
       hits.push(packet);
     }
+  });
+  const offShots = game.host.events.on("weapon:fired", (packet) => {
+    if (packet.entityId === a.id || packet.entityId === b.id) shots.push(packet);
   });
 
   const start = Date.now();
@@ -37,8 +41,13 @@ test("bots actively damage opposing bots when they see each other", async () => 
 
   assert.ok(hits.length > 0, "opposing bots should engage each other instead of only running around");
   assert.ok(hits[0].now - start <= 1600, "a visible enemy should provoke a prompt attack");
+  assert.ok(
+    shots.some((shot) => shot.targetId === a.id || shot.targetId === b.id),
+    "weapon:fired should report the actual Rapier hit target for bot shots",
+  );
 
-  off();
+  offDamage();
+  offShots();
   await game.host.stop();
 });
 
