@@ -21,6 +21,8 @@ export async function setup(ctx) {
     socket.send(JSON.stringify({ type: "input", input: sampled }));
   }
 
+  ctx.events.on("input:changed", sendInput);
+
   function emitSnapshot(snapshot) {
     if (ctx.services.has("snapshot-smoothing")) ctx.events.emit("game:snapshot:raw", snapshot);
     else ctx.events.emit("game:snapshot", snapshot);
@@ -35,6 +37,7 @@ export async function setup(ctx) {
     socket.addEventListener("open", () => {
       input.enable();
       stopTimer();
+      sendInput();
       timer = setInterval(sendInput, 50);
       ctx.events.emit("network:connected", { room });
     });
