@@ -1,6 +1,6 @@
 export const manifest = {
   id: "health",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -42,6 +42,23 @@ export async function setup(ctx) {
         return { applied, killed: true };
       }
       return { applied, killed: false };
+    },
+    heal(entityId, amount) {
+      const health = ctx.components.get(entityId, "Health");
+      const target = entities.get(entityId);
+      if (!health || !target?.alive || amount <= 0 || health.current >= health.maximum) return 0;
+      const before = health.current;
+      health.current = Math.min(health.maximum, health.current + amount);
+      const restored = health.current - before;
+      if (restored > 0) {
+        ctx.events.emit("health:changed", {
+          entityId,
+          health: health.current,
+          maximum: health.maximum,
+          restored,
+        });
+      }
+      return restored;
     },
     reset(entityId) {
       const health = ctx.components.get(entityId, "Health");

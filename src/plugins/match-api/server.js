@@ -1,11 +1,14 @@
 export const manifest = {
   id: "match-api",
-  version: "1.4.3",
+  version: "1.5.0",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
   ],
-  optional: ["armor", "weapon-progression", "opening-round", "aim-steering"],
+  optional: [
+    "armor", "weapon-progression", "opening-round", "aim-steering",
+    "health-regeneration",
+  ],
   capabilities: [
     "services.consume", "services.provide",
     "components.read", "events.on",
@@ -23,6 +26,9 @@ export async function setup(ctx) {
   const botCombat = ctx.services.get("bot-combat");
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
   const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
+  const healthRegeneration = ctx.services.has("health-regeneration")
+    ? ctx.services.get("health-regeneration")
+    : null;
 
   botFill.ensure();
 
@@ -73,6 +79,7 @@ export async function setup(ctx) {
       botCombat.tick(dt, now);
       movement.tick(dt, now);
       weapons.tickAutomatic(now);
+      healthRegeneration?.tick(dt, now);
     }
     respawn.tick(now);
   }

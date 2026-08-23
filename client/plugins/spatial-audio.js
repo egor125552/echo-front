@@ -6,6 +6,10 @@ export const manifest = {
 export const HRTF_START_ANGLE = 0.95;
 export const HRTF_FULL_ANGLE = 1.45;
 
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
 function smoothstep(edge0, edge1, value) {
   const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);
@@ -13,6 +17,21 @@ function smoothstep(edge0, edge1, value) {
 
 function wrappedAbsAngle(azimuth) {
   return Math.abs(Math.atan2(Math.sin(azimuth), Math.cos(azimuth)));
+}
+
+function createReverbImpulse(audioContext, durationSeconds = 2.4, decay = 3.2) {
+  const length = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
+  const impulse = audioContext.createBuffer(2, length, audioContext.sampleRate);
+
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const data = impulse.getChannelData(channel);
+    for (let i = 0; i < length; i += 1) {
+      const envelope = Math.pow(1 - i / length, decay);
+      data[i] = (Math.random() * 2 - 1) * envelope;
+    }
+  }
+
+  return impulse;
 }
 
 export function hybridSpatialMix(azimuth) {
@@ -41,6 +60,19 @@ export async function setup(ctx) {
   const buffers = new Map();
   const activeChannels = new Map();
   let listener = { x: 0, z: 0, angle: 0 };
+  let reverbMix = 0;
+
+  // Every game sound is routed through this master bus. Speech synthesis is
+  // outside WebAudio, so accessibility announcements stay clean and readable.
+  const masterInput = audioContext.createGain();
+  const dryGain = audioContext.createGain();
+  const reverb = audioContext.createConvolver();
+  const wetGain = audioContext.createGain();
+  reverb.buffer = createReverbImpulse(audioContext);
+  dryGain.gain.value = 1;
+  wetGain.gain.value = 0;
+  masterInput.connect(dryGain).connect(audioContext.destination);
+  masterInput.connect(reverb).connect(wetGain).connect(audioContext.destination);
 
   ctx.events.on("game:snapshot", (snapshot) => {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
@@ -82,6 +114,26 @@ export async function setup(ctx) {
     }, { once: true });
   }
 
+  function rampParam(param, value, seconds = 0.25) {
+    const now = audioContext.currentTime;
+    const duration = Math.max(0.02, Number(seconds) || 0.25);
+    if (typeof param.cancelAndHoldAtTime === "function") {
+      param.cancelAndHoldAtTime(now);
+    } else {
+      param.cancelScheduledValues(now);
+      param.setValueAtTime(param.value, now);
+    }
+    param.linearRampToValueAtTime(value, now + duration);
+  }
+
+  function setReverbMix(value, transitionSeconds = 0.35) {
+    reverbMix = clamp01(value);
+    // Keep a strong dry path so positional information remains readable even
+    // at critical health, while the wet tail creates the wounded-state haze.
+    rampParam(dryGain.gain, 1 - reverbMix * 0.32, transitionSeconds);
+    rampParam(wetGain.gain, reverbMix * 0.9, transitionSeconds);
+  }
+
   function playCenteredBuffer(buffer, {
     gain = 1,
     channel = null,
@@ -93,10 +145,18 @@ export async function setup(ctx) {
     source.buffer = buffer;
     source.loop = Boolean(loop);
     gainNode.gain.value = gain;
-    source.connect(gainNode).connect(audioContext.destination);
+    source.connect(gainNode).connect(masterInput);
     trackSource(source, channel, replace);
     source.start();
-    return source;
+    return {
+      source,
+      setGain(nextGain, transitionSeconds = 0.2) {
+        rampParam(gainNode.gain, Math.max(0, Number(nextGain) || 0), transitionSeconds);
+      },
+      stop() {
+        try { source.stop(); } catch {}
+      },
+    };
   }
 
   function localize(position) {
@@ -153,8 +213,8 @@ export async function setup(ctx) {
     hrtfGain.gain.setValueAtTime(mix.hrtf, now);
 
     source.connect(distanceGain);
-    distanceGain.connect(stereoPanner).connect(stereoGain).connect(audioContext.destination);
-    distanceGain.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(audioContext.destination);
+    distanceGain.connect(stereoPanner).connect(stereoGain).connect(masterInput);
+    distanceGain.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(masterInput);
     trackSource(source, channel, replace);
     source.start();
 
@@ -185,6 +245,10 @@ export async function setup(ctx) {
     },
     load,
     stopChannel,
+    setReverbMix,
+    getReverbMix() {
+      return reverbMix;
+    },
     async playCentered(url, options = {}) {
       const buffer = await load(url);
       return playCenteredBuffer(buffer, options);
