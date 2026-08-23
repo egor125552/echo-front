@@ -4,4 +4,4 @@
 
 Аудиошутер с модульной архитектурой. Базовые переиспользуемые звуки лежат в `assets/audio/core/`.
 
-<!-- diagnostic CI branch: play button startup -->
+<!-- diagnostic CI branch: play button startup, ready-for-review run -->
