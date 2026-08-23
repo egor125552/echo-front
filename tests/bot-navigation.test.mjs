@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
 import { applyBotObstacleAvoidance } from "../src/plugins/bot-combat/server.js";
 
-test("bot avoidance steers away instead of repeatedly pushing into an arena wall", async () => {
+test("bot avoidance steers away instead of repeatedly pushing into a physical wall", async () => {
   const game = await createEchoFrontGame();
   const physics = game.host.services.get("physics");
   const movement = game.host.services.get("movement");
   const bot = game.api.snapshot().entities.find((entity) => entity.bot);
   assert.ok(bot);
 
+  // The forest map is intentionally open, so the regression test creates its
+  // own obstacle rather than relying on map geometry.
+  physics.createWall({ x: 10.5, z: 8.5, hx: 2.2, hz: 0.35 });
   movement.teleport(bot.id, { x: 9, z: 7.8, angle: Math.PI });
   const transform = game.host.components.get(bot.id, "Transform");
   const botState = game.host.components.get(bot.id, "Bot");
@@ -28,7 +31,7 @@ test("bot avoidance steers away instead of repeatedly pushing into an arena wall
       now,
     );
     movement.setInput(bot.id, input);
-    movement.tick(0.1);
+    movement.tick(0.1, now);
     stepDistances.push(Math.hypot(transform.x - before.x, transform.z - before.z));
     now += 100;
   }
