@@ -1,6 +1,6 @@
 export const manifest = {
   id: "combat",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["health"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -8,6 +8,11 @@ export const manifest = {
 export async function setup(ctx) {
   const health = ctx.services.get("health");
   let armorVariant = 0;
+
+  function emitFeedback(recipientId, key) {
+    if (!recipientId) return;
+    ctx.events.emit("feedback:sound", { recipientId, key });
+  }
 
   ctx.services.provide("combat", {
     damage(targetId, amount, source = {}) {
@@ -25,45 +30,29 @@ export async function setup(ctx) {
       ctx.events.emit("combat:damage:before", packet);
       const result = health.applyDamage(targetId, packet.remaining, source);
 
-      if (packet.attackerId && !packet.spawnProtected) {
-        if (packet.armorAbsorbed > 0) {
-          armorVariant = (armorVariant % 2) + 1;
-          ctx.events.emit("feedback:sound", {
-            recipientId: packet.attackerId,
-            key: `armor.hit${armorVariant}`,
-          });
-          if (packet.armorBroke) {
-            ctx.events.emit("feedback:sound", {
-              recipientId: packet.attackerId,
-              key: "armor.break",
-            });
-          }
-        } else if (result.applied > 0) {
-          ctx.events.emit("feedback:sound", {
-            recipientId: packet.attackerId,
-            key: "hit.enemy",
-          });
-        }
-      }
+      if (packet.armorAbsorbed > 0) {
+        armorVariant = (armorVariant % 2) + 1;
+        const armorHitKey = `armor.hit${armorVariant}`;
 
-      if (result.applied > 0 || packet.armorAbsorbed > 0) {
-        ctx.events.emit("feedback:sound", {
-          recipientId: targetId,
-          key: "hit.player",
-        });
+        if (packet.attackerId && !packet.spawnProtected) {
+          emitFeedback(packet.attackerId, armorHitKey);
+          if (packet.armorBroke) emitFeedback(packet.attackerId, "armor.break");
+        }
+
+        // The defender hears armor, not a flesh hit. When the last plate is
+        // broken they also get an explicit self-break cue.
+        emitFeedback(targetId, armorHitKey);
+        if (packet.armorBroke) emitFeedback(targetId, "armor.self-break");
+      } else if (result.applied > 0) {
+        if (packet.attackerId && !packet.spawnProtected) {
+          emitFeedback(packet.attackerId, "hit.enemy");
+        }
+        emitFeedback(targetId, "hit.player");
       }
 
       if (result.killed) {
-        if (packet.attackerId) {
-          ctx.events.emit("feedback:sound", {
-            recipientId: packet.attackerId,
-            key: "enemy.killed",
-          });
-        }
-        ctx.events.emit("feedback:sound", {
-          recipientId: targetId,
-          key: "death.full",
-        });
+        if (packet.attackerId) emitFeedback(packet.attackerId, "enemy.killed");
+        emitFeedback(targetId, "death.full");
       }
 
       const outcome = {

@@ -146,7 +146,11 @@ test("human spawn protection blocks immediate damage", async () => {
   combat.damage("human-protected", 60);
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
   assert.equal(self.armor, 0);
-  assert.equal(self.health, 90);
+  assert.equal(self.health, 100, "the armor-breaking hit should not spill into health");
+
+  combat.damage("human-protected", 10);
+  self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
+  assert.equal(self.health, 90, "health damage should begin on the hit after armor is gone");
   await game.host.stop();
 });
 

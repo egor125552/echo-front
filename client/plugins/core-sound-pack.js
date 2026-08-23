@@ -10,6 +10,7 @@ const SOUNDS = {
   "armor.hit1": "/assets/audio/core/armor-hit-1.mp3",
   "armor.hit2": "/assets/audio/core/armor-hit-2.mp3",
   "armor.break": "/assets/audio/core/armor-break.mp3",
+  "armor.self-break": "/assets/audio/core/armor-break.mp3",
   "enemy.killed": "/assets/audio/core/enemy-killed.mp3",
   "death.full": "/assets/audio/core/death-full.mp3",
 };
@@ -76,10 +77,13 @@ export async function setup(ctx) {
       return;
     }
 
-    if (key === "armor.break") {
+    if (key === "armor.break" || key === "armor.self-break") {
       setTimeout(() => {
-        audio.playCentered(url, { gain: 1.4, channel: "feedback-armor-break", replace: true })
-          .catch((error) => console.error("Armor break audio", error));
+        audio.playCentered(url, {
+          gain: key === "armor.self-break" ? 1.5 : 1.4,
+          channel: "feedback-armor-break",
+          replace: true,
+        }).catch((error) => console.error("Armor break audio", error));
       }, 65);
       return;
     }

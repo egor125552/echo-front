@@ -55,6 +55,7 @@ export async function setup(ctx) {
       if (payload.key === "enemy.killed") announce("Противник уничтожен", { interrupt: true });
       if (payload.key === "death.full") announce("Вы погибли. Возрождение через три секунды", { interrupt: true });
       if (payload.key === "armor.break") announce("Броня противника разбита", { interrupt: true });
+      if (payload.key === "armor.self-break") announce("Ваша броня разбита", { interrupt: true });
     }
 
     if (packet.event === "entity:respawned" && payload.entityId === network.playerId) {
