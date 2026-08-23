@@ -6,13 +6,7 @@ export const manifest = {
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   let socket = null;
-  let timer = null;
   let playerId = null;
-
-  function stopTimer() {
-    if (timer) clearInterval(timer);
-    timer = null;
-  }
 
   function sendInput() {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
@@ -36,9 +30,7 @@ export async function setup(ctx) {
 
     socket.addEventListener("open", () => {
       input.enable();
-      stopTimer();
       sendInput();
-      timer = setInterval(sendInput, 50);
       ctx.events.emit("network:connected", { room });
     });
 
@@ -61,7 +53,6 @@ export async function setup(ctx) {
     });
 
     socket.addEventListener("close", () => {
-      stopTimer();
       input.disable();
       ctx.events.emit("network:disconnected", {});
     });
