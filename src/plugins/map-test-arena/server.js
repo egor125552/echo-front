@@ -31,13 +31,6 @@ export function describeBlockedMove(position, attempted, moved) {
     };
   }
 
-  if (lostDistance >= attemptedDistance * 0.35) {
-    return {
-      kind: "wall",
-      speech: "Здесь пройти нельзя. Стена",
-    };
-  }
-
   return null;
 }
 
