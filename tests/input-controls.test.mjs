@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
+  releaseKeyboardKey,
   sampleInputState,
   sampleKeyboardState,
   shouldHandleControlClick,
@@ -39,6 +40,14 @@ test("Z plus left or right selects a weapon without lateral movement", () => {
   assert.equal(right.strafe, 0);
   assert.equal(right.turn, 0);
   assert.equal(right.selectDelta, 1);
+});
+
+test("releasing Z while an arrow remains held immediately restores movement", () => {
+  const pressed = new Set(["KeyZ", "ArrowLeft"]);
+  assert.equal(sampleKeyboardState(pressed).strafe, 0);
+  releaseKeyboardKey(pressed, "KeyZ");
+  assert.equal(pressed.has("ArrowLeft"), true);
+  assert.equal(sampleKeyboardState(pressed).strafe, -1);
 });
 
 test("touch movement uses the same server input shape as keyboard", () => {

@@ -28,9 +28,9 @@ function rotateDirection(direction, radians) {
   return { x: Math.sin(heading), z: -Math.cos(heading) };
 }
 
-export const BOT_FIRE_CONE_RADIANS = 0.065;
-export const BOT_AIM_RESET_RADIANS = 0.11;
-export const BOT_REACTION_BASE_MS = 850;
+export const BOT_FIRE_CONE_RADIANS = 0.09;
+export const BOT_AIM_RESET_RADIANS = 0.16;
+export const BOT_REACTION_BASE_MS = 420;
 export const BOT_OBSTACLE_PROBE_DISTANCE = 1.45;
 export const BOT_STUCK_SAMPLE_MS = 300;
 export const BOT_STUCK_DISTANCE = 0.055;
@@ -116,7 +116,7 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
 
 export const manifest = {
   id: "bot-combat",
-  version: "1.8.0",
+  version: "2.0.1",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "rapier-physics"],
   optional: ["opening-round"],
   capabilities: [
@@ -149,17 +149,27 @@ export async function setup(ctx) {
           weapons.reload(bot.id, now);
         }
 
-        const target = perception.nearestVisibleEnemy(bot.id, weaponRange || 22);
-        if (!target) {
+        const visibleTarget = perception.nearestVisibleEnemy(
+          bot.id,
+          weaponRange || 28,
+          { humanPriority: 0.78 },
+        );
+        const huntTarget = visibleTarget ?? perception.nearestEnemy(
+          bot.id,
+          60,
+          { humanPriority: 0.88 },
+        );
+
+        if (!huntTarget) {
           const roamingInput = applyBotObstacleAvoidance(
             physics,
             bot.id,
             transform,
             botState,
             {
-              forward: training ? 0.62 : 0.72,
-              strafe: (training ? 0.08 : 0.22) * botState.strafeDirection,
-              turn: training ? botState.wanderTurn * 0.55 : botState.wanderTurn,
+              forward: 0.78,
+              strafe: 0.2 * botState.strafeDirection,
+              turn: botState.wanderTurn,
               sprint: true,
               fireHeld: false,
             },
@@ -173,47 +183,73 @@ export async function setup(ctx) {
         const seed = bot.id.charCodeAt(bot.id.length - 1) || 1;
         if (now >= botState.tacticUntil) {
           botState.strafeDirection *= -1;
-          botState.tacticUntil = now + 750 + (seed % 5) * 190;
+          botState.tacticUntil = now + 550 + (seed % 5) * 130;
         }
 
-        const dx = target.transform.x - transform.x;
-        const dz = target.transform.z - transform.z;
-        const wobbleAmount = training?.aimWobble ?? 0.045;
-        const aimWobble = Math.sin(now / (300 + seed * 3) + seed) * wobbleAmount;
-        const desired = Math.atan2(dx, -dz) + aimWobble;
+        const dx = huntTarget.transform.x - transform.x;
+        const dz = huntTarget.transform.z - transform.z;
+        const desiredWithoutWobble = Math.atan2(dx, -dz);
+
+        if (!visibleTarget) {
+          const huntError = wrapAngle(desiredWithoutWobble - transform.angle);
+          const huntTurn = Math.max(-1, Math.min(1, huntError * 2.7));
+          const turningHard = Math.abs(huntError) > 1.35;
+          const huntingInput = applyBotObstacleAvoidance(
+            physics,
+            bot.id,
+            transform,
+            botState,
+            {
+              forward: turningHard ? 0.22 : 1,
+              strafe: turningHard
+                ? Math.sign(huntError || 1) * 0.88
+                : 0.22 * botState.strafeDirection,
+              turn: huntTurn,
+              sprint: true,
+              fireHeld: false,
+            },
+            now,
+          );
+          movement.setInput(bot.id, huntingInput);
+          botState.reactionUntil = 0;
+          continue;
+        }
+
+        const target = visibleTarget;
+        const wobbleAmount = training?.aimWobble ?? 0.03;
+        const aimWobble = Math.sin(now / (270 + seed * 3) + seed) * wobbleAmount;
+        const desired = desiredWithoutWobble + aimWobble;
         const error = wrapAngle(desired - transform.angle);
         const absoluteError = Math.abs(error);
-        const turn = Math.max(-1, Math.min(1, error * (training ? 1.55 : 2.05)));
+        const turn = Math.max(-1, Math.min(1, error * (training ? 2.1 : 2.6)));
 
         let forward = 0;
         let strafe = 0;
         let sprint = false;
-        if (training) {
-          if (target.distance > 5.5) {
-            forward = Math.max(0.72, training.approachForward);
-            strafe = Math.max(0.12, training.approachStrafe) * botState.strafeDirection;
-            sprint = true;
-          } else if (target.distance < 2.8) {
-            forward = -0.35;
-            strafe = 0.5 * botState.strafeDirection;
-          } else {
-            forward = 0.3;
-            strafe = 0.42 * botState.strafeDirection;
-          }
-        } else if (target.distance > 14) {
-          forward = 0.95;
-          strafe = 0.25 * botState.strafeDirection;
+        if (target.distance > 14) {
+          forward = 0.98;
+          strafe = 0.22 * botState.strafeDirection;
           sprint = true;
-        } else if (target.distance < 5) {
-          forward = -0.7;
-          strafe = 0.8 * botState.strafeDirection;
+        } else if (target.distance > 8) {
+          forward = 0.48;
+          strafe = 0.62 * botState.strafeDirection;
+          sprint = target.distance > 10.5;
+        } else if (target.distance < 4.5) {
+          forward = -0.62;
+          strafe = 0.82 * botState.strafeDirection;
         } else {
-          forward = target.distance > 9 ? 0.42 : -0.12;
-          strafe = 0.78 * botState.strafeDirection;
-          sprint = target.distance > 7.5;
+          forward = -0.08;
+          strafe = 0.82 * botState.strafeDirection;
         }
 
-        if (absoluteError > 0.85) strafe *= 0.35;
+        if (training) {
+          forward = Math.max(forward, target.distance > 6 ? training.approachForward : forward);
+          if (target.distance > 6) {
+            strafe = Math.max(Math.abs(strafe), training.approachStrafe) * botState.strafeDirection;
+          }
+        }
+
+        if (absoluteError > 0.95) strafe *= 0.35;
 
         const combatInput = applyBotObstacleAvoidance(
           physics,
@@ -238,7 +274,7 @@ export async function setup(ctx) {
         const reactionBase = training?.reactionBaseMs ?? BOT_REACTION_BASE_MS;
         if (weaponRange > 0 && absoluteError < fireCone && target.distance <= weaponRange) {
           if (botState.reactionUntil === 0) {
-            botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 90 : 80);
+            botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 35 : 28);
           }
           if (now >= botState.reactionUntil) weapons.fire(bot.id, now);
         } else if (absoluteError >= aimReset || target.distance > weaponRange) {

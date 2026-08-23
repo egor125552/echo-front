@@ -21,7 +21,7 @@ const TRAINING_LAYOUTS = {
 
 export const manifest = {
   id: "opening-round",
-  version: "1.2.0",
+  version: "1.3.1",
   requires: ["entities", "teams", "movement", "team-deathmatch"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
@@ -91,12 +91,12 @@ export async function setup(ctx) {
     botTuning(now = Date.now()) {
       if (!isActive(now)) return null;
       return {
-        reactionBaseMs: 1300,
-        fireConeRadians: 0.045,
-        aimResetRadians: 0.09,
-        aimWobble: 0.075,
-        approachForward: 0.62,
-        approachStrafe: 0.05,
+        reactionBaseMs: 520,
+        fireConeRadians: 0.08,
+        aimResetRadians: 0.15,
+        aimWobble: 0.045,
+        approachForward: 0.86,
+        approachStrafe: 0.18,
       };
     },
   });

@@ -11,6 +11,10 @@ export function shouldHandleControlClick(detail, now, suppressUntil) {
   return Number(detail) === 0 || Number(now) >= Number(suppressUntil || 0);
 }
 
+export function releaseKeyboardKey(pressed, code) {
+  return pressed.delete(code);
+}
+
 export function sampleKeyboardState(pressed, {
   firePressed = false,
   reload = false,
@@ -187,15 +191,9 @@ export async function setup(ctx) {
   window.addEventListener("keyup", (event) => {
     if (!handled.has(event.code)) return;
     if (enabled) event.preventDefault();
-    const wasPressed = pressed.delete(event.code);
+    const wasPressed = releaseKeyboardKey(pressed, event.code);
     if (enabled && wasPressed) ctx.events.emit("input:key", { code: event.code, down: false });
     if (enabled && wasPressed && event.code === "KeyX") ctx.events.emit("input:fire-stop", {});
-
-    if (event.code === "KeyZ") {
-      pressed.delete("ArrowLeft");
-      pressed.delete("ArrowRight");
-    }
-
     if (wasPressed) notifyChanged(`key:${event.code}:up`);
   }, { capture: true, passive: false });
 

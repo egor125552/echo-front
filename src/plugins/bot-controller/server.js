@@ -1,6 +1,6 @@
 export const manifest = {
   id: "bot-controller",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -12,6 +12,17 @@ export const manifest = {
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   ctx.components.register("Bot");
+
+  function resetCombatState(botState) {
+    if (!botState) return;
+    botState.reactionUntil = 0;
+    botState.tacticUntil = 0;
+    botState.avoidUntil = 0;
+    botState.navSampleAt = 0;
+    botState.navSampleX = null;
+    botState.navSampleZ = null;
+    botState.stuckSamples = 0;
+  }
 
   ctx.events.on("entity:spawned", ({ entityId, spec }) => {
     if (!spec.bot) return;
@@ -28,6 +39,10 @@ export async function setup(ctx) {
       navSampleZ: null,
       stuckSamples: 0,
     });
+  });
+
+  ctx.events.on("entity:respawned", ({ entityId }) => {
+    resetCombatState(ctx.components.get(entityId, "Bot"));
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => ctx.components.remove(entityId, "Bot"));
