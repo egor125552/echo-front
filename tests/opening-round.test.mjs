@@ -25,8 +25,8 @@ test("first round places enemy bots in front without making them passive", async
   const targeting = game.host.services.get("targeting");
   assert.equal(opening.isActive(), true);
   assert.equal(targeting.mode, "assisted-target-selection");
-  assert.ok(opening.botTuning().reactionBaseMs >= 600);
-  assert.ok(opening.botTuning().reactionBaseMs <= 800);
+  assert.ok(opening.botTuning().reactionBaseMs >= 450);
+  assert.ok(opening.botTuning().reactionBaseMs <= 650);
 
   game.api.step(0.05, Date.now());
   const sprintingEnemies = enemies.filter((enemy) => {
