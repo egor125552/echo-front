@@ -1,6 +1,6 @@
 export const manifest = {
   id: "match-api",
-  version: "1.4.1",
+  version: "1.4.2",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
@@ -39,8 +39,8 @@ export async function setup(ctx) {
       name: "Игрок",
       bot: false,
       team,
-      health: 100,
-      ...(ctx.hasPlugin("armor") ? { armor: 50 } : {}),
+      health: 150,
+      ...(ctx.hasPlugin("armor") ? { armor: 100 } : {}),
       weapons: ["pistol"],
     });
     botFill.ensure();
