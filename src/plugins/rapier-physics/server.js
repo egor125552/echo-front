@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -60,6 +60,14 @@ async function createRapierPhysics() {
     world.removeCollider(entry.collider, true);
     characters.delete(entityId);
     syncQueries();
+  }
+
+  function setCharacterEnabled(entityId, enabled) {
+    const entry = characters.get(entityId);
+    if (!entry) return false;
+    entry.collider.setEnabled(Boolean(enabled));
+    syncQueries();
+    return true;
   }
 
   function position(entityId) {
@@ -134,6 +142,7 @@ async function createRapierPhysics() {
     createWall,
     createCharacter,
     removeCharacter,
+    setCharacterEnabled,
     position,
     teleport,
     move,

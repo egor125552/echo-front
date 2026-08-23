@@ -3,7 +3,7 @@ export const BOT_TURN_SPEED = 2.6;
 
 export const manifest = {
   id: "movement",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -38,6 +38,24 @@ export async function setup(ctx) {
       sprint: false,
       fireHeld: false,
     });
+  });
+
+  ctx.events.on("entity:died", ({ entityId }) => {
+    physics.setCharacterEnabled(entityId, false);
+    const input = ctx.components.get(entityId, "Input");
+    if (input) {
+      input.forward = 0;
+      input.strafe = 0;
+      input.turn = 0;
+      input.sprint = false;
+      input.fireHeld = false;
+    }
+  });
+
+  ctx.events.on("entity:respawned", ({ entityId }) => {
+    physics.setCharacterEnabled(entityId, true);
+    const transform = ctx.components.get(entityId, "Transform");
+    if (transform) transform.stepDistance = 0;
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
