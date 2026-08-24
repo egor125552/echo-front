@@ -18,7 +18,11 @@ export async function createEchoFrontGame() {
       packet.event === "weapon:fired" ||
       packet.event === "weapon:selected" ||
       packet.event === "weapon:unlocked" ||
-      packet.event === "combat:damage"
+      packet.event === "combat:damage" ||
+      packet.event === "armor:changed" ||
+      packet.event === "armor:plating-started" ||
+      packet.event === "armor:plating-completed" ||
+      packet.event === "armor:plating-cancelled"
     ) {
       events.push(packet);
       if (events.length > 400) events.shift();

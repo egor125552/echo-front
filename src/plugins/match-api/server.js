@@ -1,6 +1,6 @@
 export const manifest = {
   id: "match-api",
-  version: "1.6.0",
+  version: "1.7.0",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
@@ -24,6 +24,7 @@ export async function setup(ctx) {
   const tdm = ctx.services.get("tdm");
   const botFill = ctx.services.get("bot-fill");
   const botCombat = ctx.services.get("bot-combat");
+  const armorService = ctx.services.has("armor") ? ctx.services.get("armor") : null;
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
   const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
   const healthRegeneration = ctx.services.has("health-regeneration")
@@ -33,7 +34,10 @@ export async function setup(ctx) {
   botFill.ensure();
 
   ctx.events.on("match:ended", () => {
-    for (const entity of entities.all()) movement.setInput(entity.id, {});
+    for (const entity of entities.all()) {
+      movement.setInput(entity.id, {});
+      armorService?.cancelPlating(entity.id, "match-ended");
+    }
   });
 
   function connectHuman(playerId) {
@@ -59,7 +63,7 @@ export async function setup(ctx) {
       bot: false,
       team,
       health: 200,
-      ...(ctx.hasPlugin("armor") ? { armor: 125 } : {}),
+      ...(ctx.hasPlugin("armor") ? { armorPlates: 4 } : {}),
       weapons: ["pistol"],
     });
     botFill.ensure();
@@ -71,18 +75,45 @@ export async function setup(ctx) {
     const entity = entities.get(playerId);
     if (!entity || entity.kind !== "human" || entity.bot) return false;
     movement.setInput(playerId, {});
+    armorService?.cancelPlating(playerId, "disconnect");
     return true;
   }
 
   function disconnectHuman(playerId) {
+    armorService?.cancelPlating(playerId, "disconnect");
     entities.remove(playerId);
     botFill.ensure();
+  }
+
+  function hasInterruptingAction(input) {
+    return Boolean(
+      Math.abs(Number(input.forward) || 0) > 0 ||
+      Math.abs(Number(input.strafe) || 0) > 0 ||
+      Math.abs(Number(input.turn) || 0) > 0 ||
+      input.sprint || input.firePressed || input.fireHeld ||
+      input.reload || input.selectDelta
+    );
   }
 
   function handleInput(playerId, input = {}, now = Date.now()) {
     const entity = entities.get(playerId);
     if (!entity?.alive) return;
     const ended = tdm.status(now).ended;
+
+    if (!ended && input.platePressed && armorService?.startPlating(playerId, now)) {
+      movement.setInput(playerId, {});
+      return;
+    }
+
+    if (armorService?.isPlating(playerId)) {
+      if (hasInterruptingAction(input)) {
+        armorService.cancelPlating(playerId, "action");
+      } else {
+        movement.setInput(playerId, {});
+        return;
+      }
+    }
+
     const movementInput = ended
       ? input
       : (aimSteering?.adjustInput(playerId, input, now) ?? input);
@@ -95,6 +126,7 @@ export async function setup(ctx) {
 
   function step(dt, now = Date.now()) {
     tdm.tick(now);
+    armorService?.tick(now);
     if (!tdm.status(now).ended) {
       botCombat.tick(dt, now);
       movement.tick(dt, now);
@@ -113,6 +145,7 @@ export async function setup(ctx) {
         const transform = components.Transform ?? null;
         const health = components.Health ?? null;
         const armor = components.Armor ?? null;
+        const armorDescription = armorService?.describe(entity.id) ?? null;
         const team = components.Team?.id ?? 0;
         const inventory = components.Weapons ?? null;
         const selected = inventory?.items?.[inventory.selected] ?? null;
@@ -129,6 +162,9 @@ export async function setup(ctx) {
           healthMax: health?.maximum ?? null,
           armor: armor?.current ?? null,
           armorMax: armor?.maximum ?? null,
+          armorPlates: armorDescription?.platesRemaining ?? null,
+          armorPlateMax: armorDescription?.maximumPlates ?? null,
+          plating: armorDescription?.plating ?? false,
           weapon: selected?.id ?? null,
           weapons: inventory?.items?.map((item) => item.id) ?? [],
           ammo: selected?.ammo ?? null,

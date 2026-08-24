@@ -43,6 +43,13 @@ export async function setup(ctx) {
     weapon.textContent = self.weapon === "rifle" ? "Автомат" : self.weapon === "pistol" ? "Пистолет" : "-";
     ammo.textContent = self.ammo == null ? "-" : `${self.ammo} / ${self.reserve ?? 0}`;
     health.textContent = self.health == null ? "-" : String(Math.round(self.health));
-    armor.textContent = self.armor == null ? "нет" : String(Math.round(self.armor));
+    if (self.armor == null) {
+      armor.textContent = "нет";
+    } else if (self.armorPlates != null && self.armorPlateMax != null) {
+      const plating = self.plating ? ", установка" : "";
+      armor.textContent = `${self.armorPlates} из ${self.armorPlateMax} пластин, ${Math.round(self.armor)} брони${plating}`;
+    } else {
+      armor.textContent = String(Math.round(self.armor));
+    }
   });
 }
