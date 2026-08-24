@@ -7,6 +7,7 @@ export const HRTF_START_ANGLE = 0.95;
 export const HRTF_FULL_ANGLE = 1.45;
 export const MASTER_FILTER_MIN_HZ = 80;
 export const MASTER_FILTER_MAX_HZ = 18000;
+export const FOREGROUND_MUFFLE_STRENGTH = 0.15;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
@@ -55,6 +56,17 @@ export function localizeForListener(listener, position) {
   return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
 }
 
+export function softenedMuffleCutoff(masterCutoff, strength = FOREGROUND_MUFFLE_STRENGTH) {
+  const numeric = Number(masterCutoff);
+  const cutoff = Math.max(
+    MASTER_FILTER_MIN_HZ,
+    Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
+  );
+  const amount = clamp01(strength);
+  if (amount <= 0) return MASTER_FILTER_MAX_HZ;
+  return MASTER_FILTER_MAX_HZ * Math.pow(cutoff / MASTER_FILTER_MAX_HZ, amount);
+}
+
 export async function setup(ctx) {
   const network = ctx.services.get("network");
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -64,25 +76,33 @@ export async function setup(ctx) {
   let listener = { x: 0, z: 0, angle: 0 };
   let reverbMix = 0;
   let muffleCutoff = MASTER_FILTER_MAX_HZ;
+  let foregroundMuffleCutoff = MASTER_FILTER_MAX_HZ;
 
-  // Every game sound is routed through one persistent master bus. The low-pass
-  // lives before both dry and reverb paths, so critical-health muffling affects
-  // the entire game mix without recreating or restarting any audio source.
-  // Speech synthesis is outside WebAudio and stays clear for accessibility.
+  // Normal game audio uses the full injury low-pass. Foreground feedback gets a
+  // separate, much gentler low-pass so important personal-state cues remain
+  // intelligible even while the surrounding world is heavily muffled.
   const masterInput = audioContext.createGain();
   const masterLowpass = audioContext.createBiquadFilter();
+  const foregroundInput = audioContext.createGain();
+  const foregroundLowpass = audioContext.createBiquadFilter();
   const dryGain = audioContext.createGain();
   const reverb = audioContext.createConvolver();
   const wetGain = audioContext.createGain();
   masterLowpass.type = "lowpass";
   masterLowpass.Q.value = 0.7;
   masterLowpass.frequency.value = MASTER_FILTER_MAX_HZ;
+  foregroundLowpass.type = "lowpass";
+  foregroundLowpass.Q.value = 0.55;
+  foregroundLowpass.frequency.value = MASTER_FILTER_MAX_HZ;
   reverb.buffer = createReverbImpulse(audioContext);
   dryGain.gain.value = 1;
   wetGain.gain.value = 0;
   masterInput.connect(masterLowpass);
   masterLowpass.connect(dryGain).connect(audioContext.destination);
   masterLowpass.connect(reverb).connect(wetGain).connect(audioContext.destination);
+  foregroundInput.connect(foregroundLowpass);
+  foregroundLowpass.connect(dryGain);
+  foregroundLowpass.connect(reverb);
 
   ctx.events.on("game:snapshot", (snapshot) => {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
@@ -144,7 +164,9 @@ export async function setup(ctx) {
       MASTER_FILTER_MIN_HZ,
       Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
     );
+    foregroundMuffleCutoff = softenedMuffleCutoff(muffleCutoff);
     targetParam(masterLowpass.frequency, muffleCutoff, 0.36);
+    targetParam(foregroundLowpass.frequency, foregroundMuffleCutoff, 0.22);
   }
 
   function playCenteredBuffer(buffer, {
@@ -152,13 +174,14 @@ export async function setup(ctx) {
     channel = null,
     replace = false,
     loop = false,
+    foreground = false,
   } = {}) {
     const source = audioContext.createBufferSource();
     const gainNode = audioContext.createGain();
     source.buffer = buffer;
     source.loop = Boolean(loop);
     gainNode.gain.value = gain;
-    source.connect(gainNode).connect(masterInput);
+    source.connect(gainNode).connect(foreground ? foregroundInput : masterInput);
     trackSource(source, channel, replace);
     source.start();
     return {
@@ -265,6 +288,9 @@ export async function setup(ctx) {
     setMuffleCutoff,
     getMuffleCutoff() {
       return muffleCutoff;
+    },
+    getForegroundMuffleCutoff() {
+      return foregroundMuffleCutoff;
     },
     async playCentered(url, options = {}) {
       const buffer = await load(url);
