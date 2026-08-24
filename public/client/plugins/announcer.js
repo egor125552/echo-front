@@ -9,6 +9,7 @@ export async function setup(ctx) {
   const live = document.querySelector("#announcer");
   let lastMessage = "";
   let team = 0;
+  let lastArmorPlates = null;
 
   function updateLiveMode() {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
@@ -31,13 +32,20 @@ export async function setup(ctx) {
 
   ctx.events.on("network:welcome", ({ team: joinedTeam }) => {
     team = joinedTeam;
+    lastArmorPlates = null;
     announce(
       `Вы в команде ${team}. Первый раунд учебный. ` +
       "Стрелка вверх — вперёд, вниз — назад, влево — движение влево, вправо — движение вправо. Стрелки можно удерживать и сочетать. Поворот камеры не нужен. " +
-      "X — огонь, X можно удерживать. R — перезарядка. Shift — бег. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы сменить оружие. " +
-      "На сенсорном экране доступны отдельные кнопки движения, стопа, огня, бега, перезарядки и смены оружия.",
+      "X — огонь, X можно удерживать. R — перезарядка. B — поставить одну бронепластину. Shift — бег. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы сменить оружие. " +
+      "На сенсорном экране доступны отдельные кнопки движения, стопа, огня, бега, перезарядки, бронепластины и смены оружия.",
       { interrupt: true },
     );
+  });
+
+  ctx.events.on("game:snapshot", (snapshot) => {
+    const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
+    if (!self || self.armorPlates == null) return;
+    if (lastArmorPlates == null) lastArmorPlates = Number(self.armorPlates);
   });
 
   ctx.events.on("game:event", (packet) => {
@@ -51,6 +59,26 @@ export async function setup(ctx) {
       return;
     }
 
+    if (packet.event === "armor:changed" && payload.entityId === network.playerId) {
+      const next = Number(payload.platesRemaining);
+      if (Number.isFinite(next)) {
+        if (lastArmorPlates != null && next < lastArmorPlates) {
+          announce(`Осталось ${next} ${next === 1 ? "пластина" : next >= 2 && next <= 4 ? "пластины" : "пластин"}`, {
+            interrupt: false,
+            repeat: true,
+          });
+        }
+        lastArmorPlates = next;
+      }
+      return;
+    }
+
+    if (packet.event === "armor:plating-completed" && payload.entityId === network.playerId) {
+      const next = Number(payload.plateNumber);
+      if (Number.isFinite(next)) lastArmorPlates = next;
+      return;
+    }
+
     if (packet.event === "feedback:sound" && payload.recipientId === network.playerId) {
       if (payload.key === "enemy.killed") announce("Противник уничтожен", { interrupt: true });
       if (payload.key === "death.full") announce("Вы погибли. Возрождение через три секунды", { interrupt: true });
@@ -59,6 +87,7 @@ export async function setup(ctx) {
     }
 
     if (packet.event === "entity:respawned" && payload.entityId === network.playerId) {
+      lastArmorPlates = null;
       announce("Вы снова в бою", { interrupt: true });
     }
 
