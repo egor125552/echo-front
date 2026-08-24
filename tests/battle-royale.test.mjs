@@ -60,17 +60,34 @@ test("warehouse front door toggles and a crate can grant the rifle", async () =>
   const game = await activeGame("br-human-loot");
   const movement = game.host.services.get("movement");
   const map = game.host.services.get("map");
+  const frontDoor = map.doors.find((door) => door.id === "warehouse-front-door");
+  const rifleCrate = map.crates.find((crate) => crate.id === "crate-ground-rifle");
 
-  movement.teleport("br-human-loot", { x: 70, y: 0, z: -36.6, angle: Math.PI });
+  movement.teleport("br-human-loot", {
+    x: frontDoor.x,
+    y: frontDoor.y,
+    z: frontDoor.z + 1.4,
+    angle: Math.PI,
+  });
   game.api.handleInput("br-human-loot", { interactPressed: true }, Date.now());
-  assert.equal(map.doors.find((door) => door.id === "warehouse-front-door").open, true);
+  assert.equal(frontDoor.open, true);
 
-  movement.teleport("br-human-loot", { x: 61.5, y: 0, z: -52, angle: 0 });
+  movement.teleport("br-human-loot", {
+    x: rifleCrate.x,
+    y: rifleCrate.y,
+    z: rifleCrate.z,
+    angle: 0,
+  });
   game.api.handleInput("br-human-loot", { interactPressed: true }, Date.now() + 1);
   const self = game.api.snapshot().entities.find((entity) => entity.id === "br-human-loot");
   assert.ok(self.weapons.includes("rifle"));
 
-  movement.teleport("br-human-loot", { x: 60, y: UPPER_FLOOR_Y, z: -50, angle: 0 });
+  movement.teleport("br-human-loot", {
+    x: map.building.minX + 5,
+    y: UPPER_FLOOR_Y,
+    z: (map.building.minZ + map.building.maxZ) / 2,
+    angle: 0,
+  });
   assert.equal(game.api.snapshot().entities.find((entity) => entity.id === "br-human-loot").y, UPPER_FLOOR_Y);
   await game.host.stop();
 });
