@@ -14,6 +14,38 @@ const SOUNDS = {
   "death.full": "/assets/audio/core/death-full.mp3",
 };
 
+export const SPATIAL_SOUND_PROFILES = {
+  footstep: {
+    gain: 0.95,
+    referenceDistance: 2.2,
+    rolloffFactor: 0.55,
+    airAbsorptionMinHz: 6500,
+  },
+  "weapon.pistol": {
+    gain: 1,
+    referenceDistance: 2.5,
+    rolloffFactor: 0.32,
+    airAbsorptionMinHz: 3200,
+  },
+  "weapon.rifle": {
+    gain: 1.05,
+    referenceDistance: 3,
+    rolloffFactor: 0.28,
+    airAbsorptionMinHz: 2800,
+  },
+  default: {
+    gain: 1,
+    referenceDistance: 2,
+    rolloffFactor: 0.5,
+    airAbsorptionMinHz: 4200,
+  },
+};
+
+export function spatialProfileForKey(key) {
+  if (String(key).startsWith("footstep.")) return SPATIAL_SOUND_PROFILES.footstep;
+  return SPATIAL_SOUND_PROFILES[key] ?? SPATIAL_SOUND_PROFILES.default;
+}
+
 export const manifest = {
   id: "core-sound-pack",
   requires: ["spatial-audio-web", "cloudflare-session", "keyboard-input"],
@@ -149,9 +181,13 @@ export async function setup(ctx) {
           if (payload.key === "weapon.pistol" || payload.key === "weapon.rifle") return;
           await audio.playCentered(url, { gain: isFootstep ? 0.45 : 0.85 });
         } else {
+          const profile = spatialProfileForKey(payload.key);
           await audio.playSpatial(url, { x: payload.x, z: payload.z }, {
             radius: payload.radius ?? 40,
-            gain: isFootstep ? 0.85 : 1,
+            gain: profile.gain,
+            referenceDistance: profile.referenceDistance,
+            rolloffFactor: profile.rolloffFactor,
+            airAbsorptionMinHz: profile.airAbsorptionMinHz,
           });
         }
       }
@@ -162,6 +198,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("sound-pack", {
     sounds: SOUNDS,
+    spatialProfiles: SPATIAL_SOUND_PROFILES,
     async warmEssential() {
       await Promise.all([...new Set(Object.values(SOUNDS))].map((url) => audio.load(url)));
     },
