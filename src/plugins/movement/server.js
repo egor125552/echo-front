@@ -1,6 +1,8 @@
 export const HUMAN_TURN_SPEED = 1.65;
 export const BOT_TURN_SPEED = 2.6;
 export const FOOTSTEP_VARIANT_COUNT = 3;
+export const FOOTSTEP_WALK_RADIUS = 32;
+export const FOOTSTEP_SPRINT_RADIUS = 44;
 
 export function normalizeFootstepSurface(value) {
   const surface = String(value ?? "default").trim().toLowerCase();
@@ -15,7 +17,7 @@ export function footstepKey(surface, variant) {
 
 export const manifest = {
   id: "movement",
-  version: "1.7.0",
+  version: "1.8.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -112,8 +114,6 @@ export async function setup(ctx) {
         transform.angle += input.turn * turnSpeed * safeDt;
         const speed = input.sprint ? 5.4 : 3.25;
         const rawForward = input.forward;
-        // Human left/right arrows are primary movement now, not short side-steps.
-        // Bots keep a slightly reduced strafe to preserve their current movement style.
         const strafeFactor = entity.bot ? 0.7 : 1;
         const rawStrafe = input.strafe * strafeFactor;
         const inputLength = Math.hypot(rawForward, rawStrafe);
@@ -181,7 +181,7 @@ export async function setup(ctx) {
             variant: transform.stepIndex,
             x: transform.x,
             z: transform.z,
-            radius: input.sprint ? 22 : 14,
+            radius: input.sprint ? FOOTSTEP_SPRINT_RADIUS : FOOTSTEP_WALK_RADIUS,
           });
         }
       }
