@@ -4,7 +4,7 @@ export const PLATING_DURATION_MS = 1050;
 
 export const manifest = {
   id: "armor",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["health", "entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -87,6 +87,18 @@ export async function setup(ctx) {
     return true;
   }
 
+  function grantPlates(entityId, count = 1) {
+    const entity = entities.get(entityId);
+    const armor = armorState(entityId);
+    if (!entity?.alive || !armor) return 0;
+    const safeCount = Math.max(1, Math.floor(Number(count) || 1));
+    const before = armor.current;
+    armor.current = clampArmor(armor.current + armor.plateValue * safeCount, armor.maximum);
+    const restored = armor.current - before;
+    if (restored > 0) emitChanged(entityId);
+    return restored;
+  }
+
   function tick(now = Date.now()) {
     for (const [entityId, active] of [...plating]) {
       if (now < active.completesAt) continue;
@@ -145,13 +157,9 @@ export async function setup(ctx) {
     const before = armor.current;
     const absorbed = Math.min(armor.current, packet.remaining);
     armor.current -= absorbed;
-
-    // Armor remains a hard health gate: the hit that breaks the final plate
-    // does not spill through into health. Health damage starts with the next hit.
     packet.remaining = 0;
     packet.armorAbsorbed = absorbed;
     packet.armorBroke = before > 0 && armor.current <= 0;
-
     emitChanged(packet.targetId);
   }, { priority: 100 });
 
@@ -169,6 +177,7 @@ export async function setup(ctx) {
     cancelPlating,
     tick,
     describe,
+    grantPlates,
     isPlating(entityId) {
       return plating.has(entityId);
     },

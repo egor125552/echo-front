@@ -20,13 +20,12 @@ export function sampleKeyboardState(pressed, {
   reload = false,
   selectDelta = 0,
   platePressed = false,
+  interactPressed = false,
 } = {}) {
   const weaponModifier = pressed.has("KeyZ");
   return {
     forward: (pressed.has("ArrowUp") ? 1 : 0) - (pressed.has("ArrowDown") ? 1 : 0),
-    strafe: weaponModifier
-      ? 0
-      : (pressed.has("ArrowRight") ? 1 : 0) - (pressed.has("ArrowLeft") ? 1 : 0),
+    strafe: weaponModifier ? 0 : (pressed.has("ArrowRight") ? 1 : 0) - (pressed.has("ArrowLeft") ? 1 : 0),
     turn: 0,
     sprint: pressed.has("ShiftLeft") || pressed.has("ShiftRight"),
     fireHeld: pressed.has("KeyX"),
@@ -34,6 +33,7 @@ export function sampleKeyboardState(pressed, {
     reload,
     selectDelta,
     platePressed,
+    interactPressed,
   };
 }
 
@@ -41,12 +41,8 @@ export function sampleInputState(pressed, touch = {}, flags = {}) {
   const keyboard = sampleKeyboardState(pressed, flags);
   return {
     ...keyboard,
-    forward: clampAxis(
-      keyboard.forward + (touch.forward ? 1 : 0) - (touch.back ? 1 : 0),
-    ),
-    strafe: clampAxis(
-      keyboard.strafe + (touch.right ? 1 : 0) - (touch.left ? 1 : 0),
-    ),
+    forward: clampAxis(keyboard.forward + (touch.forward ? 1 : 0) - (touch.back ? 1 : 0)),
+    strafe: clampAxis(keyboard.strafe + (touch.right ? 1 : 0) - (touch.left ? 1 : 0)),
     turn: 0,
     sprint: keyboard.sprint || Boolean(touch.sprint),
     fireHeld: keyboard.fireHeld || Boolean(touch.fireHeld),
@@ -55,55 +51,31 @@ export function sampleInputState(pressed, touch = {}, flags = {}) {
 
 export async function setup(ctx) {
   const pressed = new Set();
-  const touch = {
-    forward: false,
-    back: false,
-    left: false,
-    right: false,
-    sprint: false,
-    fireHeld: false,
-  };
+  const touch = { forward: false, back: false, left: false, right: false, sprint: false, fireHeld: false };
   let enabled = false;
   let firePressed = false;
   let reload = false;
   let selectDelta = 0;
   let platePressed = false;
+  let interactPressed = false;
 
   const clickSuppression = new WeakMap();
   const handled = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB",
+    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE",
   ]);
-
-  const opposite = {
-    forward: "back",
-    back: "forward",
-    left: "right",
-    right: "left",
-  };
-
+  const opposite = { forward: "back", back: "forward", left: "right", right: "left" };
   const movementButtons = [...document.querySelectorAll("[data-touch-control]")];
   const actionButtons = [...document.querySelectorAll("[data-touch-action]")];
 
   function notifyChanged(reason) {
     if (enabled) ctx.events.emit("input:changed", { reason });
   }
-
-  function suppressPointerFollowup(button) {
-    clickSuppression.set(button, performance.now() + 600);
-  }
-
+  function suppressPointerFollowup(button) { clickSuppression.set(button, performance.now() + 600); }
   function handleControlClick(event, button) {
-    return shouldHandleControlClick(
-      event.detail,
-      performance.now(),
-      clickSuppression.get(button) ?? 0,
-    );
+    return shouldHandleControlClick(event.detail, performance.now(), clickSuppression.get(button) ?? 0);
   }
-
-  function emitTouch(control, down) {
-    if (enabled) ctx.events.emit("input:touch", { control, down });
-  }
+  function emitTouch(control, down) { if (enabled) ctx.events.emit("input:touch", { control, down }); }
 
   function syncPressedState() {
     for (const button of movementButtons) {
@@ -163,6 +135,7 @@ export async function setup(ctx) {
     reload = false;
     selectDelta = 0;
     platePressed = false;
+    interactPressed = false;
     syncPressedState();
     if (hadState) {
       ctx.events.emit("input:reset", { reason });
@@ -174,7 +147,6 @@ export async function setup(ctx) {
     if (!enabled) return;
     if (handled.has(event.code)) event.preventDefault();
     if (!handled.has(event.code)) return;
-
     if (!pressed.has(event.code)) {
       ctx.events.emit("input:key", { code: event.code, down: true });
       if (event.code === "KeyX") {
@@ -183,13 +155,13 @@ export async function setup(ctx) {
       }
       if (event.code === "KeyR") reload = true;
       if (event.code === "KeyB") platePressed = true;
+      if (event.code === "KeyE") interactPressed = true;
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
       if (pressed.has("KeyZ") && event.code === "ArrowRight") selectDelta = 1;
       pressed.add(event.code);
       notifyChanged(`key:${event.code}:down`);
       return;
     }
-
     pressed.add(event.code);
   }, { capture: true, passive: false });
 
@@ -203,9 +175,7 @@ export async function setup(ctx) {
   }, { capture: true, passive: false });
 
   window.addEventListener("blur", () => resetPressed("blur"));
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) resetPressed("hidden");
-  });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) resetPressed("hidden"); });
 
   for (const button of movementButtons) {
     const control = button.dataset.touchControl;
@@ -216,14 +186,12 @@ export async function setup(ctx) {
       });
       continue;
     }
-
     const release = (event) => {
       if (!touch[control]) return;
       suppressPointerFollowup(button);
       setTouchDirection(control, false);
       try { button.releasePointerCapture?.(event.pointerId); } catch {}
     };
-
     button.addEventListener("pointerdown", (event) => {
       if (!enabled) return;
       event.preventDefault();
@@ -242,7 +210,6 @@ export async function setup(ctx) {
 
   for (const button of actionButtons) {
     const action = button.dataset.touchAction;
-
     if (action === "fire") {
       const releaseFire = (event) => {
         if (!touch.fireHeld) return;
@@ -316,6 +283,7 @@ export async function setup(ctx) {
       if (action === "weapon-prev") selectDelta = -1;
       if (action === "weapon-next") selectDelta = 1;
       if (action === "armor-plate") platePressed = true;
+      if (action === "interact") interactPressed = true;
       emitTouch(action, true);
       notifyChanged(`touch:${action}`);
     });
@@ -324,24 +292,17 @@ export async function setup(ctx) {
   syncPressedState();
 
   ctx.services.provide("input", {
-    enable() {
-      enabled = true;
-    },
-    disable() {
-      resetPressed("disabled");
-      enabled = false;
-    },
+    enable() { enabled = true; },
+    disable() { resetPressed("disabled"); enabled = false; },
     sample() {
       const sample = sampleInputState(pressed, touch, {
-        firePressed,
-        reload,
-        selectDelta,
-        platePressed,
+        firePressed, reload, selectDelta, platePressed, interactPressed,
       });
       firePressed = false;
       reload = false;
       selectDelta = 0;
       platePressed = false;
+      interactPressed = false;
       return sample;
     },
   });

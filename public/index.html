@@ -11,17 +11,17 @@
     <header>
       <p class="eyebrow">Игровой прототип</p>
       <h1>Echo Front</h1>
-      <p>Маленький сетевой аудиошутер. Для игры лучше использовать наушники.</p>
-      <button id="play-button" type="button">Играть</button>
+      <p>Сетевой аудиошутер. Для пространственного звука лучше использовать наушники.</p>
+      <div role="group" aria-label="Выбор режима">
+        <button id="play-button" type="button">Командный бой</button>
+        <button id="battle-royale-button" type="button">Королевская битва</button>
+      </div>
     </header>
 
     <details id="settings-panel">
       <summary>Настройки озвучки</summary>
       <div class="settings-grid">
-        <label class="setting-row">
-          <span>Игровая озвучка</span>
-          <input id="speech-enabled" type="checkbox" checked>
-        </label>
+        <label class="setting-row"><span>Игровая озвучка</span><input id="speech-enabled" type="checkbox" checked></label>
         <label class="setting-row setting-range" for="speech-rate">
           <span>Скорость речи</span>
           <input id="speech-rate" type="range" min="0.7" max="2.5" step="0.1" value="1.7">
@@ -34,14 +34,11 @@
     <details id="journal-panel">
       <summary>Журнал игры</summary>
       <div class="settings-grid">
-        <label class="setting-row">
-          <span>Записывать компактный журнал</span>
-          <input id="journal-enabled" type="checkbox" checked>
-        </label>
+        <label class="setting-row"><span>Записывать компактный журнал</span><input id="journal-enabled" type="checkbox" checked></label>
         <p id="journal-status" role="status">Журнал включён.</p>
         <button id="journal-download" type="button" disabled>Скачать журнал</button>
         <button id="journal-clear" type="button">Очистить журнал</button>
-        <p>Журнал хранится только в этой вкладке и записывает миллисекундные метки ввода, сырые серверные позиции, углы, патроны, здоровье, броню, выстрелы, попадания, смерти и счёт. При скачивании он сжимается, если браузер это поддерживает.</p>
+        <p>Журнал хранится только в этой вкладке и записывает ввод, серверные позиции, оружие, здоровье, броню, события боя и режима.</p>
       </div>
     </details>
 
@@ -49,8 +46,14 @@
       <h2 id="game-title">Матч</h2>
       <p id="connection-status" role="status">Подготовка</p>
       <dl class="hud">
+        <div><dt>Режим</dt><dd id="mode-value">-</dd></div>
         <div><dt>Команда</dt><dd id="team-value">-</dd></div>
-        <div><dt>Счёт</dt><dd id="score-value">0 : 0</dd></div>
+        <div><dt>Счёт</dt><dd id="score-value">-</dd></div>
+        <div><dt>Осталось игроков</dt><dd id="remaining-value">-</dd></div>
+        <div><dt>Локация</dt><dd id="location-value">-</dd></div>
+        <div><dt>Безопасная зона</dt><dd id="zone-value">-</dd></div>
+        <div><dt>Место</dt><dd id="placement-value">-</dd></div>
+        <div><dt>Наблюдение</dt><dd id="spectator-value">нет</dd></div>
         <div><dt>Оружие</dt><dd id="weapon-value">-</dd></div>
         <div><dt>Патроны</dt><dd id="ammo-value">-</dd></div>
         <div><dt>Здоровье</dt><dd id="health-value">-</dd></div>
@@ -58,12 +61,12 @@
       </dl>
 
       <h3>Управление</h3>
-      <p>Стрелка вверх — идти вперёд, стрелка вниз — назад, стрелка влево — двигаться влево, стрелка вправо — двигаться вправо. Стрелки можно удерживать и сочетать для движения по диагонали. Камера и поворот мышью не используются. Shift — бег. X — огонь; X можно удерживать. R — перезарядка из запаса. B — поставить одну бронепластину. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы менять открытое оружие.</p>
-      <p>В первом раунде доступен пистолет: 100 патронов в магазине и 400 в запасе, всего 500. После первого раунда открывается автомат. Максимум брони — четыре пластины. Установка пластины прерывается движением, выстрелом, другим действием или полученным уроном.</p>
+      <p>Стрелка вверх — идти вперёд, стрелка вниз — назад, стрелка влево — двигаться влево, стрелка вправо — двигаться вправо. Стрелки можно удерживать и сочетать для движения по диагонали. Камера и поворот мышью не используются. Shift — бег. X — огонь, X можно удерживать. R — перезарядка. B — поставить одну бронепластину. E — взаимодействовать: открыть или закрыть дверь, открыть ящик. Удерживайте Z и нажимайте стрелки влево или вправо для смены оружия.</p>
+      <p>В королевской битве одна жизнь. Карта большая; на ней есть двухэтажный склад с лестницей, дверями, внутренней акустикой и ящиками. Безопасная зона постепенно сужается.</p>
 
       <div id="touch-controls" class="touch-controls" aria-labelledby="touch-controls-title">
         <h3 id="touch-controls-title">Сенсорное управление</h3>
-        <p>На сенсорном экране удерживайте кнопку направления, чтобы двигаться. С VoiceOver двойное касание включает или выключает выбранное направление; кнопка «Стоп» сразу прекращает движение.</p>
+        <p>Удерживайте кнопку направления, чтобы двигаться. С VoiceOver двойное касание включает или выключает выбранное направление; кнопка «Стоп» прекращает движение.</p>
         <div class="touch-grid" role="group" aria-label="Движение">
           <button class="touch-forward" type="button" data-touch-control="forward" aria-pressed="false">Вперёд</button>
           <button class="touch-left" type="button" data-touch-control="left" aria-pressed="false">Влево</button>
@@ -76,6 +79,7 @@
           <button type="button" data-touch-action="fire" aria-pressed="false">Огонь</button>
           <button type="button" data-touch-action="reload">Перезарядка</button>
           <button type="button" data-touch-action="armor-plate">Поставить бронепластину</button>
+          <button type="button" data-touch-action="interact">Взаимодействовать</button>
           <button type="button" data-touch-action="weapon-prev">Предыдущее оружие</button>
           <button type="button" data-touch-action="weapon-next">Следующее оружие</button>
         </div>
@@ -86,7 +90,7 @@
 
     <details>
       <summary>О прототипе</summary>
-      <p>Матч рассчитан на четыре слота. Пустые места занимают боты. У ботов различаются здоровье, броня и поведение. Игровой код собирается из независимых плагинов.</p>
+      <p>Командный бой сохраняет прежний формат на четыре слота. Королевская битва запускается отдельно и заполняется до 96 участников ботами. Оба режима используют одну модульную систему движения, оружия, брони и пространственного звука.</p>
     </details>
   </main>
   <script type="module" src="/client/bootstrap.js"></script>

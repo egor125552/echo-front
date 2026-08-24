@@ -19,11 +19,16 @@ export function interpolateSnapshot(from, to, t) {
     entities: (to.entities ?? []).map((entity) => {
       const before = previous.get(entity.id);
       if (!before) return entity;
-      const jump = Math.hypot((Number(entity.x) || 0) - (Number(before.x) || 0), (Number(entity.z) || 0) - (Number(before.z) || 0));
+      const jump = Math.hypot(
+        (Number(entity.x) || 0) - (Number(before.x) || 0),
+        (Number(entity.y) || 0) - (Number(before.y) || 0),
+        (Number(entity.z) || 0) - (Number(before.z) || 0),
+      );
       if (jump > 7) return entity;
       return {
         ...entity,
         x: lerp(Number(before.x) || 0, Number(entity.x) || 0, amount),
+        y: lerp(Number(before.y) || 0, Number(entity.y) || 0, amount),
         z: lerp(Number(before.z) || 0, Number(entity.z) || 0, amount),
         angle: lerpAngle(Number(before.angle) || 0, Number(entity.angle) || 0, amount),
       };

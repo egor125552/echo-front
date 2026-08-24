@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { createEchoFrontGame } from "./game.js";
+import { createEchoFrontGame, normalizeGameMode } from "./game.js";
 import {
   activeSocketCount,
   cleanupDeadline,
@@ -12,6 +12,7 @@ export class MatchRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.game = null;
+    this.mode = null;
     this.gameLoopTimer = null;
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
@@ -20,24 +21,30 @@ export class MatchRoom extends DurableObject {
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
       if (!activeSocketCount(sockets)) return;
-
-      await this.ensureGame();
+      const mode = normalizeGameMode(
+        sockets.map((socket) => {
+          try { return socket.deserializeAttachment()?.mode; } catch { return null; }
+        }).find(Boolean),
+      );
+      await this.ensureGame(mode);
       for (const ws of sockets) {
         if (ws.readyState === 3) continue;
         const attachment = ws.deserializeAttachment();
         if (!attachment?.playerId) continue;
-        try {
-          this.game.api.connectHuman(attachment.playerId);
-        } catch {
-        }
+        try { this.game.api.connectHuman(attachment.playerId); } catch {}
       }
       this.startGameLoop();
     });
   }
 
-  async ensureGame() {
+  async ensureGame(mode = "tdm") {
+    const normalized = normalizeGameMode(mode);
+    if (this.game && this.mode !== normalized) {
+      throw new Error(`Match room mode mismatch: ${this.mode} vs ${normalized}`);
+    }
     if (!this.game) {
-      this.game = await createEchoFrontGame();
+      this.mode = normalized;
+      this.game = await createEchoFrontGame({ mode: normalized });
       this.lastStepAt = Date.now();
       this.lastSnapshotAt = 0;
     }
@@ -47,11 +54,7 @@ export class MatchRoom extends DurableObject {
   socketsForPlayer(playerId, excludedSocket = null) {
     return this.ctx.getWebSockets().filter((socket) => {
       if (!socket || socket === excludedSocket || socket.readyState === 3) return false;
-      try {
-        return socket.deserializeAttachment()?.playerId === playerId;
-      } catch {
-        return false;
-      }
+      try { return socket.deserializeAttachment()?.playerId === playerId; } catch { return false; }
     });
   }
 
@@ -85,7 +88,6 @@ export class MatchRoom extends DurableObject {
       this.stopGameLoop();
       return;
     }
-
     const now = Date.now();
     try {
       this.cleanupDisconnectedHumans(now);
@@ -113,37 +115,36 @@ export class MatchRoom extends DurableObject {
       return new Response("WebSocket required", { status: 426 });
     }
 
+    const requestUrl = new URL(request.url);
+    const mode = normalizeGameMode(requestUrl.searchParams.get("mode"));
     await this.ctx.storage.deleteAlarm();
-    await this.ensureGame();
+    await this.ensureGame(mode);
     this.cleanupDisconnectedHumans();
 
-    const requestUrl = new URL(request.url);
     const requestedPlayerId = normalizePlayerSessionId(requestUrl.searchParams.get("player"));
     const playerId = requestedPlayerId ?? crypto.randomUUID();
     const previousSockets = this.socketsForPlayer(playerId);
 
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ playerId });
+    server.serializeAttachment({ playerId, mode });
     this.disconnectedHumans.delete(playerId);
 
     const joined = this.game.api.connectHuman(playerId);
+    const initialSnapshot = typeof this.game.api.snapshotFor === "function"
+      ? this.game.api.snapshotFor(playerId)
+      : this.game.api.snapshot();
     server.send(JSON.stringify({
       type: "welcome",
       playerId,
       team: joined.team,
+      mode,
       resumed: Boolean(joined.resumed),
-      snapshot: this.game.api.snapshot(),
+      snapshot: initialSnapshot,
     }));
 
-    // A reconnect may arrive before the old TCP/WebSocket path notices that it
-    // is dead. The newest socket owns the session; close stale duplicates only
-    // after the replacement socket has been accepted and attached.
     for (const oldSocket of previousSockets) {
-      try {
-        oldSocket.close(4001, "Reconnected");
-      } catch {
-      }
+      try { oldSocket.close(4001, "Reconnected"); } catch {}
     }
 
     this.startGameLoop();
@@ -153,23 +154,14 @@ export class MatchRoom extends DurableObject {
 
   async webSocketMessage(ws, message) {
     if (typeof message !== "string") return;
-    await this.ensureGame();
-
+    const attachment = ws.deserializeAttachment();
+    await this.ensureGame(attachment?.mode ?? "tdm");
     let data;
-    try {
-      data = JSON.parse(message);
-    } catch {
-      return;
-    }
-
-    const playerId = ws.deserializeAttachment()?.playerId;
+    try { data = JSON.parse(message); } catch { return; }
+    const playerId = attachment?.playerId;
     if (!playerId) return;
     const now = Date.now();
-
-    if (data.type === "input") {
-      this.game.api.handleInput(playerId, data.input ?? {}, now);
-    }
-
+    if (data.type === "input") this.game.api.handleInput(playerId, data.input ?? {}, now);
     this.startGameLoop();
     this.broadcastEvents();
   }
@@ -177,11 +169,7 @@ export class MatchRoom extends DurableObject {
   markSocketDisconnected(ws) {
     const playerId = ws.deserializeAttachment()?.playerId;
     if (!playerId || !this.game) return;
-
-    // If a replacement connection for this session is already alive, the close
-    // belongs to the stale socket and must not suspend the resumed player.
     if (this.socketsForPlayer(playerId, ws).length) return;
-
     this.game.api.suspendHuman(playerId);
     this.disconnectedHumans.set(playerId, Date.now());
   }
@@ -210,13 +198,12 @@ export class MatchRoom extends DurableObject {
       this.startGameLoop();
       return;
     }
-
     this.stopGameLoop();
     if (this.game) {
       await this.game.host.stop();
       this.game = null;
     }
-
+    this.mode = null;
     this.disconnectedHumans.clear();
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
@@ -226,28 +213,43 @@ export class MatchRoom extends DurableObject {
 
   broadcastEvents() {
     if (!this.game) return;
-    for (const packet of this.game.drainEvents()) {
-      const message = JSON.stringify({ type: "event", ...packet });
-      for (const socket of this.ctx.getWebSockets()) {
-        try {
-          socket.send(message);
-        } catch {
-        }
-      }
+    const packets = this.game.drainEvents();
+    if (!packets.length) return;
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        const playerId = socket.deserializeAttachment()?.playerId;
+        const selected = typeof this.game.api.eventsForPlayer === "function"
+          ? this.game.api.eventsForPlayer(playerId, packets)
+          : packets;
+        if (!selected.length) continue;
+        socket.send(JSON.stringify({ type: "events", events: selected }));
+      } catch {}
     }
   }
 
   broadcastSnapshot(force = false) {
     if (!this.game) return;
     const now = Date.now();
-    if (!force && now - this.lastSnapshotAt < 100) return;
+    const interval = Number(this.game.api.snapshotIntervalMs) || 100;
+    if (!force && now - this.lastSnapshotAt < interval) return;
     this.lastSnapshotAt = now;
-    const message = JSON.stringify({ type: "snapshot", snapshot: this.game.api.snapshot(now) });
+
+    if (typeof this.game.api.snapshotFor !== "function") {
+      const message = JSON.stringify({ type: "snapshot", snapshot: this.game.api.snapshot(now) });
+      for (const socket of this.ctx.getWebSockets()) {
+        try { socket.send(message); } catch {}
+      }
+      return;
+    }
+
     for (const socket of this.ctx.getWebSockets()) {
       try {
-        socket.send(message);
-      } catch {
-      }
+        const playerId = socket.deserializeAttachment()?.playerId;
+        socket.send(JSON.stringify({
+          type: "snapshot",
+          snapshot: this.game.api.snapshotFor(playerId, now),
+        }));
+      } catch {}
     }
   }
 }

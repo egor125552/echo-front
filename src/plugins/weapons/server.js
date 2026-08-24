@@ -31,8 +31,8 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.8.0",
-  requires: ["entities", "movement", "combat", "rapier-physics", "teams"],
+  version: "1.9.0",
+  requires: ["entities", "movement", "combat", "rapier-physics", "teams", "map-test-arena"],
   optional: ["aim-assist", "target-assist"],
   capabilities: [
     "services.consume", "services.provide",
@@ -56,6 +56,7 @@ export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const combat = ctx.services.get("combat");
   const teams = ctx.services.get("teams");
+  const map = ctx.services.get("map");
   const targeting = ctx.services.has("targeting") ? ctx.services.get("targeting") : null;
 
   ctx.components.register("Weapons");
@@ -138,17 +139,22 @@ export async function setup(ctx) {
 
     const origin = {
       x: transform.x + direction.x * 0.55,
-      y: 1.0,
+      y: (Number(transform.y) || 0) + 1,
       z: transform.z + direction.z * 0.55,
     };
     const hit = physics.raycast(origin, direction, definition.range, entityId);
     const actualTargetId = hit?.entityId ?? null;
+    const acousticZone = typeof map.acousticZoneAt === "function"
+      ? map.acousticZoneAt(transform)
+      : "outdoor";
 
     ctx.events.emit("sound:spatial", {
       entityId,
       key: definition.soundKey,
       x: transform.x,
+      y: Number(transform.y) || 0,
       z: transform.z,
+      acousticZone,
       radius: definition.soundRadius,
     });
     ctx.events.emit("weapon:fired", {
@@ -157,6 +163,9 @@ export async function setup(ctx) {
       ammo: weapon.ammo,
       targetId: actualTargetId,
       assistedTargetId: resolved?.targetId ?? null,
+      x: transform.x,
+      y: Number(transform.y) || 0,
+      z: transform.z,
     });
 
     if (actualTargetId) {

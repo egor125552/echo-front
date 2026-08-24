@@ -31,15 +31,11 @@ export function describeBlockedMove(position, attempted, moved) {
       speech: "Здесь пройти нельзя. Граница мира",
     };
   }
-
   return null;
 }
 
 export async function setup(ctx) {
   const physics = ctx.services.get("physics");
-
-  // Large open forest training ground. Buildings and interior obstacles are
-  // intentionally absent for now; only the physical world boundary remains.
   const walls = [
     { kind: "world-boundary", side: "north", x: 0, z: -WORLD_HALF_SIZE, hx: WORLD_HALF_SIZE, hz: BOUNDARY_HALF_THICKNESS },
     { kind: "world-boundary", side: "south", x: 0, z: WORLD_HALF_SIZE, hx: WORLD_HALF_SIZE, hz: BOUNDARY_HALF_THICKNESS },
@@ -50,12 +46,12 @@ export async function setup(ctx) {
 
   const spawns = {
     1: [
-      { x: -28, z: 20, angle: Math.PI / 2 },
-      { x: -28, z: -20, angle: Math.PI / 2 },
+      { x: -28, y: 0, z: 20, angle: Math.PI / 2 },
+      { x: -28, y: 0, z: -20, angle: Math.PI / 2 },
     ],
     2: [
-      { x: 28, z: -20, angle: -Math.PI / 2 },
-      { x: 28, z: 20, angle: -Math.PI / 2 },
+      { x: 28, y: 0, z: -20, angle: -Math.PI / 2 },
+      { x: 28, y: 0, z: 20, angle: -Math.PI / 2 },
     ],
   };
   const counters = { 1: 0, 2: 0 };
@@ -66,9 +62,11 @@ export async function setup(ctx) {
     walls,
     defaultSurface: DEFAULT_GROUND_SURFACE,
     describeBlockedMove,
-    surfaceAt() {
-      return DEFAULT_GROUND_SURFACE;
-    },
+    surfaceAt() { return DEFAULT_GROUND_SURFACE; },
+    heightAt() { return 0; },
+    acousticZoneAt() { return "outdoor"; },
+    locationAt() { return "Лесная тренировочная площадка"; },
+    footstepVariantCount() { return 3; },
     nextSpawn(team = 1) {
       const list = spawns[team] ?? spawns[1];
       const index = counters[team]++ % list.length;

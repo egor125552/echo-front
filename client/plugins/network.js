@@ -15,6 +15,10 @@ export function reconnectDelayForAttempt(attempt) {
   return RECONNECT_DELAYS_MS[index];
 }
 
+function normalizeMode(value) {
+  return value === "battle-royale" || value === "br" ? "battle-royale" : "tdm";
+}
+
 function loadOrCreateSessionId() {
   try {
     const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
@@ -33,6 +37,7 @@ export async function setup(ctx) {
   let socket = null;
   let playerId = sessionId;
   let desiredRoom = null;
+  let desiredMode = "tdm";
   let reconnectTimer = null;
   let reconnectAttempt = 0;
 
@@ -50,6 +55,14 @@ export async function setup(ctx) {
     else ctx.events.emit("game:snapshot", snapshot);
   }
 
+  function emitGamePacket(packet) {
+    if (!packet?.event) return;
+    ctx.events.emit("game:event", packet);
+    // Inputs are transition-driven. Deployment intentionally discards them on
+    // the server, so resend the current held state exactly when combat unlocks.
+    if (packet.event === "battle-royale:started") sendInput();
+  }
+
   function clearReconnectTimer() {
     if (reconnectTimer != null) clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -61,6 +74,7 @@ export async function setup(ctx) {
     const delay = reconnectDelayForAttempt(reconnectAttempt);
     ctx.events.emit("network:reconnecting", {
       room: desiredRoom,
+      mode: desiredMode,
       attempt: reconnectAttempt,
       delay,
     });
@@ -75,8 +89,9 @@ export async function setup(ctx) {
     if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
 
     const room = desiredRoom;
+    const mode = desiredMode;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&player=${encodeURIComponent(sessionId)}`;
+    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}`;
     const ws = new WebSocket(url);
     socket = ws;
 
@@ -86,6 +101,7 @@ export async function setup(ctx) {
       sendInput();
       ctx.events.emit("network:connected", {
         room,
+        mode,
         reconnecting: reconnectAttempt > 0,
       });
     });
@@ -93,19 +109,17 @@ export async function setup(ctx) {
     ws.addEventListener("message", (event) => {
       if (socket !== ws) return;
       let data;
-      try {
-        data = JSON.parse(event.data);
-      } catch {
-        return;
-      }
+      try { data = JSON.parse(event.data); } catch { return; }
       if (data.type === "welcome") {
         const wasReconnect = reconnectAttempt > 0 || data.resumed === true;
         playerId = data.playerId;
+        desiredMode = normalizeMode(data.mode ?? mode);
         reconnectAttempt = 0;
         ctx.events.emit("network:welcome", data);
         if (wasReconnect) {
           ctx.events.emit("network:reconnected", {
             room,
+            mode: desiredMode,
             resumed: data.resumed === true,
           });
         }
@@ -113,7 +127,9 @@ export async function setup(ctx) {
       } else if (data.type === "snapshot") {
         emitSnapshot(data.snapshot);
       } else if (data.type === "event") {
-        ctx.events.emit("game:event", data);
+        emitGamePacket(data);
+      } else if (data.type === "events") {
+        for (const packet of data.events ?? []) emitGamePacket(packet);
       }
     });
 
@@ -123,6 +139,7 @@ export async function setup(ctx) {
       input.disable();
       ctx.events.emit("network:disconnected", {
         room,
+        mode: desiredMode,
         code: event.code,
         willReconnect: Boolean(desiredRoom),
       });
@@ -131,12 +148,13 @@ export async function setup(ctx) {
 
     ws.addEventListener("error", () => {
       if (socket !== ws) return;
-      ctx.events.emit("network:error", { room });
+      ctx.events.emit("network:error", { room, mode: desiredMode });
     });
   }
 
-  function connect(room = "public") {
+  function connect(room = "public", { mode = "tdm" } = {}) {
     desiredRoom = room;
+    desiredMode = normalizeMode(mode);
     clearReconnectTimer();
     openSocket();
   }
@@ -148,26 +166,16 @@ export async function setup(ctx) {
     const ws = socket;
     socket = null;
     input.disable();
-    try {
-      ws?.close(1000, "Client disconnect");
-    } catch {
-    }
+    try { ws?.close(1000, "Client disconnect"); } catch {}
   }
 
   ctx.services.provide("network", {
     connect,
     disconnect,
-    get playerId() {
-      return playerId;
-    },
-    get sessionId() {
-      return sessionId;
-    },
-    get connected() {
-      return socket?.readyState === WebSocket.OPEN;
-    },
-    get reconnecting() {
-      return Boolean(desiredRoom && !this.connected);
-    },
+    get playerId() { return playerId; },
+    get sessionId() { return sessionId; },
+    get mode() { return desiredMode; },
+    get connected() { return socket?.readyState === WebSocket.OPEN; },
+    get reconnecting() { return Boolean(desiredRoom && !this.connected); },
   });
 }

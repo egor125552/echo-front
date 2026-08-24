@@ -10,6 +10,7 @@ export const MASTER_FILTER_MAX_HZ = 18000;
 export const FOREGROUND_MUFFLE_STRENGTH = 0.15;
 export const DISTANCE_FADE_START_RATIO = 0.78;
 export const DISTANCE_AIR_MIN_HZ = 4200;
+export const OCCLUSION_MIN_HZ = 3000;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
@@ -29,7 +30,6 @@ function wrappedAbsAngle(azimuth) {
 function createReverbImpulse(audioContext, durationSeconds = 2.4, decay = 3.2) {
   const length = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
   const impulse = audioContext.createBuffer(2, length, audioContext.sampleRate);
-
   for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
     const data = impulse.getChannelData(channel);
     for (let i = 0; i < length; i += 1) {
@@ -37,7 +37,6 @@ function createReverbImpulse(audioContext, durationSeconds = 2.4, decay = 3.2) {
       data[i] = (Math.random() * 2 - 1) * envelope;
     }
   }
-
   return impulse;
 }
 
@@ -53,11 +52,21 @@ export function hybridSpatialMix(azimuth) {
 
 export function localizeForListener(listener, position) {
   const dx = position.x - listener.x;
+  const dy = (position.y ?? 0) - (listener.y ?? 0);
   const dz = position.z - listener.z;
   const localRight = dx * Math.cos(listener.angle) + dz * Math.sin(listener.angle);
   const localForward = dx * Math.sin(listener.angle) - dz * Math.cos(listener.angle);
   const azimuth = Math.atan2(localRight, localForward || 0.000001);
-  return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
+  return {
+    dx,
+    dy,
+    dz,
+    localRight,
+    localUp: dy,
+    localForward,
+    azimuth,
+    distance: Math.hypot(dx, dy, dz),
+  };
 }
 
 export function distanceAttenuation(distance, {
@@ -71,10 +80,7 @@ export function distanceAttenuation(distance, {
   const maximum = Math.max(reference + 0.01, Number(maxDistance) || 40);
   const rolloff = Math.max(0, Number(rolloffFactor) || 0);
   if (d >= maximum) return 0;
-
-  const inverse = d <= reference
-    ? 1
-    : reference / (reference + rolloff * (d - reference));
+  const inverse = d <= reference ? 1 : reference / (reference + rolloff * (d - reference));
   const ratio = Math.max(0.5, Math.min(0.95, Number(fadeStartRatio) || DISTANCE_FADE_START_RATIO));
   const fadeStart = Math.max(reference, maximum * ratio);
   const tail = d <= fadeStart ? 1 : 1 - smoothstep(fadeStart, maximum, d);
@@ -87,6 +93,12 @@ export function distanceAirCutoff(distance, maxDistance = 40, minimumHz = DISTAN
   const minimum = Math.max(1200, Math.min(MASTER_FILTER_MAX_HZ, Number(minimumHz) || DISTANCE_AIR_MIN_HZ));
   const amount = Math.pow(clamp01(d / maximum), 1.2);
   return MASTER_FILTER_MAX_HZ * Math.pow(minimum / MASTER_FILTER_MAX_HZ, amount);
+}
+
+export function occlusionCutoff(amount, minimumHz = OCCLUSION_MIN_HZ) {
+  const normalized = clamp01(amount);
+  const minimum = Math.max(1000, Math.min(MASTER_FILTER_MAX_HZ, Number(minimumHz) || OCCLUSION_MIN_HZ));
+  return MASTER_FILTER_MAX_HZ * Math.pow(minimum / MASTER_FILTER_MAX_HZ, normalized);
 }
 
 export function softenedMuffleCutoff(masterCutoff, strength = FOREGROUND_MUFFLE_STRENGTH) {
@@ -106,14 +118,13 @@ export async function setup(ctx) {
   const audioContext = new AudioContextClass();
   const buffers = new Map();
   const activeChannels = new Map();
-  let listener = { x: 0, z: 0, angle: 0 };
+  let listener = { x: 0, y: 0, z: 0, angle: 0 };
+  let injuryReverbMix = 0;
+  let environmentReverbMix = 0;
   let reverbMix = 0;
   let muffleCutoff = MASTER_FILTER_MAX_HZ;
   let foregroundMuffleCutoff = MASTER_FILTER_MAX_HZ;
 
-  // Normal game audio uses the full injury low-pass. Foreground feedback gets a
-  // separate, much gentler low-pass so important personal-state cues remain
-  // intelligible even while the surrounding world is heavily muffled.
   const masterInput = audioContext.createGain();
   const masterLowpass = audioContext.createBiquadFilter();
   const foregroundInput = audioContext.createGain();
@@ -138,8 +149,9 @@ export async function setup(ctx) {
   foregroundLowpass.connect(reverb);
 
   ctx.events.on("game:snapshot", (snapshot) => {
-    const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
-    if (self) listener = { x: self.x, z: self.z, angle: self.angle };
+    const spectatorId = snapshot?.spectator?.active ? snapshot.spectator.targetId : null;
+    const observed = snapshot?.entities?.find((entity) => entity.id === (spectatorId ?? network.playerId));
+    if (observed) listener = { x: observed.x, y: observed.y ?? 0, z: observed.z, angle: observed.angle };
   });
 
   async function load(url) {
@@ -182,10 +194,20 @@ export async function setup(ctx) {
     param.setTargetAtTime(value, audioContext.currentTime, constant);
   }
 
-  function setReverbMix(value) {
-    reverbMix = clamp01(value);
+  function applyReverbMix() {
+    reverbMix = 1 - (1 - clamp01(injuryReverbMix)) * (1 - clamp01(environmentReverbMix));
     targetParam(dryGain.gain, 1 - reverbMix * 0.32, 0.28);
     targetParam(wetGain.gain, reverbMix * 0.9, 0.34);
+  }
+
+  function setReverbMix(value) {
+    injuryReverbMix = clamp01(value);
+    applyReverbMix();
+  }
+
+  function setEnvironmentReverbMix(value) {
+    environmentReverbMix = clamp01(value);
+    applyReverbMix();
   }
 
   function setMuffleCutoff(value) {
@@ -219,9 +241,7 @@ export async function setup(ctx) {
       setGain(nextGain, timeConstant = 0.18) {
         targetParam(gainNode.gain, Math.max(0, Number(nextGain) || 0), timeConstant);
       },
-      stop() {
-        try { source.stop(); } catch {}
-      },
+      stop() { try { source.stop(); } catch {} },
     };
   }
 
@@ -241,6 +261,7 @@ export async function setup(ctx) {
     referenceDistance = 2,
     rolloffFactor = 0.5,
     airAbsorptionMinHz = DISTANCE_AIR_MIN_HZ,
+    occlusion = 0,
     channel = null,
     replace = false,
     loop = false,
@@ -256,30 +277,35 @@ export async function setup(ctx) {
     const mix = hybridSpatialMix(local.azimuth);
     const source = audioContext.createBufferSource();
     const distanceGain = audioContext.createGain();
+    const occlusionGain = audioContext.createGain();
+    const occlusionFilter = audioContext.createBiquadFilter();
     const airFilter = audioContext.createBiquadFilter();
     const stereoPanner = audioContext.createStereoPanner();
     const stereoGain = audioContext.createGain();
     const hrtfPanner = audioContext.createPanner();
     const rearFilter = audioContext.createBiquadFilter();
     const hrtfGain = audioContext.createGain();
+    const occlusionAmount = clamp01(occlusion);
 
     source.buffer = buffer;
     source.loop = Boolean(loop);
     distanceGain.gain.value = gain * attenuation;
+    occlusionGain.gain.value = 1 - occlusionAmount * 0.22;
+    occlusionFilter.type = "lowpass";
+    occlusionFilter.Q.value = 0.3;
+    occlusionFilter.frequency.value = occlusionCutoff(occlusionAmount);
     airFilter.type = "lowpass";
     airFilter.Q.value = 0.2;
     airFilter.frequency.value = distanceAirCutoff(local.distance, radius, airAbsorptionMinHz);
     stereoPanner.pan.value = mix.pan;
 
-    // Distance attenuation is handled explicitly before the panners so the
-    // stereo and HRTF branches share the exact same audibility curve.
     hrtfPanner.panningModel = "HRTF";
     hrtfPanner.distanceModel = "inverse";
     hrtfPanner.refDistance = 1;
     hrtfPanner.maxDistance = 10000;
     hrtfPanner.rolloffFactor = 0;
     hrtfPanner.positionX.value = local.localRight;
-    hrtfPanner.positionY.value = 0;
+    hrtfPanner.positionY.value = local.localUp;
     hrtfPanner.positionZ.value = -local.localForward;
 
     rearFilter.type = "lowpass";
@@ -290,7 +316,7 @@ export async function setup(ctx) {
     stereoGain.gain.setValueAtTime(mix.stereo, now);
     hrtfGain.gain.setValueAtTime(mix.hrtf, now);
 
-    source.connect(distanceGain).connect(airFilter);
+    source.connect(distanceGain).connect(occlusionGain).connect(occlusionFilter).connect(airFilter);
     airFilter.connect(stereoPanner).connect(stereoGain).connect(masterInput);
     airFilter.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(masterInput);
     trackSource(source, channel, replace);
@@ -311,12 +337,10 @@ export async function setup(ctx) {
         stereoGain.gain.linearRampToValueAtTime(nextMix.stereo, at);
         hrtfGain.gain.linearRampToValueAtTime(nextMix.hrtf, at);
         hrtfPanner.positionX.linearRampToValueAtTime(next.localRight, at);
+        hrtfPanner.positionY.linearRampToValueAtTime(next.localUp, at);
         hrtfPanner.positionZ.linearRampToValueAtTime(-next.localForward, at);
         rearFilter.frequency.linearRampToValueAtTime(rearCutoff(next), at);
-        airFilter.frequency.linearRampToValueAtTime(
-          distanceAirCutoff(next.distance, radius, airAbsorptionMinHz),
-          at,
-        );
+        airFilter.frequency.linearRampToValueAtTime(distanceAirCutoff(next.distance, radius, airAbsorptionMinHz), at);
         distanceGain.gain.linearRampToValueAtTime(gain * nextAttenuation, at);
       },
     };
@@ -324,22 +348,17 @@ export async function setup(ctx) {
 
   ctx.services.provide("audio", {
     context: audioContext,
-    async resume() {
-      if (audioContext.state !== "running") await audioContext.resume();
-    },
+    async resume() { if (audioContext.state !== "running") await audioContext.resume(); },
     load,
     stopChannel,
     setReverbMix,
-    getReverbMix() {
-      return reverbMix;
-    },
+    setEnvironmentReverbMix,
+    getReverbMix() { return reverbMix; },
+    getInjuryReverbMix() { return injuryReverbMix; },
+    getEnvironmentReverbMix() { return environmentReverbMix; },
     setMuffleCutoff,
-    getMuffleCutoff() {
-      return muffleCutoff;
-    },
-    getForegroundMuffleCutoff() {
-      return foregroundMuffleCutoff;
-    },
+    getMuffleCutoff() { return muffleCutoff; },
+    getForegroundMuffleCutoff() { return foregroundMuffleCutoff; },
     async playCentered(url, options = {}) {
       const buffer = await load(url);
       return playCenteredBuffer(buffer, options);
@@ -348,5 +367,6 @@ export async function setup(ctx) {
       const buffer = await load(url);
       return playSpatialBuffer(buffer, position, options);
     },
+    playSpatialBuffer,
   });
 }
