@@ -1,10 +1,9 @@
 const SOUNDS = {
   "weapon.pistol": "/assets/audio/core/pistol-shot.mp3",
   "weapon.rifle": "/assets/audio/core/automatic-shot.mp3",
-  "step.1": "/assets/audio/core/step-1.mp3",
-  "step.2": "/assets/audio/core/step-2.mp3",
-  "step.3": "/assets/audio/core/step-3.mp3",
-  "step.4": "/assets/audio/core/step-4.mp3",
+  "footstep.forest.1": "/assets/audio/footsteps/forest/forest-step-1.mp3",
+  "footstep.forest.2": "/assets/audio/footsteps/forest/forest-step-2.mp3",
+  "footstep.forest.3": "/assets/audio/footsteps/forest/forest-step-3.mp3",
   "hit.enemy": "/assets/audio/core/hit-enemy.mp3",
   "hit.player": "/assets/audio/core/hit-player.mp3",
   "armor.hit1": "/assets/audio/core/armor-hit-1.mp3",
@@ -136,6 +135,7 @@ export async function setup(ctx) {
 
     const url = SOUNDS[payload.key];
     if (!url) return;
+    const isFootstep = payload.key.startsWith("footstep.");
 
     try {
       if (packet.event === "feedback:sound") {
@@ -147,11 +147,11 @@ export async function setup(ctx) {
       if (packet.event === "sound:spatial") {
         if (payload.entityId === network.playerId) {
           if (payload.key === "weapon.pistol" || payload.key === "weapon.rifle") return;
-          await audio.playCentered(url, { gain: payload.key.startsWith("step.") ? 0.45 : 0.85 });
+          await audio.playCentered(url, { gain: isFootstep ? 0.45 : 0.85 });
         } else {
           await audio.playSpatial(url, { x: payload.x, z: payload.z }, {
             radius: payload.radius ?? 40,
-            gain: payload.key.startsWith("step.") ? 0.85 : 1,
+            gain: isFootstep ? 0.85 : 1,
           });
         }
       }
