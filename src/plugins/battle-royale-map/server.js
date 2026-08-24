@@ -2,17 +2,25 @@ export const WORLD_HALF_SIZE = 400;
 export const BOUNDARY_HALF_THICKNESS = 1;
 export const UPPER_FLOOR_Y = 3.2;
 export const DEFAULT_GROUND_SURFACE = "forest";
+export const BASE_SPAWN_RADIUS = 125;
+export const BUILDING_CENTER_X = 60;
+export const BUILDING_CENTER_Z = 0;
 
 export const BUILDING = Object.freeze({
   id: "warehouse",
-  minX: 55,
-  maxX: 85,
-  minZ: -62,
-  maxZ: -38,
+  minX: BUILDING_CENTER_X - 15,
+  maxX: BUILDING_CENTER_X + 15,
+  minZ: BUILDING_CENTER_Z - 12,
+  maxZ: BUILDING_CENTER_Z + 12,
   upperY: UPPER_FLOOR_Y,
 });
 
-export const STAIR = Object.freeze({ minX: 78, maxX: 82, minZ: -58, maxZ: -42 });
+export const STAIR = Object.freeze({
+  minX: BUILDING_CENTER_X + 8,
+  maxX: BUILDING_CENTER_X + 12,
+  minZ: BUILDING_CENTER_Z - 8,
+  maxZ: BUILDING_CENTER_Z + 8,
+});
 
 const SURFACE_VARIANTS = Object.freeze({
   forest: 3,
@@ -44,7 +52,7 @@ function distance3(a, b) {
 
 export function stairHeightAt(position) {
   if (!insideRect(position, STAIR)) return null;
-  const progress = Math.max(0, Math.min(1, ((-position.z) - 42) / 16));
+  const progress = Math.max(0, Math.min(1, (STAIR.maxZ - position.z) / (STAIR.maxZ - STAIR.minZ)));
   return progress * UPPER_FLOOR_Y;
 }
 
@@ -58,7 +66,12 @@ export function heightAt(position) {
 export function surfaceAt(position) {
   if (insideRect(position, STAIR)) return "metal";
   if (insideRect(position, BUILDING)) return "concrete";
-  if (position.x >= 48 && position.x <= 92 && position.z >= -70 && position.z <= -30) return "stone";
+  if (
+    position.x >= BUILDING_CENTER_X - 22
+    && position.x <= BUILDING_CENTER_X + 22
+    && position.z >= BUILDING_CENTER_Z - 20
+    && position.z <= BUILDING_CENTER_Z + 20
+  ) return "stone";
   if (position.x <= -145 && position.x >= -235 && position.z >= 90 && position.z <= 190) return "sand";
   return DEFAULT_GROUND_SURFACE;
 }
@@ -106,7 +119,7 @@ function generatedSpawn(index) {
   const golden = Math.PI * (3 - Math.sqrt(5));
   const ring = index % 96;
   const angle = ring * golden;
-  const radius = 125 + ((ring * 47) % 215);
+  const radius = BASE_SPAWN_RADIUS + ((ring * 47) % 215);
   const x = Math.cos(angle) * radius;
   const z = Math.sin(angle) * radius;
   return {
@@ -135,27 +148,27 @@ export async function setup(ctx) {
     addWall({ kind: "world-boundary", side: "east", x: WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
 
     // Ground-floor warehouse shell. The southern/front wall leaves a 2.4 m door opening.
-    addWall({ kind: "building-wall", x: BUILDING.minX, z: -50, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING.maxX, z: -50, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: 70, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: 61.9, z: BUILDING.maxZ, hx: 6.9, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: 78.1, z: BUILDING.maxZ, hx: 6.9, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING.minX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING.maxX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X - 8.1, z: BUILDING.maxZ, hx: 6.9, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X + 8.1, z: BUILDING.maxZ, hx: 6.9, hz: 0.3, height: 2.8 });
 
     // A thin physical second-floor slab blocks shots and line of sight between floors.
     // It is split into four pieces so the metal stairwell remains a real opening.
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
-    addWall({ kind: "building-floor", x: 66.5, y: floorBottomY, z: -50, hx: 11.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", x: 83.5, y: floorBottomY, z: -50, hx: 1.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", x: 80, y: floorBottomY, z: -60, hx: 2, hz: 2, height: 0.18 });
-    addWall({ kind: "building-floor", x: 80, y: floorBottomY, z: -40, hx: 2, hz: 2, height: 0.18 });
+    addWall({ kind: "building-floor", x: BUILDING_CENTER_X - 3.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11.5, hz: 12, height: 0.18 });
+    addWall({ kind: "building-floor", x: BUILDING_CENTER_X + 13.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1.5, hz: 12, height: 0.18 });
+    addWall({ kind: "building-floor", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 10, hx: 2, hz: 2, height: 0.18 });
+    addWall({ kind: "building-floor", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 10, hx: 2, hz: 2, height: 0.18 });
 
     // Upper floor shell and an internal room separator with its own door.
-    addWall({ kind: "building-wall", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: -50, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: -50, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: 70, y: UPPER_FLOOR_Y, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: 70, y: UPPER_FLOOR_Y, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: 70, y: UPPER_FLOOR_Y, z: -44, hx: 0.25, hz: 4, height: 2.8 });
-    addWall({ kind: "building-wall", x: 70, y: UPPER_FLOOR_Y, z: -56, hx: 0.25, hz: 4, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
   } finally {
     physics.endBatch?.();
   }
@@ -164,28 +177,28 @@ export async function setup(ctx) {
     {
       id: "warehouse-front-door",
       name: "Входная дверь склада",
-      x: 70,
+      x: BUILDING_CENTER_X,
       y: 0,
       z: BUILDING.maxZ,
       open: false,
-      collider: physics.createWall({ x: 70, z: BUILDING.maxZ, hx: 1.2, hz: 0.25, height: 2.6 }),
+      collider: physics.createWall({ x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 1.2, hz: 0.25, height: 2.6 }),
     },
     {
       id: "warehouse-upper-room-door",
       name: "Дверь комнаты второго этажа",
-      x: 70,
+      x: BUILDING_CENTER_X,
       y: UPPER_FLOOR_Y,
-      z: -50,
+      z: BUILDING_CENTER_Z,
       open: false,
-      collider: physics.createWall({ x: 70, y: UPPER_FLOOR_Y, z: -50, hx: 0.25, hz: 1.2, height: 2.6 }),
+      collider: physics.createWall({ x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.25, hz: 1.2, height: 2.6 }),
     },
   ];
 
   const crates = [
-    { id: "crate-ground-rifle", x: 61.5, y: 0, z: -52, loot: "rifle", opened: false },
-    { id: "crate-ground-armor", x: 81, y: 0, z: -47, loot: "armor", opened: false },
-    { id: "crate-upper-armor", x: 61.5, y: UPPER_FLOOR_Y, z: -55, loot: "armor", opened: false },
-    { id: "crate-upper-rifle", x: 76, y: UPPER_FLOOR_Y, z: -53, loot: "rifle", opened: false },
+    { id: "crate-ground-rifle", x: BUILDING_CENTER_X - 8.5, y: 0, z: BUILDING_CENTER_Z - 2, loot: "rifle", opened: false },
+    { id: "crate-ground-armor", x: BUILDING_CENTER_X + 11, y: 0, z: BUILDING_CENTER_Z + 3, loot: "armor", opened: false },
+    { id: "crate-upper-armor", x: BUILDING_CENTER_X - 8.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 5, loot: "armor", opened: false },
+    { id: "crate-upper-rifle", x: BUILDING_CENTER_X + 6, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 3, loot: "rifle", opened: false },
   ];
 
   let spawnIndex = 0;
