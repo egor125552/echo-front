@@ -7,7 +7,7 @@ export const manifest = {
   version: "2.0.0",
   requires: ["health", "entities"],
   capabilities: [
-    "services.provide",
+    "services.consume", "services.provide",
     "components.register", "components.read", "components.write",
     "events.on", "events.emit",
   ],
