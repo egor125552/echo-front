@@ -8,6 +8,8 @@ import * as soundPack from "../plugins/core-sound-pack.js";
 import * as eventSoundPack from "../plugins/event-sound-pack.js";
 import * as armorPlatingAudio from "../plugins/armor-plating-audio.js";
 import * as environmentAudio from "../plugins/environment-audio.js";
+import * as buildingAcoustics from "../plugins/building-acoustics.js";
+import * as battleRoyaleAudio from "../plugins/battle-royale-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
@@ -23,6 +25,8 @@ export const echoFrontClientPreset = [
   eventSoundPack,
   armorPlatingAudio,
   environmentAudio,
+  buildingAcoustics,
+  battleRoyaleAudio,
   lowHealthAudio,
   hud,
   announcer,
