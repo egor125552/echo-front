@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { createEchoFrontGame } from "../src/server/game.js";
 import {
   HEARTBEAT_URL,
+  WOUNDED_URL,
   HEARTBEAT_START_RATIO,
   HEARTBEAT_STOP_RATIO,
   MAX_REVERB_MIX,
@@ -71,6 +72,7 @@ test("health regeneration does not silently buff bots", async () => {
 
 test("low health audio uses the Archipelago-style curved muffling response", () => {
   assert.equal(HEARTBEAT_URL, "/assets/audio/core/heartbeat-fast.mp3");
+  assert.equal(WOUNDED_URL, "/assets/audio/core/player-wounded.mp3");
   assert.ok(HEARTBEAT_START_RATIO < HEARTBEAT_STOP_RATIO, "heartbeat fade range must be wider than its start threshold");
   assert.equal(lowHealthIntensity(200, 200), 0);
   assert.equal(lowHealthIntensity(130, 200), 0);
@@ -115,11 +117,16 @@ test("wounded audio uses persistent exponential targets instead of restarted lin
   assert.match(sourceSpatial, /targetParam\(wetGain\.gain, reverbMix \* 0\.9, 0\.34\)/);
   assert.doesNotMatch(sourceSpatial, /cancelAndHoldAtTime|cancelScheduledValues/);
 
+  assert.match(sourceLowHealth, /WOUNDED_URL = "\/assets\/audio\/core\/player-wounded\.mp3"/);
+  assert.match(sourceLowHealth, /let woundedCueArmed = true;/);
+  assert.match(sourceLowHealth, /if \(lastRatio >= HEARTBEAT_STOP_RATIO\) \{\s*woundedCueArmed = true;/);
+  assert.match(sourceLowHealth, /if \(woundedCueArmed\) \{\s*woundedCueArmed = false;\s*void playWoundedCue\(\);/);
+  assert.match(sourceLowHealth, /channel: "low-health-wounded"/);
   assert.match(sourceLowHealth, /MUFFLE_MIN_HZ = 80/);
   assert.match(sourceLowHealth, /MUFFLE_CURVE_POWER = 3\.5/);
   assert.match(sourceLowHealth, /if \(!self\) return;/);
   assert.doesNotMatch(sourceLowHealth, /EFFECT_UPDATE_EPSILON/);
-  assert.match(sourceLowHealth, /if \(lastRatio <= HEARTBEAT_START_RATIO && !heartbeat\)/);
+  assert.match(sourceLowHealth, /if \(!heartbeat\) void startHeartbeat\(\);/);
   assert.match(sourceLowHealth, /heartbeat\.setGain\?\.\(heartbeatGainForRatio\(lastRatio\), 0\.28\)/);
   assert.doesNotMatch(sourceLowHealth, /lastRatio >= HEARTBEAT_STOP_RATIO\)[\s\S]{0,80}stopHeartbeat/);
   assert.match(sourceLowHealth, /loop: true/);

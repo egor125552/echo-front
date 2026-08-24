@@ -1,4 +1,5 @@
 export const HEARTBEAT_URL = "/assets/audio/core/heartbeat-fast.mp3";
+export const WOUNDED_URL = "/assets/audio/core/player-wounded.mp3";
 export const HEARTBEAT_START_RATIO = 0.45;
 export const HEARTBEAT_STOP_RATIO = 0.65;
 export const REVERB_START_RATIO = 0.65;
@@ -54,6 +55,7 @@ export async function setup(ctx) {
   let heartbeat = null;
   let heartbeatStarting = false;
   let heartbeatUnavailable = false;
+  let woundedCueArmed = true;
   let lastRatio = 1;
   let alive = false;
 
@@ -63,6 +65,18 @@ export async function setup(ctx) {
     heartbeat = null;
     heartbeatStarting = false;
     audio.stopChannel("low-health-heartbeat");
+  }
+
+  async function playWoundedCue() {
+    try {
+      await audio.playCentered(WOUNDED_URL, {
+        gain: 1.05,
+        channel: "low-health-wounded",
+        replace: true,
+      });
+    } catch (error) {
+      console.error("Echo Front wounded cue audio error", error);
+    }
   }
 
   async function startHeartbeat() {
@@ -105,6 +119,8 @@ export async function setup(ctx) {
   function resetEffects() {
     alive = false;
     lastRatio = 1;
+    woundedCueArmed = true;
+    audio.stopChannel("low-health-wounded");
     stopHeartbeat();
     applyIntensity(0);
   }
@@ -121,8 +137,16 @@ export async function setup(ctx) {
     lastRatio = healthRatio(self.health, self.healthMax);
     applyIntensity(lowHealthIntensity(self.health, self.healthMax));
 
-    if (lastRatio <= HEARTBEAT_START_RATIO && !heartbeat) {
-      void startHeartbeat();
+    if (lastRatio >= HEARTBEAT_STOP_RATIO) {
+      woundedCueArmed = true;
+    }
+
+    if (lastRatio <= HEARTBEAT_START_RATIO) {
+      if (woundedCueArmed) {
+        woundedCueArmed = false;
+        void playWoundedCue();
+      }
+      if (!heartbeat) void startHeartbeat();
     }
 
     if (heartbeat) {
@@ -136,6 +160,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("low-health-audio", {
     heartbeatUrl: HEARTBEAT_URL,
+    woundedUrl: WOUNDED_URL,
     muffleMinHz: MUFFLE_MIN_HZ,
     muffleMaxHz: MUFFLE_MAX_HZ,
     reset: resetEffects,
