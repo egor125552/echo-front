@@ -1,6 +1,6 @@
 export const manifest = {
   id: "match-api",
-  version: "1.5.0",
+  version: "1.6.0",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
@@ -37,6 +37,19 @@ export async function setup(ctx) {
   });
 
   function connectHuman(playerId) {
+    const existing = entities.get(playerId);
+    if (existing) {
+      if (existing.kind !== "human" || existing.bot) {
+        throw new Error(`Session id already belongs to a non-human entity: ${playerId}`);
+      }
+      movement.setInput(playerId, {});
+      return {
+        playerId,
+        team: teams.teamOf(playerId),
+        resumed: true,
+      };
+    }
+
     botFill.makeRoomForHuman();
     const team = teams.pickBalancedTeam({ humansOnly: true });
     entities.spawn({
@@ -51,7 +64,14 @@ export async function setup(ctx) {
     });
     botFill.ensure();
     opening?.arrangeForHuman(playerId);
-    return { playerId, team };
+    return { playerId, team, resumed: false };
+  }
+
+  function suspendHuman(playerId) {
+    const entity = entities.get(playerId);
+    if (!entity || entity.kind !== "human" || entity.bot) return false;
+    movement.setInput(playerId, {});
+    return true;
   }
 
   function disconnectHuman(playerId) {
@@ -120,6 +140,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("match-api", {
     connectHuman,
+    suspendHuman,
     disconnectHuman,
     handleInput,
     step,
