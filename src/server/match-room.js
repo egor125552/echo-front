@@ -1,6 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 import { createEchoFrontGame } from "./game.js";
-import { activeSocketCount, cleanupDeadline } from "./room-lifecycle.js";
+import {
+  activeSocketCount,
+  cleanupDeadline,
+  normalizePlayerSessionId,
+  reconnectExpired,
+} from "./room-lifecycle.js";
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
 
 export class MatchRoom extends DurableObject {
@@ -10,6 +15,7 @@ export class MatchRoom extends DurableObject {
     this.gameLoopTimer = null;
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
+    this.disconnectedHumans = new Map();
 
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
@@ -38,6 +44,30 @@ export class MatchRoom extends DurableObject {
     return this.game;
   }
 
+  socketsForPlayer(playerId, excludedSocket = null) {
+    return this.ctx.getWebSockets().filter((socket) => {
+      if (!socket || socket === excludedSocket || socket.readyState === 3) return false;
+      try {
+        return socket.deserializeAttachment()?.playerId === playerId;
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  cleanupDisconnectedHumans(now = Date.now()) {
+    if (!this.game) return;
+    for (const [playerId, disconnectedAt] of this.disconnectedHumans) {
+      if (this.socketsForPlayer(playerId).length) {
+        this.disconnectedHumans.delete(playerId);
+        continue;
+      }
+      if (!reconnectExpired(disconnectedAt, now)) continue;
+      this.game.api.disconnectHuman(playerId);
+      this.disconnectedHumans.delete(playerId);
+    }
+  }
+
   startGameLoop() {
     if (this.gameLoopTimer || !this.game) return;
     this.lastStepAt = Date.now();
@@ -58,6 +88,7 @@ export class MatchRoom extends DurableObject {
 
     const now = Date.now();
     try {
+      this.cleanupDisconnectedHumans(now);
       const result = advanceSimulation(this.game, this.lastStepAt, now);
       this.lastStepAt = result.lastStepAt;
       if (result.droppedMs > 0) {
@@ -84,18 +115,37 @@ export class MatchRoom extends DurableObject {
 
     await this.ctx.storage.deleteAlarm();
     await this.ensureGame();
+    this.cleanupDisconnectedHumans();
+
+    const requestUrl = new URL(request.url);
+    const requestedPlayerId = normalizePlayerSessionId(requestUrl.searchParams.get("player"));
+    const playerId = requestedPlayerId ?? crypto.randomUUID();
+    const previousSockets = this.socketsForPlayer(playerId);
 
     const [client, server] = Object.values(new WebSocketPair());
-    const playerId = crypto.randomUUID();
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ playerId });
+    this.disconnectedHumans.delete(playerId);
+
     const joined = this.game.api.connectHuman(playerId);
     server.send(JSON.stringify({
       type: "welcome",
       playerId,
       team: joined.team,
+      resumed: Boolean(joined.resumed),
       snapshot: this.game.api.snapshot(),
     }));
+
+    // A reconnect may arrive before the old TCP/WebSocket path notices that it
+    // is dead. The newest socket owns the session; close stale duplicates only
+    // after the replacement socket has been accepted and attached.
+    for (const oldSocket of previousSockets) {
+      try {
+        oldSocket.close(4001, "Reconnected");
+      } catch {
+      }
+    }
+
     this.startGameLoop();
     this.broadcastSnapshot(true);
     return new Response(null, { status: 101, webSocket: client });
@@ -124,16 +174,26 @@ export class MatchRoom extends DurableObject {
     this.broadcastEvents();
   }
 
-  async webSocketClose(ws) {
+  markSocketDisconnected(ws) {
     const playerId = ws.deserializeAttachment()?.playerId;
-    if (playerId && this.game) this.game.api.disconnectHuman(playerId);
+    if (!playerId || !this.game) return;
+
+    // If a replacement connection for this session is already alive, the close
+    // belongs to the stale socket and must not suspend the resumed player.
+    if (this.socketsForPlayer(playerId, ws).length) return;
+
+    this.game.api.suspendHuman(playerId);
+    this.disconnectedHumans.set(playerId, Date.now());
+  }
+
+  async webSocketClose(ws) {
+    this.markSocketDisconnected(ws);
     this.broadcastSnapshot(true);
     await this.scheduleCleanupIfEmpty(ws);
   }
 
   async webSocketError(ws) {
-    const playerId = ws.deserializeAttachment()?.playerId;
-    if (playerId && this.game) this.game.api.disconnectHuman(playerId);
+    this.markSocketDisconnected(ws);
     await this.scheduleCleanupIfEmpty(ws);
   }
 
@@ -157,6 +217,7 @@ export class MatchRoom extends DurableObject {
       this.game = null;
     }
 
+    this.disconnectedHumans.clear();
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
     await this.ctx.storage.deleteAlarm();
