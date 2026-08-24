@@ -73,6 +73,7 @@ export async function setup(ctx) {
         gain: 1.05,
         channel: "low-health-wounded",
         replace: true,
+        foreground: true,
       });
     } catch (error) {
       console.error("Echo Front wounded cue audio error", error);

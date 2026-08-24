@@ -15,6 +15,11 @@ import {
   lowHealthIntensity,
   muffleCutoffForIntensity,
 } from "../client/plugins/low-health-audio.js";
+import {
+  FOREGROUND_MUFFLE_STRENGTH,
+  MASTER_FILTER_MIN_HZ,
+  softenedMuffleCutoff,
+} from "../client/plugins/spatial-audio.js";
 
 test("human health regenerates only after five seconds without health damage", async () => {
   const game = await createEchoFrontGame();
@@ -97,6 +102,13 @@ test("low health audio uses the Archipelago-style curved muffling response", () 
   assert.equal(heartbeatGainForRatio(HEARTBEAT_STOP_RATIO), 0);
 });
 
+test("foreground wounded cue remains mostly clear under maximum world muffling", () => {
+  assert.equal(FOREGROUND_MUFFLE_STRENGTH, 0.15);
+  const foregroundCutoff = softenedMuffleCutoff(MASTER_FILTER_MIN_HZ);
+  assert.ok(foregroundCutoff > 7000, `foreground cutoff too muffled: ${foregroundCutoff}`);
+  assert.ok(foregroundCutoff < 9000, `foreground cutoff should still be slightly filtered: ${foregroundCutoff}`);
+});
+
 test("wounded audio uses persistent exponential targets instead of restarted linear ramps", async () => {
   const sourceLowHealth = await readFile(new URL("../client/plugins/low-health-audio.js", import.meta.url), "utf8");
   const publicLowHealth = await readFile(new URL("../public/client/plugins/low-health-audio.js", import.meta.url), "utf8");
@@ -111,10 +123,15 @@ test("wounded audio uses persistent exponential targets instead of restarted lin
 
   assert.match(sourceSpatial, /createConvolver\(\)/);
   assert.match(sourceSpatial, /masterLowpass = audioContext\.createBiquadFilter\(\)/);
+  assert.match(sourceSpatial, /foregroundLowpass = audioContext\.createBiquadFilter\(\)/);
+  assert.match(sourceSpatial, /FOREGROUND_MUFFLE_STRENGTH = 0\.15/);
+  assert.match(sourceSpatial, /foregroundInput\.connect\(foregroundLowpass\)/);
   assert.match(sourceSpatial, /param\.setTargetAtTime\(value, audioContext\.currentTime, constant\)/);
   assert.match(sourceSpatial, /targetParam\(masterLowpass\.frequency, muffleCutoff, 0\.36\)/);
+  assert.match(sourceSpatial, /targetParam\(foregroundLowpass\.frequency, foregroundMuffleCutoff, 0\.22\)/);
   assert.match(sourceSpatial, /targetParam\(dryGain\.gain, 1 - reverbMix \* 0\.32, 0\.28\)/);
   assert.match(sourceSpatial, /targetParam\(wetGain\.gain, reverbMix \* 0\.9, 0\.34\)/);
+  assert.match(sourceSpatial, /foreground \? foregroundInput : masterInput/);
   assert.doesNotMatch(sourceSpatial, /cancelAndHoldAtTime|cancelScheduledValues/);
 
   assert.match(sourceLowHealth, /WOUNDED_URL = "\/assets\/audio\/core\/player-wounded\.mp3"/);
@@ -122,6 +139,7 @@ test("wounded audio uses persistent exponential targets instead of restarted lin
   assert.match(sourceLowHealth, /if \(lastRatio >= HEARTBEAT_STOP_RATIO\) \{\s*woundedCueArmed = true;/);
   assert.match(sourceLowHealth, /if \(woundedCueArmed\) \{\s*woundedCueArmed = false;\s*void playWoundedCue\(\);/);
   assert.match(sourceLowHealth, /channel: "low-health-wounded"/);
+  assert.match(sourceLowHealth, /foreground: true/);
   assert.match(sourceLowHealth, /MUFFLE_MIN_HZ = 80/);
   assert.match(sourceLowHealth, /MUFFLE_CURVE_POWER = 3\.5/);
   assert.match(sourceLowHealth, /if \(!self\) return;/);
