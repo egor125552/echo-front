@@ -1,9 +1,10 @@
 export const WORLD_HALF_SIZE = 50;
 export const BOUNDARY_HALF_THICKNESS = 0.5;
+export const DEFAULT_GROUND_SURFACE = "forest";
 
 export const manifest = {
   id: "map-test-arena",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -63,7 +64,11 @@ export async function setup(ctx) {
     id: "forest-training-ground",
     halfSize: WORLD_HALF_SIZE,
     walls,
+    defaultSurface: DEFAULT_GROUND_SURFACE,
     describeBlockedMove,
+    surfaceAt() {
+      return DEFAULT_GROUND_SURFACE;
+    },
     nextSpawn(team = 1) {
       const list = spawns[team] ?? spawns[1];
       const index = counters[team]++ % list.length;
