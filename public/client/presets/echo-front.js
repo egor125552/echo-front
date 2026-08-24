@@ -5,6 +5,7 @@ import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as soundPack from "../plugins/core-sound-pack.js";
+import * as eventSoundPack from "../plugins/event-sound-pack.js";
 import * as environmentAudio from "../plugins/environment-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
@@ -18,6 +19,7 @@ export const echoFrontClientPreset = [
   speechSettings,
   spatialAudio,
   soundPack,
+  eventSoundPack,
   environmentAudio,
   lowHealthAudio,
   hud,
