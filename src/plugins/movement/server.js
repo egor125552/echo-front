@@ -1,9 +1,21 @@
 export const HUMAN_TURN_SPEED = 1.65;
 export const BOT_TURN_SPEED = 2.6;
+export const FOOTSTEP_VARIANT_COUNT = 3;
+
+export function normalizeFootstepSurface(value) {
+  const surface = String(value ?? "default").trim().toLowerCase();
+  return /^[a-z0-9-]+$/.test(surface) ? surface : "default";
+}
+
+export function footstepKey(surface, variant) {
+  const normalizedSurface = normalizeFootstepSurface(surface);
+  const safeVariant = Math.max(1, Math.min(FOOTSTEP_VARIANT_COUNT, Number(variant) || 1));
+  return `footstep.${normalizedSurface}.${safeVariant}`;
+}
 
 export const manifest = {
   id: "movement",
-  version: "1.6.0",
+  version: "1.7.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -156,10 +168,17 @@ export async function setup(ctx) {
         const threshold = input.sprint ? 1.15 : 1.55;
         if (transform.stepDistance >= threshold) {
           transform.stepDistance %= threshold;
-          transform.stepIndex = (transform.stepIndex % 4) + 1;
+          transform.stepIndex = (transform.stepIndex % FOOTSTEP_VARIANT_COUNT) + 1;
+          const surface = normalizeFootstepSurface(
+            typeof map.surfaceAt === "function"
+              ? map.surfaceAt({ x: transform.x, z: transform.z })
+              : map.defaultSurface,
+          );
           ctx.events.emit("sound:spatial", {
             entityId,
-            key: `step.${transform.stepIndex}`,
+            key: footstepKey(surface, transform.stepIndex),
+            surface,
+            variant: transform.stepIndex,
             x: transform.x,
             z: transform.z,
             radius: input.sprint ? 22 : 14,
