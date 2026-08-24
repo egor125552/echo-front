@@ -149,8 +149,9 @@ export async function setup(ctx) {
   foregroundLowpass.connect(reverb);
 
   ctx.events.on("game:snapshot", (snapshot) => {
-    const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
-    if (self) listener = { x: self.x, y: self.y ?? 0, z: self.z, angle: self.angle };
+    const spectatorId = snapshot?.spectator?.active ? snapshot.spectator.targetId : null;
+    const observed = snapshot?.entities?.find((entity) => entity.id === (spectatorId ?? network.playerId));
+    if (observed) listener = { x: observed.x, y: observed.y ?? 0, z: observed.z, angle: observed.angle };
   });
 
   async function load(url) {

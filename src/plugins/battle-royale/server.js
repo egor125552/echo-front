@@ -30,6 +30,7 @@ export async function setup(ctx) {
   let zoneClosingAnnounced = false;
   let previousAlive = 0;
   const announced = new Set();
+  const placements = new Map();
 
   function aliveEntities() {
     return entities.all().filter((entity) => entity.alive);
@@ -79,6 +80,7 @@ export async function setup(ctx) {
     phase = "ended";
     endedAt = now;
     winnerId = survivors[0]?.id ?? null;
+    if (winnerId) placements.set(winnerId, 1);
     ctx.events.emit("battle-royale:ended", {
       winnerId,
       alive: survivors.length,
@@ -152,7 +154,9 @@ export async function setup(ctx) {
   ctx.events.on("entity:died", ({ entityId, killerId }) => {
     if (phase !== "active") return;
     const alive = aliveEntities().length;
-    ctx.events.emit("battle-royale:eliminated", { entityId, killerId, alive });
+    const placement = alive + 1;
+    placements.set(entityId, placement);
+    ctx.events.emit("battle-royale:eliminated", { entityId, killerId, alive, placement, total });
     emitRemaining(alive);
     finish(Date.now());
   });
@@ -162,6 +166,7 @@ export async function setup(ctx) {
     tick,
     status,
     zoneRadiusAt,
+    placementOf(entityId) { return placements.get(entityId) ?? null; },
     canAct() { return phase === "active"; },
     isActive() { return phase === "active"; },
     zoneSteeringTarget(entityId, now = Date.now()) {

@@ -24,7 +24,8 @@ export async function setup(ctx) {
   }
 
   ctx.events.on("game:snapshot", (snapshot) => {
-    const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
+    const observedId = snapshot?.spectator?.active ? snapshot.spectator.targetId : network.playerId;
+    const self = snapshot?.entities?.find((entity) => entity.id === observedId);
     setZone(self?.acousticZone ?? "outdoor");
   });
   ctx.events.on("network:disconnected", () => setZone("outdoor"));

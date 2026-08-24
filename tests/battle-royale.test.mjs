@@ -74,3 +74,21 @@ test("warehouse front door toggles and a crate can grant the rifle", async () =>
   assert.equal(game.api.snapshot().entities.find((entity) => entity.id === "br-human-loot").y, UPPER_FLOOR_Y);
   await game.host.stop();
 });
+
+test("eliminated human gets a placement and spectator target without respawn", async () => {
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const playerId = "spectator-human";
+  game.api.connectHuman(playerId);
+  const deployment = game.api.snapshot().match;
+  game.api.step(0.05, deployment.deploymentEndsAt + 1);
+  const health = game.host.services.get("health");
+  health.applyDamage(playerId, 9999, { attackerId: null, weaponId: "test" });
+  const snapshot = game.api.snapshotFor(playerId, deployment.deploymentEndsAt + 2);
+  const self = snapshot.entities.find((entity) => entity.id === playerId);
+  assert.equal(self?.alive, false);
+  assert.ok(snapshot.spectator?.active);
+  assert.ok(snapshot.spectator?.targetId);
+  assert.equal(snapshot.playerPlacement, snapshot.match.alive + 1);
+  assert.ok(snapshot.entities.some((entity) => entity.id === snapshot.spectator.targetId));
+  await game.host.stop();
+});

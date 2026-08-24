@@ -53,8 +53,18 @@ test("local weapon audio stays silent during the deployment freeze", async () =>
   assert.match(source, /!selfState\.canFire/);
 });
 
-
 test("held input is resent when deployment unlocks combat", async () => {
   const source = await readFile(new URL("../client/plugins/network.js", import.meta.url), "utf8");
   assert.match(source, /packet\.event === "battle-royale:started"\) sendInput\(\)/);
+});
+
+test("spectator snapshots move the audio listener to the observed survivor", async () => {
+  const spatial = await readFile(new URL("../client/plugins/spatial-audio.js", import.meta.url), "utf8");
+  const announcer = await readFile(new URL("../client/plugins/announcer.js", import.meta.url), "utf8");
+  assert.match(spatial, /snapshot\?\.spectator\?\.active/);
+  assert.match(spatial, /snapshot\.spectator\.targetId/);
+  assert.match(announcer, /Вы выбыли\. \${placement}-е место/);
+  assert.match(announcer, /Наблюдение за/);
+  const hud = await readFile(new URL("../client/plugins/game-hud.js", import.meta.url), "utf8");
+  assert.match(hud, /snapshot\?\.playerPlacement/);
 });

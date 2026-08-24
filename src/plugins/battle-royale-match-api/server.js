@@ -36,6 +36,49 @@ export async function setup(ctx) {
   let humanSerial = 0;
 
   botFill.ensure();
+  const spectatorTargets = new Map();
+
+  function nearestAliveEntity(reference, excludedId = null) {
+    let best = null;
+    let bestDistance = Infinity;
+    for (const entity of entities.all()) {
+      if (!entity.alive || entity.id === excludedId) continue;
+      const transform = ctx.components.get(entity.id, "Transform");
+      if (!transform) continue;
+      const distance = reference ? distance2(reference, transform) : 0;
+      if (best && distance >= bestDistance) continue;
+      best = entity;
+      bestDistance = distance;
+    }
+    return best;
+  }
+
+  function spectatorTargetFor(playerId) {
+    const player = entities.get(playerId);
+    if (!player || player.alive || battleRoyale.status().phase === "ended") return null;
+    const currentId = spectatorTargets.get(playerId);
+    const current = currentId ? entities.get(currentId) : null;
+    if (current?.alive) return current;
+    const reference = ctx.components.get(playerId, "Transform");
+    const next = nearestAliveEntity(reference, playerId);
+    if (next) spectatorTargets.set(playerId, next.id);
+    else spectatorTargets.delete(playerId);
+    return next;
+  }
+
+  ctx.events.on("battle-royale:eliminated", ({ entityId }) => {
+    const entity = entities.get(entityId);
+    if (!entity || entity.bot) return;
+    spectatorTargets.delete(entityId);
+    spectatorTargetFor(entityId);
+  });
+
+  ctx.events.on("entity:removed", ({ entityId }) => {
+    spectatorTargets.delete(entityId);
+    for (const [viewerId, targetId] of spectatorTargets) {
+      if (targetId === entityId) spectatorTargets.delete(viewerId);
+    }
+  });
 
   function connectHuman(playerId) {
     const existing = entities.get(playerId);
@@ -79,6 +122,7 @@ export async function setup(ctx) {
 
   function disconnectHuman(playerId) {
     armorService?.cancelPlating(playerId, "disconnect");
+    spectatorTargets.delete(playerId);
     entities.remove(playerId);
     const phase = battleRoyale.status().phase;
     if (phase === "waiting" || phase === "deploying") botFill.ensure();
@@ -215,29 +259,42 @@ export async function setup(ctx) {
   function snapshotFor(playerId, now = Date.now()) {
     const selfEntity = entities.get(playerId);
     const selfTransform = selfEntity ? ctx.components.get(playerId, "Transform") : null;
+    const spectatorTarget = spectatorTargetFor(playerId);
+    const listenerTransform = spectatorTarget
+      ? ctx.components.get(spectatorTarget.id, "Transform")
+      : selfTransform;
     const visible = [];
     for (const entity of entities.all()) {
-      if (entity.id === playerId) {
+      if (entity.id === playerId || entity.id === spectatorTarget?.id) {
         visible.push(entitySnapshot(entity));
         continue;
       }
-      if (!selfTransform) continue;
+      if (!listenerTransform) continue;
       const transform = ctx.components.get(entity.id, "Transform");
       if (!transform) continue;
       const radius = entity.alive ? ENTITY_INTEREST_RADIUS : 30;
-      if (distance2(selfTransform, transform) <= radius) visible.push(entitySnapshot(entity));
+      if (distance2(listenerTransform, transform) <= radius) visible.push(entitySnapshot(entity));
     }
     return {
       now,
       mode: "battle-royale",
       map: { id: map.id, halfSize: map.halfSize },
       match: battleRoyale.status(now),
+      playerPlacement: battleRoyale.placementOf(playerId),
+      spectator: spectatorTarget ? {
+        active: true,
+        targetId: spectatorTarget.id,
+        targetName: spectatorTarget.name,
+      } : null,
       entities: visible,
     };
   }
 
   function eventsForPlayer(playerId, packets = []) {
-    const self = ctx.components.get(playerId, "Transform");
+    const spectatorTarget = spectatorTargetFor(playerId);
+    const self = spectatorTarget
+      ? ctx.components.get(spectatorTarget.id, "Transform")
+      : ctx.components.get(playerId, "Transform");
     const globalEvents = new Set([
       "battle-royale:deployment",
       "battle-royale:started",

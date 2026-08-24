@@ -12,6 +12,7 @@ export async function setup(ctx) {
   let lastArmorPlates = null;
   let mode = "tdm";
   let lastLocation = null;
+  let lastSpectatorTargetId = null;
 
   function updateLiveMode() {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
@@ -58,13 +59,22 @@ export async function setup(ctx) {
     if (!self) return;
     mode = snapshot.mode === "battle-royale" ? "battle-royale" : mode;
     if (self.armorPlates != null && lastArmorPlates == null) lastArmorPlates = Number(self.armorPlates);
-    if (mode === "battle-royale" && self.location) {
-      if (lastLocation == null) lastLocation = self.location;
-      else if (self.location !== lastLocation) {
+    const spectator = snapshot?.spectator;
+    const observedId = spectator?.active ? spectator.targetId : network.playerId;
+    const observed = snapshot?.entities?.find((entity) => entity.id === observedId) ?? self;
+    if (spectator?.active && spectator.targetId && spectator.targetId !== lastSpectatorTargetId) {
+      lastSpectatorTargetId = spectator.targetId;
+      announce(`Наблюдение за ${spectator.targetName || "оставшимся игроком"}`, { interrupt: false, repeat: true });
+    } else if (!spectator?.active) {
+      lastSpectatorTargetId = null;
+    }
+    if (mode === "battle-royale" && observed.location) {
+      if (lastLocation == null) lastLocation = observed.location;
+      else if (observed.location !== lastLocation) {
         const previous = lastLocation;
-        lastLocation = self.location;
-        const important = self.location.startsWith("Склад") || previous.startsWith("Склад");
-        if (important) announce(self.location, { interrupt: false, repeat: true });
+        lastLocation = observed.location;
+        const important = observed.location.startsWith("Склад") || previous.startsWith("Склад");
+        if (important) announce(observed.location, { interrupt: false, repeat: true });
       }
     }
   });
@@ -102,8 +112,8 @@ export async function setup(ctx) {
 
     if (packet.event === "feedback:sound" && payload.recipientId === network.playerId) {
       if (payload.key === "enemy.killed") announce("Противник уничтожен", { interrupt: true });
-      if (payload.key === "death.full") {
-        announce(mode === "battle-royale" ? "Вы выбыли" : "Вы погибли. Возрождение через три секунды", { interrupt: true });
+      if (payload.key === "death.full" && mode !== "battle-royale") {
+        announce("Вы погибли. Возрождение через три секунды", { interrupt: true });
       }
       if (payload.key === "armor.break") announce("Броня противника разбита", { interrupt: true });
       if (payload.key === "armor.self-break") announce("Ваша броня разбита", { interrupt: true });
@@ -126,6 +136,10 @@ export async function setup(ctx) {
       if (packet.event === "battle-royale:deployment") announce("Высадка начинается", { interrupt: true });
       if (packet.event === "battle-royale:started") announce("Высадка завершена. В бой", { interrupt: true });
       if (packet.event === "battle-royale:remaining") announce(`Осталось ${payload.alive} игроков`, { interrupt: false, repeat: true });
+      if (packet.event === "battle-royale:eliminated" && payload.entityId === network.playerId) {
+        const placement = Number(payload.placement);
+        announce(Number.isFinite(placement) ? `Вы выбыли. ${placement}-е место` : "Вы выбыли", { interrupt: true, repeat: true });
+      }
       if (packet.event === "battle-royale:zone-damage" && payload.entityId === network.playerId) {
         announce("Вы за пределами безопасной зоны", { interrupt: true, repeat: true });
       }

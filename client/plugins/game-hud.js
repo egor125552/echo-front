@@ -12,6 +12,8 @@ export async function setup(ctx) {
   const remaining = document.querySelector("#remaining-value");
   const location = document.querySelector("#location-value");
   const zone = document.querySelector("#zone-value");
+  const placement = document.querySelector("#placement-value");
+  const spectator = document.querySelector("#spectator-value");
   const weapon = document.querySelector("#weapon-value");
   const ammo = document.querySelector("#ammo-value");
   const health = document.querySelector("#health-value");
@@ -33,16 +35,20 @@ export async function setup(ctx) {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
     if (!self) return;
     const isBr = snapshot.mode === "battle-royale" || snapshot.match?.mode === "battle-royale";
+    const observedId = snapshot?.spectator?.active ? snapshot.spectator.targetId : network.playerId;
+    const observed = snapshot?.entities?.find((entity) => entity.id === observedId) ?? self;
     if (mode) mode.textContent = isBr ? "Королевская битва" : "Командный бой";
     team.textContent = isBr ? "каждый сам за себя" : String(self.team || "-");
     score.textContent = isBr
       ? "без командного счёта"
       : `${snapshot.match?.score?.[1] ?? 0} : ${snapshot.match?.score?.[2] ?? 0}`;
     if (remaining) remaining.textContent = isBr ? String(snapshot.match?.alive ?? "-") : "-";
-    if (location) location.textContent = self.location ?? "-";
+    if (location) location.textContent = observed.location ?? "-";
+    if (placement) placement.textContent = isBr && snapshot?.playerPlacement ? String(snapshot.playerPlacement) : "-";
+    if (spectator) spectator.textContent = snapshot?.spectator?.active ? (snapshot.spectator.targetName ?? "активно") : "нет";
     if (zone) {
       if (isBr && snapshot.match?.zone) {
-        const distance = Math.hypot(self.x ?? 0, self.z ?? 0);
+        const distance = Math.hypot(observed.x ?? 0, observed.z ?? 0);
         const radius = Number(snapshot.match.zone.radius) || 0;
         zone.textContent = `${Math.round(radius)} м, вы ${distance <= radius ? "внутри" : "снаружи"}`;
       } else zone.textContent = "-";
