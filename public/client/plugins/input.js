@@ -19,6 +19,7 @@ export function sampleKeyboardState(pressed, {
   firePressed = false,
   reload = false,
   selectDelta = 0,
+  platePressed = false,
 } = {}) {
   const weaponModifier = pressed.has("KeyZ");
   return {
@@ -32,6 +33,7 @@ export function sampleKeyboardState(pressed, {
     firePressed,
     reload,
     selectDelta,
+    platePressed,
   };
 }
 
@@ -65,11 +67,12 @@ export async function setup(ctx) {
   let firePressed = false;
   let reload = false;
   let selectDelta = 0;
+  let platePressed = false;
 
   const clickSuppression = new WeakMap();
   const handled = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR",
+    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB",
   ]);
 
   const opposite = {
@@ -159,6 +162,7 @@ export async function setup(ctx) {
     firePressed = false;
     reload = false;
     selectDelta = 0;
+    platePressed = false;
     syncPressedState();
     if (hadState) {
       ctx.events.emit("input:reset", { reason });
@@ -178,6 +182,7 @@ export async function setup(ctx) {
         ctx.events.emit("input:fire-start", {});
       }
       if (event.code === "KeyR") reload = true;
+      if (event.code === "KeyB") platePressed = true;
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
       if (pressed.has("KeyZ") && event.code === "ArrowRight") selectDelta = 1;
       pressed.add(event.code);
@@ -310,6 +315,7 @@ export async function setup(ctx) {
       if (action === "reload") reload = true;
       if (action === "weapon-prev") selectDelta = -1;
       if (action === "weapon-next") selectDelta = 1;
+      if (action === "armor-plate") platePressed = true;
       emitTouch(action, true);
       notifyChanged(`touch:${action}`);
     });
@@ -326,10 +332,16 @@ export async function setup(ctx) {
       enabled = false;
     },
     sample() {
-      const sample = sampleInputState(pressed, touch, { firePressed, reload, selectDelta });
+      const sample = sampleInputState(pressed, touch, {
+        firePressed,
+        reload,
+        selectDelta,
+        platePressed,
+      });
       firePressed = false;
       reload = false;
       selectDelta = 0;
+      platePressed = false;
       return sample;
     },
   });
