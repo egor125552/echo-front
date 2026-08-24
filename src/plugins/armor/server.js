@@ -1,4 +1,4 @@
-export const ARMOR_PLATE_VALUE = 25;
+export const ARMOR_PLATE_VALUE = 31.25;
 export const DEFAULT_MAX_PLATES = 4;
 export const PLATING_DURATION_MS = 1050;
 
@@ -122,7 +122,9 @@ export async function setup(ctx) {
     ctx.components.add(entityId, "Armor", {
       current,
       maximum,
-      plateValue: ARMOR_PLATE_VALUE,
+      plateValue: explicitPlates > 0
+        ? maximum / explicitPlates
+        : ARMOR_PLATE_VALUE,
     });
   });
 
