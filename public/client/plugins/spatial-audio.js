@@ -8,13 +8,17 @@ export const HRTF_FULL_ANGLE = 1.45;
 export const MASTER_FILTER_MIN_HZ = 80;
 export const MASTER_FILTER_MAX_HZ = 18000;
 export const FOREGROUND_MUFFLE_STRENGTH = 0.15;
+export const DISTANCE_FADE_START_RATIO = 0.78;
+export const DISTANCE_AIR_MIN_HZ = 4200;
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
 function smoothstep(edge0, edge1, value) {
-  const t = Math.max(0, Math.min(1, (value - edge0) / (edge1 - edge0)));
+  const span = edge1 - edge0;
+  if (span <= 0) return value >= edge1 ? 1 : 0;
+  const t = Math.max(0, Math.min(1, (value - edge0) / span));
   return t * t * (3 - 2 * t);
 }
 
@@ -54,6 +58,35 @@ export function localizeForListener(listener, position) {
   const localForward = dx * Math.sin(listener.angle) - dz * Math.cos(listener.angle);
   const azimuth = Math.atan2(localRight, localForward || 0.000001);
   return { dx, dz, localRight, localForward, azimuth, distance: Math.hypot(dx, dz) };
+}
+
+export function distanceAttenuation(distance, {
+  maxDistance = 40,
+  referenceDistance = 2,
+  rolloffFactor = 0.5,
+  fadeStartRatio = DISTANCE_FADE_START_RATIO,
+} = {}) {
+  const d = Math.max(0, Number(distance) || 0);
+  const reference = Math.max(0.1, Number(referenceDistance) || 2);
+  const maximum = Math.max(reference + 0.01, Number(maxDistance) || 40);
+  const rolloff = Math.max(0, Number(rolloffFactor) || 0);
+  if (d >= maximum) return 0;
+
+  const inverse = d <= reference
+    ? 1
+    : reference / (reference + rolloff * (d - reference));
+  const ratio = Math.max(0.5, Math.min(0.95, Number(fadeStartRatio) || DISTANCE_FADE_START_RATIO));
+  const fadeStart = Math.max(reference, maximum * ratio);
+  const tail = d <= fadeStart ? 1 : 1 - smoothstep(fadeStart, maximum, d);
+  return clamp01(inverse * tail);
+}
+
+export function distanceAirCutoff(distance, maxDistance = 40, minimumHz = DISTANCE_AIR_MIN_HZ) {
+  const d = Math.max(0, Number(distance) || 0);
+  const maximum = Math.max(1, Number(maxDistance) || 40);
+  const minimum = Math.max(1200, Math.min(MASTER_FILTER_MAX_HZ, Number(minimumHz) || DISTANCE_AIR_MIN_HZ));
+  const amount = Math.pow(clamp01(d / maximum), 1.2);
+  return MASTER_FILTER_MAX_HZ * Math.pow(minimum / MASTER_FILTER_MAX_HZ, amount);
 }
 
 export function softenedMuffleCutoff(masterCutoff, strength = FOREGROUND_MUFFLE_STRENGTH) {
@@ -144,9 +177,6 @@ export async function setup(ctx) {
     }, { once: true });
   }
 
-  // Archipelago deliberately uses setTargetAtTime for continuously changing
-  // combat audio. A later target bends the same exponential curve instead of
-  // cancelling a finite ramp and starting a new one, which avoids zippering.
   function targetParam(param, value, timeConstant = 0.25) {
     const constant = Math.max(0.01, Number(timeConstant) || 0.25);
     param.setTargetAtTime(value, audioContext.currentTime, constant);
@@ -200,26 +230,33 @@ export async function setup(ctx) {
   }
 
   function rearCutoff(local) {
-    if (local.distance < 0.001) return 18000;
+    if (local.distance < 0.001) return MASTER_FILTER_MAX_HZ;
     const rearAmount = Math.max(0, Math.min(1, -local.localForward / local.distance));
-    return 18000 - rearAmount * 7000;
+    return MASTER_FILTER_MAX_HZ - rearAmount * 7000;
   }
 
   function playSpatialBuffer(buffer, position, {
     radius = 40,
     gain = 1,
+    referenceDistance = 2,
+    rolloffFactor = 0.5,
+    airAbsorptionMinHz = DISTANCE_AIR_MIN_HZ,
     channel = null,
     replace = false,
     loop = false,
   } = {}) {
     const local = localize(position);
-    if (local.distance > radius) return null;
+    const attenuation = distanceAttenuation(local.distance, {
+      maxDistance: radius,
+      referenceDistance,
+      rolloffFactor,
+    });
+    if (attenuation <= 0) return null;
 
     const mix = hybridSpatialMix(local.azimuth);
-    const attenuation = gain * Math.max(0.025, 1 / (1 + local.distance * 0.16));
-
     const source = audioContext.createBufferSource();
     const distanceGain = audioContext.createGain();
+    const airFilter = audioContext.createBiquadFilter();
     const stereoPanner = audioContext.createStereoPanner();
     const stereoGain = audioContext.createGain();
     const hrtfPanner = audioContext.createPanner();
@@ -228,9 +265,14 @@ export async function setup(ctx) {
 
     source.buffer = buffer;
     source.loop = Boolean(loop);
-    distanceGain.gain.value = attenuation;
+    distanceGain.gain.value = gain * attenuation;
+    airFilter.type = "lowpass";
+    airFilter.Q.value = 0.2;
+    airFilter.frequency.value = distanceAirCutoff(local.distance, radius, airAbsorptionMinHz);
     stereoPanner.pan.value = mix.pan;
 
+    // Distance attenuation is handled explicitly before the panners so the
+    // stereo and HRTF branches share the exact same audibility curve.
     hrtfPanner.panningModel = "HRTF";
     hrtfPanner.distanceModel = "inverse";
     hrtfPanner.refDistance = 1;
@@ -248,9 +290,9 @@ export async function setup(ctx) {
     stereoGain.gain.setValueAtTime(mix.stereo, now);
     hrtfGain.gain.setValueAtTime(mix.hrtf, now);
 
-    source.connect(distanceGain);
-    distanceGain.connect(stereoPanner).connect(stereoGain).connect(masterInput);
-    distanceGain.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(masterInput);
+    source.connect(distanceGain).connect(airFilter);
+    airFilter.connect(stereoPanner).connect(stereoGain).connect(masterInput);
+    airFilter.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(masterInput);
     trackSource(source, channel, replace);
     source.start();
 
@@ -259,6 +301,11 @@ export async function setup(ctx) {
       update(nextPosition) {
         const next = localize(nextPosition);
         const nextMix = hybridSpatialMix(next.azimuth);
+        const nextAttenuation = distanceAttenuation(next.distance, {
+          maxDistance: radius,
+          referenceDistance,
+          rolloffFactor,
+        });
         const at = audioContext.currentTime + 0.06;
         stereoPanner.pan.linearRampToValueAtTime(nextMix.pan, at);
         stereoGain.gain.linearRampToValueAtTime(nextMix.stereo, at);
@@ -266,10 +313,11 @@ export async function setup(ctx) {
         hrtfPanner.positionX.linearRampToValueAtTime(next.localRight, at);
         hrtfPanner.positionZ.linearRampToValueAtTime(-next.localForward, at);
         rearFilter.frequency.linearRampToValueAtTime(rearCutoff(next), at);
-        distanceGain.gain.linearRampToValueAtTime(
-          gain * Math.max(0.025, 1 / (1 + next.distance * 0.16)),
+        airFilter.frequency.linearRampToValueAtTime(
+          distanceAirCutoff(next.distance, radius, airAbsorptionMinHz),
           at,
         );
+        distanceGain.gain.linearRampToValueAtTime(gain * nextAttenuation, at);
       },
     };
   }
