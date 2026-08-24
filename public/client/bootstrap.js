@@ -22,6 +22,10 @@ playButton.addEventListener("click", async () => {
   }
 });
 
-host.events.on("network:disconnected", () => {
-  playButton.disabled = false;
+host.events.on("network:disconnected", ({ willReconnect } = {}) => {
+  playButton.disabled = Boolean(willReconnect);
+});
+
+host.events.on("network:reconnecting", () => {
+  playButton.disabled = true;
 });

@@ -31,9 +31,6 @@ export function lowHealthIntensity(health, maximum) {
   return (REVERB_START_RATIO - ratio) / (REVERB_START_RATIO - REVERB_FULL_RATIO);
 }
 
-// Match Archipelago's injury-filter curve shape. The critically muffled range
-// opens slowly and then naturally accelerates toward full-band sound instead
-// of stepping through equally sized frequency changes.
 export function muffleCutoffForIntensity(intensity) {
   const injury = clamp01(intensity);
   const openSound = Math.pow(1 - injury, MUFFLE_CURVE_POWER);
@@ -94,9 +91,6 @@ export async function setup(ctx) {
         handle?.stop?.();
         return;
       }
-      // Keep one heartbeat source for the whole life. Recovery fades this same
-      // loop to silence instead of stopping it at an audible level and later
-      // creating a fresh source when health becomes critical again.
       heartbeat = handle;
       heartbeat.setGain?.(heartbeatGainForRatio(lastRatio), 0.28);
     } catch (error) {
@@ -109,10 +103,6 @@ export async function setup(ctx) {
 
   function applyIntensity(intensity) {
     const next = clamp01(intensity);
-    // Feed every authoritative health target into persistent WebAudio nodes.
-    // The audio service uses setTargetAtTime, as Archipelago does, so a new
-    // snapshot retargets the same smooth curve instead of cancelling/restarting
-    // a finite linear ramp.
     audio.setReverbMix(next * MAX_REVERB_MIX);
     audio.setMuffleCutoff(muffleCutoffForIntensity(next));
   }
@@ -123,6 +113,15 @@ export async function setup(ctx) {
     woundedCueArmed = true;
     audio.stopChannel("low-health-wounded");
     stopHeartbeat();
+    applyIntensity(0);
+  }
+
+  function suspendEffectsForReconnect() {
+    // A network hiccup is not a new life. Do not re-arm the wounded cue or
+    // recreate the heartbeat; just fade the local injury presentation until the
+    // authoritative snapshot returns.
+    audio.stopChannel("low-health-wounded");
+    heartbeat?.setGain?.(0, 0.2);
     applyIntensity(0);
   }
 
@@ -151,13 +150,11 @@ export async function setup(ctx) {
     }
 
     if (heartbeat) {
-      // Once started, the source stays alive but becomes silent while the player
-      // recovers. This removes the audible stop/start seam around the threshold.
       heartbeat.setGain?.(heartbeatGainForRatio(lastRatio), 0.28);
     }
   });
 
-  ctx.events.on("network:disconnected", resetEffects);
+  ctx.events.on("network:disconnected", suspendEffectsForReconnect);
 
   ctx.services.provide("low-health-audio", {
     heartbeatUrl: HEARTBEAT_URL,

@@ -17,8 +17,18 @@ export async function setup(ctx) {
     connection.textContent = "Соединение установлено";
   });
 
-  ctx.events.on("network:disconnected", () => {
-    connection.textContent = "Соединение потеряно";
+  ctx.events.on("network:disconnected", ({ willReconnect } = {}) => {
+    connection.textContent = willReconnect ? "Соединение потеряно. Переподключение" : "Соединение потеряно";
+  });
+
+  ctx.events.on("network:reconnecting", ({ attempt } = {}) => {
+    connection.textContent = attempt > 1
+      ? `Переподключение к матчу. Попытка ${attempt}`
+      : "Переподключение к матчу";
+  });
+
+  ctx.events.on("network:reconnected", ({ resumed } = {}) => {
+    connection.textContent = resumed ? "Соединение восстановлено. Матч продолжен" : "Соединение восстановлено";
   });
 
   ctx.events.on("network:error", () => {

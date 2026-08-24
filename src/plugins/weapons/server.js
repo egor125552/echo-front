@@ -6,7 +6,7 @@ const DEFINITIONS = {
     holdRepeat: true,
     magazine: 100,
     reserve: 400,
-    damage: 28,
+    damage: 22,
     rpm: 300,
     range: 28,
     soundKey: "weapon.pistol",
