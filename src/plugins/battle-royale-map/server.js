@@ -6,6 +6,8 @@ export const BASE_SPAWN_RADIUS = 125;
 export const PLAYER_SPAWN_CLEARANCE = 60;
 export const BUILDING_CENTER_X = 60;
 export const BUILDING_CENTER_Z = 0;
+export const STAIR_STEP_COUNT = 16;
+export const STAIR_STEP_HEIGHT = UPPER_FLOOR_Y / STAIR_STEP_COUNT;
 
 export const BUILDING = Object.freeze({
   id: "warehouse",
@@ -39,7 +41,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "3.3.0",
+  version: "4.0.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -59,10 +61,20 @@ function distance3(a, b) {
 
 export function stairHeightAt(position) {
   if (!insideRect(position, STAIR)) return null;
-  const progress = Math.max(0, Math.min(1, (STAIR.maxZ - position.z) / (STAIR.maxZ - STAIR.minZ)));
-  return progress * UPPER_FLOOR_Y;
+  const stepDepth = (STAIR.maxZ - STAIR.minZ) / STAIR_STEP_COUNT;
+  const distanceFromBottom = Math.max(0, Math.min(
+    STAIR.maxZ - STAIR.minZ,
+    STAIR.maxZ - position.z,
+  ));
+  const stepIndex = Math.min(
+    STAIR_STEP_COUNT - 1,
+    Math.floor(distanceFromBottom / stepDepth),
+  );
+  return (stepIndex + 1) * STAIR_STEP_HEIGHT;
 }
 
+// Compatibility/diagnostic helper only. Runtime vertical motion is resolved by
+// Rapier colliders in the movement plugin and never reads this function.
 export function heightAt(position) {
   const stair = stairHeightAt(position);
   if (stair != null) return stair;
@@ -130,8 +142,6 @@ function generatedSpawn(index) {
   let x = Math.cos(angle) * radius;
   let z = Math.sin(angle) * radius;
 
-  // Ring 0 is the slot replaced by the first human. Keep every other initial
-  // fighter comfortably away so combat cannot begin immediately beside them.
   if (ring !== 0 && Math.hypot(x - BASE_SPAWN_RADIUS, z) < PLAYER_SPAWN_CLEARANCE) {
     angle += ring % 2 === 0 ? -0.7 : 0.7;
     x = Math.cos(angle) * radius;
@@ -157,35 +167,61 @@ export async function setup(ctx) {
     return collider;
   };
 
+  let groundCollider = null;
   try {
+    groundCollider = physics.createFloor({
+      kind: "ground",
+      material: DEFAULT_GROUND_SURFACE,
+      x: 0,
+      y: 0,
+      z: 0,
+      hx: WORLD_HALF_SIZE,
+      hz: WORLD_HALF_SIZE,
+      thickness: 0.4,
+    });
+
     addWall({ kind: "world-boundary", side: "north", x: 0, z: -WORLD_HALF_SIZE, hx: WORLD_HALF_SIZE, hz: BOUNDARY_HALF_THICKNESS, height: 10 });
     addWall({ kind: "world-boundary", side: "south", x: 0, z: WORLD_HALF_SIZE, hx: WORLD_HALF_SIZE, hz: BOUNDARY_HALF_THICKNESS, height: 10 });
     addWall({ kind: "world-boundary", side: "west", x: -WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
     addWall({ kind: "world-boundary", side: "east", x: WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
 
-    // Ground-floor warehouse shell. The east wall faces the first human spawn and
-    // leaves a 2.4 m entrance exactly on the straight-ahead path.
-    addWall({ kind: "building-wall", x: BUILDING.minX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING.maxX, z: BUILDING_CENTER_Z - 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING.maxX, z: BUILDING_CENTER_Z + 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.minX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, z: BUILDING_CENTER_Z - 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, z: BUILDING_CENTER_Z + 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
 
-    // A thin physical second-floor slab blocks shots and line of sight between floors.
-    // It is split into four pieces so the metal stairwell remains a real opening.
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
-    addWall({ kind: "building-floor", x: BUILDING_CENTER_X - 3.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", x: BUILDING_CENTER_X + 13.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 10, hx: 2, hz: 2, height: 0.18 });
-    addWall({ kind: "building-floor", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 10, hx: 2, hz: 2, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 3.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11.5, hz: 12, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 13.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1.5, hz: 12, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 10, hx: 2, hz: 2, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 10, hx: 2, hz: 2, height: 0.18 });
 
-    // Upper floor shell and an internal room separator with its own door.
-    addWall({ kind: "building-wall", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
+    const stairDepth = (STAIR.maxZ - STAIR.minZ) / STAIR_STEP_COUNT;
+    const stairHalfX = (STAIR.maxX - STAIR.minX) / 2;
+    const stairCenterX = (STAIR.minX + STAIR.maxX) / 2;
+    for (let index = 0; index < STAIR_STEP_COUNT; index += 1) {
+      const topY = (index + 1) * STAIR_STEP_HEIGHT;
+      const z = STAIR.maxZ - (index + 0.5) * stairDepth;
+      addWall({
+        kind: "building-stair",
+        material: "metal",
+        stairIndex: index,
+        x: stairCenterX,
+        y: 0,
+        z,
+        hx: stairHalfX,
+        hz: stairDepth / 2,
+        height: topY,
+      });
+    }
+
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
   } finally {
     physics.endBatch?.();
   }
@@ -196,7 +232,15 @@ export async function setup(ctx) {
       name: "Входная дверь склада",
       ...WAREHOUSE_FRONT_DOOR,
       open: false,
-      collider: physics.createWall({ ...WAREHOUSE_FRONT_DOOR, hx: 0.25, hz: 1.2, height: 2.6 }),
+      collider: physics.createWall({
+        kind: "building-door",
+        doorId: "warehouse-front-door",
+        material: "metal",
+        ...WAREHOUSE_FRONT_DOOR,
+        hx: 0.25,
+        hz: 1.2,
+        height: 2.6,
+      }),
     },
     {
       id: "warehouse-upper-room-door",
@@ -205,20 +249,59 @@ export async function setup(ctx) {
       y: UPPER_FLOOR_Y,
       z: BUILDING_CENTER_Z,
       open: false,
-      collider: physics.createWall({ x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.25, hz: 1.2, height: 2.6 }),
+      collider: physics.createWall({
+        kind: "building-door",
+        doorId: "warehouse-upper-room-door",
+        material: "metal",
+        x: BUILDING_CENTER_X,
+        y: UPPER_FLOOR_Y,
+        z: BUILDING_CENTER_Z,
+        hx: 0.25,
+        hz: 1.2,
+        height: 2.6,
+      }),
     },
   ];
 
   const crates = [
     { id: "crate-ground-rifle", x: BUILDING_CENTER_X - 8.5, y: 0, z: BUILDING_CENTER_Z - 2, loot: "rifle", opened: false },
     { id: "crate-ground-armor", x: BUILDING_CENTER_X + 11, y: 0, z: BUILDING_CENTER_Z + 3, loot: "armor", opened: false },
-    // Both upper crates are on the solid east-side mezzanine. The first sits just
-    // beyond the top of the stairs, while the second is farther along the same floor.
     { id: "crate-upper-armor", x: BUILDING_CENTER_X + 5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 9, loot: "armor", opened: false },
     { id: "crate-upper-rifle", x: BUILDING_CENTER_X + 5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 9, loot: "rifle", opened: false },
   ];
 
   let spawnIndex = 0;
+
+  function acousticOcclusionBetween(listener, source) {
+    if (typeof physics.raycastWorld !== "function") return 0;
+    const origin = {
+      x: Number(listener?.x) || 0,
+      y: (Number(listener?.y) || 0) + 1,
+      z: Number(listener?.z) || 0,
+    };
+    const target = {
+      x: Number(source?.x) || 0,
+      y: (Number(source?.y) || 0) + 0.65,
+      z: Number(source?.z) || 0,
+    };
+    const direction = {
+      x: target.x - origin.x,
+      y: target.y - origin.y,
+      z: target.z - origin.z,
+    };
+    const distance = Math.hypot(direction.x, direction.y, direction.z);
+    if (distance < 0.2) return 0;
+    const hit = physics.raycastWorld(origin, direction, Math.max(0, distance - 0.25));
+    if (!hit) return 0;
+    const kind = hit.worldObject?.kind;
+    if (kind === "ground") return 0;
+    if (kind === "building-door") return 0.92;
+    if (kind === "building-floor") return 0.88;
+    if (kind === "building-wall") return 0.82;
+    if (kind === "building-stair") return 0.34;
+    if (kind === "world-boundary") return 0.9;
+    return 0.55;
+  }
 
   function describeBlockedMoveWithObjects(position, attempted, moved) {
     const blockage = describeBlockedMove(position, attempted, moved);
@@ -288,11 +371,13 @@ export async function setup(ctx) {
     doors,
     crates,
     building: BUILDING,
+    groundCollider,
     defaultSurface: DEFAULT_GROUND_SURFACE,
     describeBlockedMove: describeBlockedMoveWithObjects,
     surfaceAt,
     heightAt,
     acousticZoneAt,
+    acousticOcclusionBetween,
     locationAt,
     interact,
     footstepVariantCount(surface) {
