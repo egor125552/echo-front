@@ -1,0 +1,72 @@
+name: Capture Engine Diagnostics
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/engine-diagnostics-request.json
+      - .github/workflows/capture-engine-diagnostics.yml
+  workflow_dispatch:
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read request
+        id: request
+        run: |
+          REQUEST_ID=$(jq -r '.id' .github/engine-diagnostics-request.json)
+          MODE=$(jq -r '.mode // "battle-royale"' .github/engine-diagnostics-request.json)
+          ROOM=$(jq -r '.room // "public"' .github/engine-diagnostics-request.json)
+          SAMPLES=$(jq -r '.samples // 20' .github/engine-diagnostics-request.json)
+          INTERVAL=$(jq -r '.intervalSeconds // 3' .github/engine-diagnostics-request.json)
+          echo "id=$REQUEST_ID" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "room=$ROOM" >> "$GITHUB_OUTPUT"
+          echo "samples=$SAMPLES" >> "$GITHUB_OUTPUT"
+          echo "interval=$INTERVAL" >> "$GITHUB_OUTPUT"
+
+      - name: Verify diagnostics are live
+        run: |
+          BODY=$(curl --fail --silent --show-error https://echo-front.k69ysrndm7.workers.dev/api/health)
+          ENABLED=$(printf '%s' "$BODY" | jq -r '.diagnosticsEnabled')
+          if [ "$ENABLED" != "true" ]; then
+            echo "Engine diagnostics are not enabled on the live Worker."
+            exit 1
+          fi
+
+      - name: Capture live Durable Object diagnostics
+        env:
+          REQUEST_ID: ${{ steps.request.outputs.id }}
+          MODE: ${{ steps.request.outputs.mode }}
+          ROOM: ${{ steps.request.outputs.room }}
+          SAMPLES: ${{ steps.request.outputs.samples }}
+          INTERVAL: ${{ steps.request.outputs.interval }}
+        run: |
+          : > engine-diagnostics.jsonl
+          for ((i=1; i<=SAMPLES; i++)); do
+            URL="https://echo-front.k69ysrndm7.workers.dev/api/diagnostics?mode=${MODE}&room=${ROOM}"
+            BODY=$(curl --fail --silent --show-error "$URL")
+            printf '%s\n' "$BODY" >> engine-diagnostics.jsonl
+            echo "Captured sample $i/$SAMPLES"
+            if [ "$i" -lt "$SAMPLES" ]; then sleep "$INTERVAL"; fi
+          done
+          jq -s '{samples:length, first:.[0].game.generatedAt, last:.[-1].game.generatedAt, roomActive:.[-1].roomActive, mode:.[-1].mode}' engine-diagnostics.jsonl > engine-diagnostics-summary.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-diagnostics-${{ steps.request.outputs.id }}
+          path: |
+            engine-diagnostics.jsonl
+            engine-diagnostics-summary.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Summary
+        run: |
+          echo "### Direct engine diagnostics captured" >> "$GITHUB_STEP_SUMMARY"
+          echo "Request: ${{ steps.request.outputs.id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Samples: ${{ steps.request.outputs.samples }} every ${{ steps.request.outputs.interval }}s" >> "$GITHUB_STEP_SUMMARY"
+          cat engine-diagnostics-summary.json >> "$GITHUB_STEP_SUMMARY"
