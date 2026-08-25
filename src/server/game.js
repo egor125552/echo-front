@@ -1,6 +1,7 @@
 import { PluginHost } from "../core/plugin-host.js";
 import { echoFrontPreset } from "../presets/echo-front.js";
 import { battleRoyalePreset } from "../presets/battle-royale.js";
+import { collectGameDiagnostics } from "./engine-diagnostics.js";
 
 const FORWARDED_EVENTS = new Set([
   "sound:spatial",
@@ -45,12 +46,21 @@ export async function createEchoFrontGame({ mode = "tdm" } = {}) {
     events.push(packet);
     if (events.length > 2400) events.shift();
   });
-  return {
+
+  const game = {
     mode: normalizedMode,
     host,
     api: host.services.get("match-api"),
     drainEvents() {
       return events.splice(0);
     },
+    pendingEventCount() {
+      return events.length;
+    },
+    diagnostics(options = {}) {
+      return collectGameDiagnostics(game, options);
+    },
   };
+
+  return game;
 }
