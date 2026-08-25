@@ -1,3 +1,24 @@
+export const ZONE_WARNING_INTERVAL_MS = 3000;
+
+export function zoneDirectionLabel(self, zone) {
+  if (!self || !zone) return null;
+  const dx = (Number(zone.x) || 0) - (Number(self.x) || 0);
+  const dz = (Number(zone.z) || 0) - (Number(self.z) || 0);
+  if (Math.hypot(dx, dz) < 0.1) return "впереди";
+  const angle = Number(self.angle) || 0;
+  const forward = dx * Math.sin(angle) + dz * -Math.cos(angle);
+  const right = dx * Math.cos(angle) + dz * Math.sin(angle);
+  const sector = Math.round(Math.atan2(right, forward) / (Math.PI / 4));
+  if (sector === 0) return "впереди";
+  if (sector === 1) return "впереди справа";
+  if (sector === 2) return "справа";
+  if (sector === 3) return "сзади справа";
+  if (Math.abs(sector) === 4) return "сзади";
+  if (sector === -3) return "сзади слева";
+  if (sector === -2) return "слева";
+  return "впереди слева";
+}
+
 export const manifest = {
   id: "announcer",
   requires: ["cloudflare-session", "speech-settings"],
@@ -14,6 +35,9 @@ export async function setup(ctx) {
   let mode = "tdm";
   let lastLocation = null;
   let lastSpectatorTargetId = null;
+  let lastSelf = null;
+  let lastZone = null;
+  let lastZoneWarningAt = 0;
 
   function updateLiveMode() {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
@@ -38,6 +62,9 @@ export async function setup(ctx) {
     lastArmorPlates = null;
     lastArmorReserve = null;
     lastLocation = null;
+    lastSelf = null;
+    lastZone = null;
+    lastZoneWarningAt = 0;
     if (mode === "battle-royale") {
       announce(
         resumed
@@ -59,6 +86,8 @@ export async function setup(ctx) {
   ctx.events.on("game:snapshot", (snapshot) => {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
     if (!self) return;
+    lastSelf = self;
+    lastZone = snapshot?.match?.zone ?? lastZone;
     mode = snapshot.mode === "battle-royale" ? "battle-royale" : mode;
     if (self.armorPlates != null && lastArmorPlates == null) lastArmorPlates = Number(self.armorPlates);
     if (self.armorReserve != null && lastArmorReserve == null) lastArmorReserve = Number(self.armorReserve);
@@ -164,7 +193,19 @@ export async function setup(ctx) {
         announce(Number.isFinite(placement) ? `Вы выбыли. ${placement}-е место` : "Вы выбыли", { interrupt: true, repeat: true });
       }
       if (packet.event === "battle-royale:zone-damage" && payload.entityId === network.playerId) {
-        announce("Вы за пределами безопасной зоны", { interrupt: true, repeat: true });
+        const now = Date.now();
+        if (now - lastZoneWarningAt >= ZONE_WARNING_INTERVAL_MS) {
+          lastZoneWarningAt = now;
+          const direction = zoneDirectionLabel(lastSelf, lastZone);
+          const outside = Math.max(0, Number(payload.distance) - Number(payload.radius));
+          const metres = Math.max(1, Math.ceil(Number.isFinite(outside) ? outside : 0));
+          announce(
+            direction
+              ? `Вы за пределами безопасной зоны. Зона ${direction}. До границы примерно ${metres} м`
+              : "Вы за пределами безопасной зоны",
+            { interrupt: true, repeat: true },
+          );
+        }
       }
       if (packet.event === "world:door" && payload.entityId === network.playerId) {
         announce(payload.open ? "Дверь открыта" : "Дверь закрыта", { interrupt: false, repeat: true });
