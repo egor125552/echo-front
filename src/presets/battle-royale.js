@@ -11,6 +11,7 @@ import * as combat from "../plugins/combat/server.js";
 import * as healthRegeneration from "../plugins/health-regeneration/server.js";
 import * as weapons from "../plugins/weapons/server.js";
 import * as botController from "../plugins/bot-controller/server.js";
+import * as botNavigation from "../plugins/bot-navigation/server.js";
 import * as botLoadouts from "../plugins/battle-royale-bot-loadouts/server.js";
 import * as spatialGrid from "../plugins/battle-royale-spatial-grid/server.js";
 import * as botPerception from "../plugins/battle-royale-bot-perception/server.js";
@@ -33,6 +34,7 @@ export const battleRoyalePreset = [
   healthRegeneration,
   weapons,
   botController,
+  botNavigation,
   botLoadouts,
   spatialGrid,
   botPerception,
