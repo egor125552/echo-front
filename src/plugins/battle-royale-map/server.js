@@ -39,7 +39,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "3.1.1",
+  version: "3.2.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -218,6 +218,22 @@ export async function setup(ctx) {
 
   let spawnIndex = 0;
 
+  function describeBlockedMoveWithObjects(position, attempted, moved) {
+    const blockage = describeBlockedMove(position, attempted, moved);
+    if (!blockage || blockage.kind === "world-boundary") return blockage;
+
+    const closedDoor = doors.find((door) => (
+      !door.open
+      && Math.abs((position.y ?? 0) - (door.y ?? 0)) <= 1.6
+      && Math.abs(position.x - door.x) <= 1.25
+      && Math.abs(position.z - door.z) <= 1.8
+    ));
+    if (closedDoor) {
+      return { kind: "door", speech: "Здесь дверь. Нажмите E, чтобы открыть" };
+    }
+    return blockage;
+  }
+
   function interact({ entityId, x, y = 0, z }) {
     const actor = { x, y, z };
     const nearbyDoor = doors
@@ -271,7 +287,7 @@ export async function setup(ctx) {
     crates,
     building: BUILDING,
     defaultSurface: DEFAULT_GROUND_SURFACE,
-    describeBlockedMove,
+    describeBlockedMove: describeBlockedMoveWithObjects,
     surfaceAt,
     heightAt,
     acousticZoneAt,
