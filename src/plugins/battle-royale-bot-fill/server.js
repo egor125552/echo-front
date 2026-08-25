@@ -1,13 +1,18 @@
 export const TARGET_PLAYERS = 96;
 export const HUMAN_START_CLEARANCE = 75;
+export const BOT_MAX_START_RADIUS = 325;
 
-const SAFE_REPLACEMENT_RADIUS = 340;
+const SAFE_REPLACEMENT_RADIUS = BOT_MAX_START_RADIUS;
 const SAFE_REPLACEMENT_ATTEMPTS = 512;
+const SOURCE_START_RADII = Object.freeze([125, 190, 255, 320, 385]);
+const COMPACT_START_RADII = Object.freeze([125, 175, 225, 275, 325]);
 
 export const manifest = {
   id: "bot-fill",
-  version: "2.1.0",
-  requires: ["bot-controller", "bot-loadouts", "entities", "teams", "rapier-physics"],
+  version: "2.2.0",
+  requires: [
+    "bot-controller", "bot-loadouts", "entities", "teams", "rapier-physics", "map-test-arena",
+  ],
   capabilities: ["services.consume", "services.provide"],
 };
 
@@ -15,11 +20,36 @@ function distance2(a, b) {
   return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.z ?? 0) - (b.z ?? 0));
 }
 
+function compactInitialSpawn(spawn) {
+  if (!spawn) return spawn;
+  const radius = Math.hypot(Number(spawn.x) || 0, Number(spawn.z) || 0);
+  if (radius < 0.001) return { ...spawn };
+
+  let ring = 0;
+  let error = Infinity;
+  for (let i = 0; i < SOURCE_START_RADII.length; i += 1) {
+    const candidateError = Math.abs(radius - SOURCE_START_RADII[i]);
+    if (candidateError >= error) continue;
+    error = candidateError;
+    ring = i;
+  }
+
+  const targetRadius = COMPACT_START_RADII[ring];
+  const scale = targetRadius / radius;
+  return {
+    ...spawn,
+    x: (Number(spawn.x) || 0) * scale,
+    y: Number(spawn.y) || 0,
+    z: (Number(spawn.z) || 0) * scale,
+  };
+}
+
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const bots = ctx.services.get("bots");
   const loadouts = ctx.services.get("bot-loadouts");
   const physics = ctx.services.get("physics");
+  const map = ctx.services.get("map");
   let serial = 0;
   let replacementCursor = 0;
 
@@ -27,7 +57,8 @@ export async function setup(ctx) {
     serial += 1;
     const team = serial;
     const spec = loadouts.create(serial, team);
-    entities.spawn(position ? { ...spec, position } : spec);
+    const spawn = position ?? compactInitialSpawn(map.nextSpawn());
+    entities.spawn({ ...spec, position: spawn });
     return spec.id;
   }
 
@@ -113,6 +144,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("bot-fill", {
     targetPlayers: TARGET_PLAYERS,
+    maxStartRadius: BOT_MAX_START_RADIUS,
     ensure,
     makeRoomForHuman,
   });
