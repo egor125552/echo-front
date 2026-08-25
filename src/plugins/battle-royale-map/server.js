@@ -4,8 +4,10 @@ export const UPPER_FLOOR_Y = 3.2;
 export const DEFAULT_GROUND_SURFACE = "forest";
 export const BASE_SPAWN_RADIUS = 125;
 export const PLAYER_SPAWN_CLEARANCE = 60;
+export const MIN_STARTING_SEPARATION = 38;
 export const BUILDING_CENTER_X = 60;
 export const BUILDING_CENTER_Z = 0;
+export const DOOR_TOGGLE_DEBOUNCE_MS = 450;
 
 export const BUILDING = Object.freeze({
   id: "warehouse",
@@ -22,10 +24,6 @@ export const WAREHOUSE_FRONT_DOOR = Object.freeze({
   z: BUILDING_CENTER_Z,
 });
 
-// Keep the staircase centered in its original east-side warehouse position.
-// The physical run is a little longer around the same x=70,z=0 centre so the
-// character controller sees a normal walkable slope instead of a near-wall.
-// East is the bottom facing the entrance; west is the top on the second floor.
 export const STAIR = Object.freeze({
   minX: BUILDING_CENTER_X + 7,
   maxX: BUILDING_CENTER_X + 13,
@@ -41,9 +39,12 @@ const SURFACE_VARIANTS = Object.freeze({
   sand: 6,
 });
 
+const SPAWN_RADII = Object.freeze([125, 190, 255, 320, 385]);
+const FIRST_RING_SKIPS = new Set([1, 9, 11, 19]);
+
 export const manifest = {
   id: "map-test-arena",
-  version: "4.1.1",
+  version: "4.2.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -53,12 +54,24 @@ function insideRect(position, rect, padding = 0) {
     && position.z >= rect.minZ - padding && position.z <= rect.maxZ + padding;
 }
 
+function distance2(a, b) {
+  return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.z ?? 0) - (b.z ?? 0));
+}
+
 function distance3(a, b) {
   return Math.hypot(
     (a.x ?? 0) - (b.x ?? 0),
     (a.y ?? 0) - (b.y ?? 0),
     (a.z ?? 0) - (b.z ?? 0),
   );
+}
+
+function isUpper(position) {
+  return Number(position?.y ?? position?.currentY) > UPPER_FLOOR_Y / 2;
+}
+
+function insideBuilding(position, padding = 0) {
+  return insideRect(position, BUILDING, padding);
 }
 
 export function stairHeightAt(position) {
@@ -70,18 +83,24 @@ export function stairHeightAt(position) {
   return progress * UPPER_FLOOR_Y;
 }
 
-// Compatibility/diagnostic helper only. Runtime vertical motion is resolved by
-// Rapier colliders in the movement plugin and never reads this function.
+export function isOnStair(position, tolerance = 0.65) {
+  const expected = stairHeightAt(position);
+  if (expected == null) return false;
+  const actual = Number(position?.y ?? position?.currentY) || 0;
+  return Math.abs(actual - expected) <= tolerance;
+}
+
+// Compatibility/diagnostic helper only. Runtime vertical motion is resolved by Rapier.
 export function heightAt(position) {
   const stair = stairHeightAt(position);
   if (stair != null) return stair;
-  if (!insideRect(position, BUILDING)) return 0;
-  return Number(position.currentY ?? position.y) > UPPER_FLOOR_Y / 2 ? UPPER_FLOOR_Y : 0;
+  if (!insideBuilding(position)) return 0;
+  return isUpper(position) ? UPPER_FLOOR_Y : 0;
 }
 
 export function surfaceAt(position) {
-  if (insideRect(position, STAIR)) return "metal";
-  if (insideRect(position, BUILDING)) return "concrete";
+  if (isOnStair(position)) return "metal";
+  if (insideBuilding(position)) return "concrete";
   if (
     position.x >= BUILDING_CENTER_X - 22
     && position.x <= BUILDING_CENTER_X + 22
@@ -93,19 +112,15 @@ export function surfaceAt(position) {
 }
 
 export function acousticZoneAt(position) {
-  if (!insideRect(position, BUILDING)) return "outdoor";
-  if (insideRect(position, STAIR)) return "warehouse-stairs";
-  return Number(position.y ?? position.currentY) > UPPER_FLOOR_Y / 2
-    ? "warehouse-upper"
-    : "warehouse-ground";
+  if (!insideBuilding(position)) return "outdoor";
+  if (isOnStair(position)) return "warehouse-stairs";
+  return isUpper(position) ? "warehouse-upper" : "warehouse-ground";
 }
 
 export function locationAt(position) {
-  if (insideRect(position, STAIR)) return "Склад, лестница";
-  if (insideRect(position, BUILDING)) {
-    return Number(position.y ?? position.currentY) > UPPER_FLOOR_Y / 2
-      ? "Склад, второй этаж"
-      : "Склад, первый этаж";
+  if (isOnStair(position)) return "Склад, лестница";
+  if (insideBuilding(position)) {
+    return isUpper(position) ? "Склад, второй этаж" : "Склад, первый этаж";
   }
   if (surfaceAt(position) === "stone") return "Каменная площадка у склада";
   if (surfaceAt(position) === "sand") return "Песчаная низина";
@@ -131,26 +146,94 @@ export function describeBlockedMove(position, attempted, moved) {
   return { kind: "wall", speech: "Здесь пройти нельзя. Стена" };
 }
 
-function generatedSpawn(index) {
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  const ring = index % 96;
-  let angle = ring * golden;
-  const radius = BASE_SPAWN_RADIUS + ((ring * 47) % 215);
-  let x = Math.cos(angle) * radius;
-  let z = Math.sin(angle) * radius;
+function buildSpawnPoints() {
+  const points = [];
+  for (let ring = 0; ring < SPAWN_RADII.length; ring += 1) {
+    const radius = SPAWN_RADII[ring];
+    const offset = ring % 2 ? Math.PI / 20 : 0;
+    for (let slot = 0; slot < 20; slot += 1) {
+      if (ring === 0 && FIRST_RING_SKIPS.has(slot)) continue;
+      const angle = offset + (slot * Math.PI * 2) / 20;
+      const x = Math.cos(angle) * radius;
+      const z = Math.sin(angle) * radius;
+      points.push(Object.freeze({ x, y: 0, z, angle: Math.atan2(-x, z) }));
+    }
+  }
+  return Object.freeze(points);
+}
 
-  if (ring !== 0 && Math.hypot(x - BASE_SPAWN_RADIUS, z) < PLAYER_SPAWN_CLEARANCE) {
-    angle += ring % 2 === 0 ? -0.7 : 0.7;
-    x = Math.cos(angle) * radius;
-    z = Math.sin(angle) * radius;
+const SPAWN_POINTS = buildSpawnPoints();
+
+function generatedSpawn(index) {
+  const point = SPAWN_POINTS[index % SPAWN_POINTS.length];
+  return { ...point };
+}
+
+function frontDoorWaypoint(from, entering) {
+  const approachX = entering ? BUILDING.maxX + 1.3 : BUILDING.maxX - 1.3;
+  const crossX = entering ? BUILDING.maxX - 1.3 : BUILDING.maxX + 1.3;
+  const approach = { x: approachX, y: 0, z: BUILDING_CENTER_Z };
+  const nearApproach = distance2(from, approach) <= 1.35;
+  return {
+    ...(nearApproach ? { x: crossX, y: 0, z: BUILDING_CENTER_Z } : approach),
+    doorId: "warehouse-front-door",
+    kind: "door",
+  };
+}
+
+function upperDoorWaypoint(from, target) {
+  const fromEast = from.x >= BUILDING_CENTER_X;
+  const targetEast = target.x >= BUILDING_CENTER_X;
+  if (fromEast === targetEast) return null;
+  const approachX = fromEast ? BUILDING_CENTER_X + 1.3 : BUILDING_CENTER_X - 1.3;
+  const crossX = fromEast ? BUILDING_CENTER_X - 1.3 : BUILDING_CENTER_X + 1.3;
+  const approach = { x: approachX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z };
+  const nearApproach = distance2(from, approach) <= 1.35;
+  return {
+    ...(nearApproach ? { x: crossX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z } : approach),
+    doorId: "warehouse-upper-room-door",
+    kind: "door",
+  };
+}
+
+function stairWaypoint(from, goingUp) {
+  if (goingUp) {
+    const bottom = { x: STAIR.maxX - 0.5, y: 0, z: BUILDING_CENTER_Z };
+    if (insideRect(from, STAIR, 0.45) || distance2(from, bottom) <= 1.25) {
+      return { x: STAIR.minX - 0.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, kind: "stair" };
+    }
+    return { ...bottom, kind: "stair" };
+  }
+  const top = { x: STAIR.minX - 0.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z };
+  if (insideRect(from, STAIR, 0.45) || distance2(from, top) <= 1.25) {
+    return { x: STAIR.maxX + 0.5, y: 0, z: BUILDING_CENTER_Z, kind: "stair" };
+  }
+  return { ...top, kind: "stair" };
+}
+
+export function navigationWaypoint(from, target) {
+  if (!from || !target) return null;
+  const fromInside = insideBuilding(from, 0.1);
+  const targetInside = insideBuilding(target, 0.1);
+  const fromUpper = isUpper(from);
+  const targetUpper = isUpper(target);
+
+  if (!fromInside && targetInside) return frontDoorWaypoint(from, true);
+
+  if (fromInside && !targetInside) {
+    if (fromUpper || (insideRect(from, STAIR, 0.45) && (from.y ?? 0) > 0.4)) {
+      return stairWaypoint(from, false);
+    }
+    return frontDoorWaypoint(from, false);
   }
 
-  return {
-    x,
-    y: 0,
-    z,
-    angle: Math.atan2(-x, z),
-  };
+  if (fromInside && targetInside) {
+    if (insideRect(from, STAIR, 0.45)) return stairWaypoint(from, targetUpper);
+    if (fromUpper !== targetUpper) return stairWaypoint(from, targetUpper);
+    if (fromUpper && targetUpper) return upperDoorWaypoint(from, target);
+  }
+
+  return null;
 }
 
 export async function setup(ctx) {
@@ -159,8 +242,11 @@ export async function setup(ctx) {
 
   const walls = [];
   const addWall = (spec) => {
-    const collider = physics.createWall(spec);
-    walls.push({ ...spec, collider });
+    const enriched = { ...spec };
+    if (!enriched.accessibleName && enriched.kind === "building-wall") enriched.accessibleName = "стена";
+    if (!enriched.accessibleName && enriched.kind === "world-boundary") enriched.accessibleName = "граница мира";
+    const collider = physics.createWall(enriched);
+    walls.push({ ...enriched, collider });
     return collider;
   };
 
@@ -189,7 +275,6 @@ export async function setup(ctx) {
     addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
 
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
-    // Split the upper slab around the actual stair opening x=67..73,z=-2..2.
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 4, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11, hz: 12, height: 0.18 });
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 14, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1, hz: 12, height: 0.18 });
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 7, hx: 3, hz: 5, height: 0.18 });
@@ -226,10 +311,13 @@ export async function setup(ctx) {
       name: "Входная дверь склада",
       ...WAREHOUSE_FRONT_DOOR,
       open: false,
+      lastToggleAt: -Infinity,
       collider: physics.createWall({
         kind: "building-door",
         doorId: "warehouse-front-door",
         material: "metal",
+        accessibleName: "дверь",
+        interactionHint: "Нажмите E, чтобы открыть",
         ...WAREHOUSE_FRONT_DOOR,
         hx: 0.25,
         hz: 1.2,
@@ -243,10 +331,13 @@ export async function setup(ctx) {
       y: UPPER_FLOOR_Y,
       z: BUILDING_CENTER_Z,
       open: false,
+      lastToggleAt: -Infinity,
       collider: physics.createWall({
         kind: "building-door",
         doorId: "warehouse-upper-room-door",
         material: "metal",
+        accessibleName: "дверь",
+        interactionHint: "Нажмите E, чтобы открыть",
         x: BUILDING_CENTER_X,
         y: UPPER_FLOOR_Y,
         z: BUILDING_CENTER_Z,
@@ -308,12 +399,37 @@ export async function setup(ctx) {
       && Math.abs(position.z - door.z) <= 1.8
     ));
     if (closedDoor) {
-      return { kind: "door", speech: "Здесь дверь. Нажмите E, чтобы открыть" };
+      return {
+        kind: "building-door",
+        objectId: closedDoor.id,
+        objectName: "дверь",
+        speech: "Здесь дверь. Нажмите E, чтобы открыть",
+      };
     }
     return blockage;
   }
 
-  function interact({ entityId, x, y = 0, z }) {
+  function setDoorOpen(doorId, open, entityId = null, now = Date.now()) {
+    const door = doors.find((entry) => entry.id === doorId);
+    if (!door) return false;
+    const desired = Boolean(open);
+    if (door.open === desired) return false;
+    door.open = desired;
+    door.lastToggleAt = now;
+    physics.setWallEnabled(door.collider, !door.open);
+    ctx.events.emit("world:door", {
+      entityId,
+      doorId: door.id,
+      name: door.name,
+      open: door.open,
+      x: door.x,
+      y: door.y,
+      z: door.z,
+    });
+    return true;
+  }
+
+  function interact({ entityId, x, y = 0, z, now = Date.now() }) {
     const actor = { x, y, z };
     const nearbyDoor = doors
       .map((door) => ({ door, distance: distance3(actor, door) }))
@@ -322,9 +438,22 @@ export async function setup(ctx) {
 
     if (nearbyDoor) {
       const door = nearbyDoor.door;
-      door.open = !door.open;
-      physics.setWallEnabled(door.collider, !door.open);
-      const payload = {
+      if (now - door.lastToggleAt < DOOR_TOGGLE_DEBOUNCE_MS) {
+        return {
+          type: "door",
+          entityId,
+          doorId: door.id,
+          name: door.name,
+          open: door.open,
+          ignored: true,
+          x: door.x,
+          y: door.y,
+          z: door.z,
+        };
+      }
+      setDoorOpen(door.id, !door.open, entityId, now);
+      return {
+        type: "door",
         entityId,
         doorId: door.id,
         name: door.name,
@@ -333,8 +462,6 @@ export async function setup(ctx) {
         y: door.y,
         z: door.z,
       };
-      ctx.events.emit("world:door", payload);
-      return { type: "door", ...payload };
     }
 
     const nearbyCrate = crates
@@ -373,6 +500,8 @@ export async function setup(ctx) {
     acousticZoneAt,
     acousticOcclusionBetween,
     locationAt,
+    navigationWaypoint,
+    setDoorOpen,
     interact,
     footstepVariantCount(surface) {
       return SURFACE_VARIANTS[surface] ?? 3;
