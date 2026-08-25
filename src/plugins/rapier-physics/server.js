@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -9,6 +9,9 @@ const CHARACTER_HALF_HEIGHT = 0.45;
 const CHARACTER_RADIUS = 0.32;
 const CHARACTER_CONTROLLER_OFFSET = 0.02;
 const CHARACTER_BASE_OFFSET = CHARACTER_HALF_HEIGHT + CHARACTER_RADIUS + CHARACTER_CONTROLLER_OFFSET;
+const CHARACTER_SUPPORT_SNAP_DISTANCE = 0.35;
+const CHARACTER_SUPPORT_PENETRATION_LIMIT = 0.5;
+const CHARACTER_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
 
 async function loadRapier() {
   if (typeof WebSocketPair !== "undefined") {
@@ -212,6 +215,48 @@ async function createRapierPhysics() {
     };
   }
 
+  function supportSurfaceBelow(position) {
+    const ray = new RAPIER.Ray(
+      { x: position.x, y: position.y, z: position.z },
+      { x: 0, y: -1, z: 0 },
+    );
+    const hit = world.castRay(
+      ray,
+      CHARACTER_BASE_OFFSET + CHARACTER_SUPPORT_SNAP_DISTANCE + CHARACTER_SUPPORT_PENETRATION_LIMIT,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      collider => {
+        if (colliderToEntity.has(collider.handle)) return false;
+        const kind = colliderMetadata.get(collider.handle)?.kind;
+        return CHARACTER_SUPPORT_KINDS.has(kind);
+      },
+    );
+    if (!hit) return null;
+    return {
+      y: position.y - hit.timeOfImpact,
+      colliderHandle: hit.collider.handle,
+      worldObject: colliderMetadata.get(hit.collider.handle) ?? null,
+    };
+  }
+
+  function stabilizeCharacterOnSupport(position, dy) {
+    if (dy > 0) return { position, grounded: false };
+    const support = supportSurfaceBelow(position);
+    if (!support) return { position, grounded: false };
+    const desiredCenterY = support.y + CHARACTER_BASE_OFFSET;
+    const gap = position.y - desiredCenterY;
+    if (gap > CHARACTER_SUPPORT_SNAP_DISTANCE || gap < -CHARACTER_SUPPORT_PENETRATION_LIMIT) {
+      return { position, grounded: false };
+    }
+    return {
+      position: { ...position, y: desiredCenterY },
+      grounded: true,
+    };
+  }
+
   function move(entityId, dx, dz, dy = 0) {
     const entry = characters.get(entityId);
     if (!entry) return { x: 0, y: 0, z: 0, grounded: false, collisions: [] };
@@ -223,7 +268,7 @@ async function createRapierPhysics() {
       collider => collider.handle !== entry.collider.handle,
     );
     const corrected = controller.computedMovement();
-    const grounded = controller.computedGrounded();
+    let grounded = controller.computedGrounded();
     const collisions = [];
     const collisionCount = controller.numComputedCollisions();
     for (let i = 0; i < collisionCount; i += 1) {
@@ -231,13 +276,22 @@ async function createRapierPhysics() {
       if (described) collisions.push(described);
     }
     const p = entry.collider.translation();
-    entry.collider.setTranslation({
+    let next = {
       x: p.x + corrected.x,
       y: p.y + corrected.y,
       z: p.z + corrected.z,
-    });
+    };
+    const stabilized = stabilizeCharacterOnSupport(next, dy);
+    next = stabilized.position;
+    grounded = grounded || stabilized.grounded;
+    const applied = {
+      x: next.x - p.x,
+      y: next.y - p.y,
+      z: next.z - p.z,
+    };
+    entry.collider.setTranslation(next);
     syncQueries();
-    return { x: corrected.x, y: corrected.y, z: corrected.z, grounded, collisions };
+    return { ...applied, grounded, collisions };
   }
 
   function makeRay(origin, direction) {
