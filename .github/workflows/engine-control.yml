@@ -73,17 +73,38 @@ jobs:
           WANTED=$(node -e 'import("./src/config/engine-control.js").then(m => process.stdout.write(String(m.ENGINE_CONTROL.enabled)))')
           REVISION=$(node -e 'import("./src/config/engine-control.js").then(m => process.stdout.write(String(m.ENGINE_CONTROL.revision)))')
           echo "Waiting for engineControlEnabled=$WANTED revision=$REVISION"
-          for i in {1..60}; do
+          LAST_ENABLED=""
+          LAST_REVISION=""
+          for i in {1..90}; do
             BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
             LIVE_ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // empty')
             LIVE_REVISION=$(printf '%s' "$BODY" | jq -r '.engineControlRevision // empty')
-            if [ "$LIVE_ENABLED" = "$WANTED" ] && [ "$LIVE_REVISION" = "$REVISION" ]; then
-              echo "Live Worker confirmed engineControlEnabled=$LIVE_ENABLED revision=$LIVE_REVISION"
+            LAST_ENABLED="$LIVE_ENABLED"
+            LAST_REVISION="$LIVE_REVISION"
+
+            # Enabling is strict: never execute commands against an older build.
+            if [ "$WANTED" = "true" ] && [ "$LIVE_ENABLED" = "true" ] && [ "$LIVE_REVISION" = "$REVISION" ]; then
+              echo "Live Worker confirmed engineControlEnabled=true revision=$LIVE_REVISION"
               exit 0
+            fi
+
+            # Disabling is safety-first: once the live endpoint reports false,
+            # the command door is closed even if deployment metadata is one revision behind.
+            if [ "$WANTED" = "false" ] && [ "$LIVE_ENABLED" = "false" ]; then
+              if [ "$LIVE_REVISION" = "$REVISION" ]; then
+                echo "Live Worker confirmed engineControlEnabled=false revision=$LIVE_REVISION"
+              else
+                echo "Live Worker is safely disabled at revision=$LIVE_REVISION; repository revision=$REVISION is still propagating."
+              fi
+              exit 0
+            fi
+
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "Still waiting: live enabled=${LIVE_ENABLED:-unknown} revision=${LIVE_REVISION:-unknown}"
             fi
             sleep 3
           done
-          echo "Cloudflare did not confirm engine control state."
+          echo "Cloudflare did not reach a safe engine control state. Last live enabled=${LAST_ENABLED:-unknown} revision=${LAST_REVISION:-unknown}"
           exit 1
 
       - name: Summary
