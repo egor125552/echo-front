@@ -1,0 +1,80 @@
+name: Engine Command
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - src/config/engine-command-request.js
+      - .github/workflows/engine-command.yml
+  workflow_dispatch:
+
+jobs:
+  run-command:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Read compiled request
+        id: request
+        run: |
+          ID=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.id)))')
+          COMMAND=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.command)))')
+          echo "id=$ID" >> "$GITHUB_OUTPUT"
+          echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
+          echo "Request $ID: $COMMAND"
+
+      - name: No request yet
+        if: steps.request.outputs.id == '0'
+        run: echo "No engine command request has been created yet."
+
+      - name: Wait for compiled request on live Worker
+        if: steps.request.outputs.id != '0'
+        env:
+          REQUEST_ID: ${{ steps.request.outputs.id }}
+          HEALTH_URL: https://echo-front.k69ysrndm7.workers.dev/api/health
+        run: |
+          for i in {1..60}; do
+            BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
+            ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // false')
+            LIVE_ID=$(printf '%s' "$BODY" | jq -r '.engineCommandRequestId // 0')
+            if [ "$ENABLED" = "true" ] && [ "$LIVE_ID" = "$REQUEST_ID" ]; then
+              echo "Live Worker has engine request $LIVE_ID and control is enabled."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Live Worker never exposed the requested engine command."
+          exit 1
+
+      - name: Invoke compiled engine command
+        if: steps.request.outputs.id != '0'
+        env:
+          REQUEST_ID: ${{ steps.request.outputs.id }}
+        run: |
+          curl --fail --silent --show-error \
+            -X POST \
+            -H 'Content-Type: application/json' \
+            --data "{\"requestId\":${REQUEST_ID}}" \
+            https://echo-front.k69ysrndm7.workers.dev/api/engine-command \
+            | tee engine-command-result.json
+          jq . engine-command-result.json
+
+      - uses: actions/upload-artifact@v4
+        if: steps.request.outputs.id != '0'
+        with:
+          name: engine-command-${{ steps.request.outputs.id }}
+          path: engine-command-result.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Summary
+        if: steps.request.outputs.id != '0'
+        run: |
+          echo "### Engine command" >> "$GITHUB_STEP_SUMMARY"
+          echo "Request: ${{ steps.request.outputs.id }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Command: ${{ steps.request.outputs.command }}" >> "$GITHUB_STEP_SUMMARY"
+          cat engine-command-result.json >> "$GITHUB_STEP_SUMMARY"
