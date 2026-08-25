@@ -5,11 +5,15 @@ function warzoneSound(fileName) {
 }
 
 const DEPLOYMENT_URL = warzoneSound("Call of Duty： Warzone ｜ Squad Leader Jump [Sound Effect].mp3");
+const CRATE_AMBIENT_URL = warzoneSound("Call of Duty： Warzone ｜ Loot Cache Chest Ambient (Loop) [Sound Effect].mp3");
 const CRATE_OPEN_URL = warzoneSound("Call of Duty： Warzone ｜ Loot Cache Chest Open [Sound Effect].mp3");
 const LOOT_PICKUP_URL = warzoneSound("Call of Duty： Warzone ｜ Legendary Loot Pickup ♪ [Sound Effect].mp3");
 const CIRCLE_CLOSING_URL = warzoneSound("Call of Duty： Warzone ｜ Circle Closing Now! [Sound Effect].mp3");
 const VICTORY_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Victory! [Sound Effect].mp3");
 const DEFEAT_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Defeat [Sound Effect].mp3");
+const CRATE_AUDIO_RADIUS = 32;
+const CRATE_START_RADIUS = 30;
+const CRATE_FLOOR_TOLERANCE = 1.75;
 
 export const manifest = {
   id: "battle-royale-audio",
@@ -32,44 +36,108 @@ function createDoorBuffer(audioContext, open) {
   return buffer;
 }
 
-function createCrateCloseBuffer(audioContext) {
-  const duration = 0.3;
-  const length = Math.max(1, Math.floor(audioContext.sampleRate * duration));
-  const buffer = audioContext.createBuffer(1, length, audioContext.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < length; i += 1) {
-    const t = i / audioContext.sampleRate;
-    const envelope = Math.exp(-t * 13);
-    const lid = Math.sin(2 * Math.PI * 118 * t) * 0.82;
-    const latch = Math.sin(2 * Math.PI * 560 * t) * Math.exp(-t * 25) * 0.22;
-    const noise = (Math.random() * 2 - 1) * 0.11;
-    data[i] = (lid + latch + noise) * envelope;
-  }
-  return buffer;
-}
-
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
   let mode = "tdm";
   let doorOpenBuffer = null;
   let doorCloseBuffer = null;
-  let crateCloseBuffer = null;
+  let crateGeneration = 0;
+  const crateLoops = new Map();
+  const pendingCrates = new Set();
 
   function ensureDoorBuffers() {
     doorOpenBuffer ??= createDoorBuffer(audio.context, true);
     doorCloseBuffer ??= createDoorBuffer(audio.context, false);
   }
 
-  function ensureCrateCloseBuffer() {
-    crateCloseBuffer ??= createCrateCloseBuffer(audio.context);
+  function crateChannel(crateId) {
+    return `br-crate:${crateId}`;
+  }
+
+  function stopCrateLoop(crateId) {
+    if (!crateId) return;
+    audio.stopChannel(crateChannel(crateId));
+    crateLoops.delete(crateId);
+    pendingCrates.delete(crateId);
+  }
+
+  function stopAllCrateLoops() {
+    crateGeneration += 1;
+    for (const crateId of crateLoops.keys()) audio.stopChannel(crateChannel(crateId));
+    crateLoops.clear();
+    pendingCrates.clear();
+  }
+
+  async function startCrateLoop(crate, generation) {
+    if (pendingCrates.has(crate.id) || crateLoops.has(crate.id)) return;
+    pendingCrates.add(crate.id);
+    try {
+      const handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
+        radius: CRATE_AUDIO_RADIUS,
+        gain: 0.92,
+        referenceDistance: 3,
+        rolloffFactor: 0.38,
+        loop: true,
+        channel: crateChannel(crate.id),
+        replace: true,
+      });
+      if (mode !== "battle-royale" || generation !== crateGeneration || crate.opened) {
+        try { handle?.source?.stop(); } catch {}
+        return;
+      }
+      if (handle) crateLoops.set(crate.id, handle);
+    } catch (error) {
+      console.warn("Battle royale crate ambient audio", error);
+    } finally {
+      pendingCrates.delete(crate.id);
+    }
+  }
+
+  function syncCrateLoops(snapshot) {
+    if (mode !== "battle-royale" || snapshot?.mode !== "battle-royale") {
+      stopAllCrateLoops();
+      return;
+    }
+
+    const crates = Array.isArray(snapshot?.map?.crates) ? snapshot.map.crates : [];
+    const spectatorId = snapshot?.spectator?.active ? snapshot.spectator.targetId : null;
+    const listener = snapshot?.entities?.find((entity) => entity.id === (spectatorId ?? network.playerId));
+    if (!listener) return;
+
+    const known = new Set(crates.map((crate) => crate.id));
+    for (const crateId of crateLoops.keys()) {
+      if (!known.has(crateId)) stopCrateLoop(crateId);
+    }
+
+    const generation = crateGeneration;
+    for (const crate of crates) {
+      const verticalDistance = Math.abs((crate.y ?? 0) - (listener.y ?? 0));
+      const horizontalDistance = Math.hypot(crate.x - listener.x, crate.z - listener.z);
+      if (crate.opened || verticalDistance > CRATE_FLOOR_TOLERANCE || horizontalDistance > CRATE_START_RADIUS) {
+        stopCrateLoop(crate.id);
+        continue;
+      }
+
+      const active = crateLoops.get(crate.id);
+      if (active) {
+        active.update(crate);
+        continue;
+      }
+      void startCrateLoop(crate, generation);
+    }
   }
 
   ctx.events.on("network:welcome", async ({ mode: joinedMode, resumed } = {}) => {
     mode = joinedMode === "battle-royale" ? "battle-royale" : "tdm";
+    stopAllCrateLoops();
     if (mode !== "battle-royale" || resumed) return;
     try { await audio.playCentered(DEPLOYMENT_URL, { gain: 0.9, channel: "br-deployment", replace: true }); }
     catch (error) { console.warn("Battle royale deployment audio", error); }
+  });
+
+  ctx.events.on("game:snapshot", (snapshot) => {
+    syncCrateLoops(snapshot);
   });
 
   ctx.events.on("game:event", async (packet) => {
@@ -85,20 +153,13 @@ export async function setup(ctx) {
         }, { radius: 30, gain: 0.78, referenceDistance: 2, rolloffFactor: 0.55 });
       }
       if (packet.event === "loot:opened") {
+        stopCrateLoop(payload.crateId);
         await audio.playSpatial(CRATE_OPEN_URL, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
           radius: 40,
           gain: 1.15,
           referenceDistance: 3,
           rolloffFactor: 0.45,
         });
-      }
-      if (packet.event === "loot:closed") {
-        ensureCrateCloseBuffer();
-        audio.playSpatialBuffer(crateCloseBuffer, {
-          x: payload.x,
-          y: payload.y ?? 0,
-          z: payload.z,
-        }, { radius: 36, gain: 1, referenceDistance: 3, rolloffFactor: 0.5 });
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
         await audio.playCentered(LOOT_PICKUP_URL, { gain: 0.8, channel: "br-loot" });
@@ -107,6 +168,7 @@ export async function setup(ctx) {
         await audio.playCentered(CIRCLE_CLOSING_URL, { gain: 0.8, channel: "br-zone", replace: true });
       }
       if (packet.event === "battle-royale:ended") {
+        stopAllCrateLoops();
         await audio.playCentered(payload.winnerId === network.playerId ? VICTORY_URL : DEFEAT_URL, {
           gain: 0.95,
           channel: "br-result",
