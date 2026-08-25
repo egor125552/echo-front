@@ -46,38 +46,56 @@ test("walking straight from the first spawn reaches the warehouse entrance after
   assert.equal(BUILDING_CENTER_Z, 0);
 });
 
-test("warehouse stair helper matches the real 16-step Rapier staircase", () => {
+test("warehouse staircase stays on the original entrance line and rises westward", () => {
   assert.equal(STAIR_STEP_COUNT, 16);
   assert.ok(Math.abs(STAIR_STEP_HEIGHT - 0.2) < 0.0001);
-  const stairX = (STAIR.minX + STAIR.maxX) / 2;
-  assert.ok(Math.abs(stairHeightAt({ x: stairX, z: 7.5 }) - 0.2) < 0.0001);
-  assert.ok(Math.abs(stairHeightAt({ x: stairX, z: 0.5 }) - 1.6) < 0.0001);
-  assert.ok(Math.abs(stairHeightAt({ x: stairX, z: -7.5 }) - UPPER_FLOOR_Y) < 0.0001);
+  assert.ok(WAREHOUSE_FRONT_DOOR.x > STAIR.maxX);
+  assert.ok(WAREHOUSE_FRONT_DOOR.z >= STAIR.minZ && WAREHOUSE_FRONT_DOOR.z <= STAIR.maxZ);
+  const stairZ = (STAIR.minZ + STAIR.maxZ) / 2;
+  assert.ok(Math.abs(stairHeightAt({ x: 71.9, z: stairZ }) - 0.2) < 0.0001);
+  assert.ok(Math.abs(stairHeightAt({ x: 70.1, z: stairZ }) - 1.6) < 0.0001);
+  assert.ok(Math.abs(stairHeightAt({ x: 68.1, z: stairZ }) - UPPER_FLOOR_Y) < 0.0001);
 });
 
-test("a real Rapier character walks up and back down the warehouse stairs", async () => {
+test("a real Rapier character enters the warehouse and walks straight up and back down the stairs", async () => {
   const host = await physicalMapHost();
   const entities = host.services.get("entities");
   const movement = host.services.get("movement");
-  const stairX = (STAIR.minX + STAIR.maxX) / 2;
+  const map = host.services.get("map");
+
+  const opened = map.interact({
+    entityId: "physical-stair-walker",
+    x: WAREHOUSE_FRONT_DOOR.x + 1,
+    y: 0,
+    z: WAREHOUSE_FRONT_DOOR.z,
+  });
+  assert.equal(opened?.type, "door");
+  assert.equal(opened?.open, true);
+
   const id = entities.spawn({
     id: "physical-stair-walker",
     kind: "test",
     team: 1,
-    position: { x: stairX, y: 0, z: STAIR.maxZ + 1, angle: 0 },
+    position: {
+      x: BUILDING.maxX + 1.5,
+      y: 0,
+      z: WAREHOUSE_FRONT_DOOR.z,
+      angle: -Math.PI / 2,
+    },
   });
 
   movement.setInput(id, { forward: 1, sprint: false });
-  for (let i = 0; i < 115; i += 1) movement.tick(0.05);
+  for (let i = 0; i < 70; i += 1) movement.tick(0.05);
   let transform = host.components.get(id, "Transform");
-  assert.ok(transform.z < STAIR.minZ - 0.2, `walker did not leave the top of the stair: z=${transform.z}`);
+  assert.ok(transform.x < STAIR.minX - 0.5, `walker did not clear the top of the entrance-facing stair: x=${transform.x}`);
+  assert.ok(Math.abs(transform.z - WAREHOUSE_FRONT_DOOR.z) < 0.15, `straight entrance path drifted sideways: z=${transform.z}`);
   assert.ok(Math.abs(transform.y - UPPER_FLOOR_Y) < 0.08, `Rapier did not place walker on upper floor: y=${transform.y}`);
   assert.equal(transform.grounded, true);
 
   movement.setInput(id, { forward: -1, sprint: false });
-  for (let i = 0; i < 115; i += 1) movement.tick(0.05);
+  for (let i = 0; i < 70; i += 1) movement.tick(0.05);
   transform = host.components.get(id, "Transform");
-  assert.ok(transform.z > STAIR.maxZ + 0.2, `walker did not leave the bottom of the stair: z=${transform.z}`);
+  assert.ok(transform.x > BUILDING.maxX + 0.5, `walker did not exit back through the warehouse entrance: x=${transform.x}`);
   assert.ok(Math.abs(transform.y) < 0.08, `Rapier did not return walker to ground: y=${transform.y}`);
   assert.equal(transform.grounded, true);
 
