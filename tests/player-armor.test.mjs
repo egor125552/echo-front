@@ -3,16 +3,16 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createEchoFrontGame } from "../src/server/game.js";
 
-test("a hit that breaks player armor does not spill damage into health", async () => {
+test("a hit that breaks the last armor also spills its remaining damage into health", async () => {
   const game = await createEchoFrontGame();
-  game.api.connectHuman("human-armor-gate");
+  game.api.connectHuman("human-armor-spill");
 
   const combat = game.host.services.get("combat");
   const protection = game.host.services.get("spawn-protection");
-  protection.clear("human-armor-gate");
+  protection.clear("human-armor-spill");
 
-  const armor = game.host.components.get("human-armor-gate", "Armor");
-  const health = game.host.components.get("human-armor-gate", "Health");
+  const armor = game.host.components.get("human-armor-spill", "Armor");
+  const health = game.host.components.get("human-armor-spill", "Health");
   assert.ok(armor);
   assert.ok(health);
 
@@ -21,31 +21,31 @@ test("a hit that breaks player armor does not spill damage into health", async (
 
   const defenderFeedback = [];
   const off = game.host.events.on("feedback:sound", (payload) => {
-    if (payload.recipientId === "human-armor-gate") defenderFeedback.push(payload.key);
+    if (payload.recipientId === "human-armor-spill") defenderFeedback.push(payload.key);
   });
 
-  const breakingHit = combat.damage("human-armor-gate", 28, {
+  const breakingHit = combat.damage("human-armor-spill", 28, {
     attackerId: "attacker",
     weaponId: "pistol",
     now: 1000,
   });
 
   assert.equal(armor.current, 0);
-  assert.equal(health.current, 100, "the armor-breaking hit must not spill into health");
-  assert.equal(breakingHit.healthApplied ?? breakingHit.applied, 0);
+  assert.equal(health.current, 82, "10 damage should break armor and the remaining 18 should hit health");
+  assert.equal(breakingHit.healthApplied ?? breakingHit.applied, 18);
+  assert.equal(breakingHit.armorAbsorbed, 10);
   assert.equal(breakingHit.armorBroke, true);
   assert.ok(defenderFeedback.some((key) => key === "armor.hit1" || key === "armor.hit2"));
   assert.ok(defenderFeedback.includes("armor.self-break"));
-  assert.equal(defenderFeedback.includes("hit.player"), false);
 
   defenderFeedback.length = 0;
-  const healthHit = combat.damage("human-armor-gate", 28, {
+  const healthHit = combat.damage("human-armor-spill", 28, {
     attackerId: "attacker",
     weaponId: "pistol",
     now: 1100,
   });
 
-  assert.equal(health.current, 72);
+  assert.equal(health.current, 54);
   assert.equal(healthHit.applied, 28);
   assert.ok(defenderFeedback.includes("hit.player"));
   assert.equal(defenderFeedback.includes("armor.self-break"), false);
