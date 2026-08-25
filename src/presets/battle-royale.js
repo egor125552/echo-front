@@ -1,6 +1,7 @@
 import * as entities from "../plugins/entities/server.js";
 import * as physics from "../plugins/rapier-physics/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
+import * as cratePhysics from "../plugins/battle-royale-crate-physics/server.js";
 import * as movement from "../plugins/movement/server.js";
 import * as teams from "../plugins/teams/server.js";
 import * as health from "../plugins/health/server.js";
@@ -22,6 +23,7 @@ export const battleRoyalePreset = [
   entities,
   physics,
   map,
+  cratePhysics,
   movement,
   teams,
   health,
