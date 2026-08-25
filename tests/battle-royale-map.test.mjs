@@ -140,7 +140,7 @@ test("closed warehouse door is announced as a door instead of a wall", async () 
     { x: -0.2, y: 0, z: 0 },
     { x: 0, y: 0, z: 0 },
   );
-  assert.equal(blockage.kind, "door");
+  assert.equal(blockage.kind, "building-door");
   assert.match(blockage.speech, /Здесь дверь/i);
 });
 
