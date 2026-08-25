@@ -4,7 +4,7 @@ export const CRATE_HEIGHT = 0.55;
 
 export const manifest = {
   id: "battle-royale-crate-physics",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["rapier-physics", "map-test-arena"],
   capabilities: ["services.consume"],
 };
@@ -20,6 +20,7 @@ export async function setup(ctx) {
       physics.createWall({
         kind: "loot-crate",
         crateId: crate.id,
+        accessibleName: "ящик",
         material: "wood",
         x: crate.x,
         y: crate.y ?? 0,
