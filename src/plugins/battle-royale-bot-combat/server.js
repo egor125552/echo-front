@@ -1,8 +1,15 @@
+export const BOT_VISIBLE_MEMORY_MS = 7000;
+export const BOT_DAMAGE_MEMORY_MS = 8500;
+export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
+
 export const manifest = {
   id: "bot-combat",
-  version: "2.0.0",
-  requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "spatial-grid", "battle-royale"],
-  capabilities: ["services.consume", "services.provide", "components.read"],
+  version: "2.1.0",
+  requires: [
+    "bot-controller", "bot-perception", "bot-navigation", "movement", "weapons",
+    "entities", "spatial-grid", "battle-royale", "map-test-arena",
+  ],
+  capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
 
 function wrapAngle(value) {
@@ -10,6 +17,14 @@ function wrapAngle(value) {
   while (angle > Math.PI) angle -= Math.PI * 2;
   while (angle < -Math.PI) angle += Math.PI * 2;
   return angle;
+}
+
+function distance3(a, b) {
+  return Math.hypot(
+    (a.x ?? 0) - (b.x ?? 0),
+    (a.y ?? 0) - (b.y ?? 0),
+    (a.z ?? 0) - (b.z ?? 0),
+  );
 }
 
 function steeringTo(transform, target) {
@@ -24,59 +39,159 @@ function steeringTo(transform, target) {
   };
 }
 
+function rememberTarget(state, entityId, transform, now, ttl) {
+  if (!state || !transform) return;
+  state.lastKnownTargetId = entityId ?? null;
+  state.lastKnownX = Number(transform.x) || 0;
+  state.lastKnownY = Number(transform.y) || 0;
+  state.lastKnownZ = Number(transform.z) || 0;
+  state.lastKnownUntil = now + ttl;
+}
+
+function clearMemory(state) {
+  state.lastKnownTargetId = null;
+  state.lastKnownX = null;
+  state.lastKnownY = null;
+  state.lastKnownZ = null;
+  state.lastKnownUntil = 0;
+}
+
+function rememberedTarget(state, entities, now) {
+  if (!state?.lastKnownTargetId || now > (state.lastKnownUntil ?? 0)) {
+    if (state) clearMemory(state);
+    return null;
+  }
+  const entity = entities.get(state.lastKnownTargetId);
+  if (!entity?.alive) {
+    clearMemory(state);
+    return null;
+  }
+  if (![state.lastKnownX, state.lastKnownY, state.lastKnownZ].every(Number.isFinite)) {
+    clearMemory(state);
+    return null;
+  }
+  return {
+    entityId: state.lastKnownTargetId,
+    transform: {
+      x: state.lastKnownX,
+      y: state.lastKnownY,
+      z: state.lastKnownZ,
+    },
+  };
+}
+
 export async function setup(ctx) {
   const bots = ctx.services.get("bots");
   const perception = ctx.services.get("bot-perception");
+  const navigation = ctx.services.get("bot-navigation");
   const movement = ctx.services.get("movement");
+  const entities = ctx.services.get("entities");
   const grid = ctx.services.get("spatial-grid");
   const battleRoyale = ctx.services.get("battle-royale");
+  const map = ctx.services.get("map");
+
+  ctx.events.on("combat:damage", ({ targetId, attackerId, now = Date.now() }) => {
+    if (!targetId || !attackerId) return;
+    const bot = entities.get(targetId);
+    const attacker = entities.get(attackerId);
+    if (!bot?.bot || !bot.alive || !attacker?.alive) return;
+    const state = ctx.components.get(targetId, "Bot");
+    const attackerTransform = ctx.components.get(attackerId, "Transform");
+    rememberTarget(state, attackerId, attackerTransform, now, BOT_DAMAGE_MEMORY_MS);
+  });
+
+  function openRouteDoor(botId, transform, waypoint, now) {
+    if (!waypoint?.doorId || typeof map.setDoorOpen !== "function") return;
+    const door = map.doors?.find((entry) => entry.id === waypoint.doorId);
+    if (!door || door.open || distance3(transform, door) > 2.6) return;
+    map.setDoorOpen(door.id, true, botId, now);
+  }
+
+  function setNavigatedInput(bot, transform, state, input, now) {
+    movement.setInput(bot.id, navigation.avoid(bot.id, transform, state, input, now));
+  }
 
   function think(bot, now) {
     const transform = ctx.components.get(bot.id, "Transform");
     const state = ctx.components.get(bot.id, "Bot");
     if (!transform || !state) return;
 
+    if (now >= (state.tacticUntil ?? 0)) {
+      state.strafeDirection = -(state.strafeDirection || 1);
+      const seed = Number.parseInt(String(bot.id).replace(/\D/g, ""), 10) || 1;
+      state.tacticUntil = now + 700 + (seed % 5) * 140;
+    }
+
     const visible = perception.nearestVisibleEnemy(bot.id, 28, { now });
     if (visible) {
+      rememberTarget(state, visible.entityId, visible.transform, now, BOT_VISIBLE_MEMORY_MS);
       const steering = steeringTo(transform, visible.transform);
-      movement.setInput(bot.id, {
+      setNavigatedInput(bot, transform, state, {
         forward: visible.distance > 9 ? 1 : visible.distance < 4.5 ? -0.45 : 0.2,
         strafe: visible.distance < 13 ? state.strafeDirection * 0.7 : 0,
         turn: steering.turn,
         sprint: visible.distance > 18,
         fireHeld: steering.aligned && visible.distance <= 28,
-      });
+      }, now);
       state.nextThinkAt = now + 95;
       return;
     }
 
+    let memory = rememberedTarget(state, entities, now);
+    if (memory) {
+      const route = typeof map.navigationWaypoint === "function"
+        ? map.navigationWaypoint(transform, memory.transform)
+        : null;
+      if (!route && distance3(transform, memory.transform) <= BOT_SEARCH_REACHED_DISTANCE) {
+        clearMemory(state);
+        memory = null;
+      } else {
+        const target = route ?? memory.transform;
+        openRouteDoor(bot.id, transform, route, now);
+        const steering = steeringTo(transform, target);
+        const verticalDifference = Math.abs((target.y ?? 0) - (transform.y ?? 0));
+        setNavigatedInput(bot, transform, state, {
+          forward: Math.abs(wrapAngle(Math.atan2(target.x - transform.x, -(target.z - transform.z)) - transform.angle)) > 1.35 ? 0.28 : 1,
+          strafe: 0,
+          turn: steering.turn,
+          sprint: steering.distance > 18 && verticalDifference < 1,
+          fireHeld: false,
+        }, now);
+        state.nextThinkAt = now + 135;
+        return;
+      }
+    }
+
     const zoneTarget = battleRoyale.zoneSteeringTarget(bot.id, now);
-    const enemy = perception.nearestEnemy(bot.id, 105, { humanPriority: 0.82, now });
-    const target = enemy?.transform ?? zoneTarget;
-    if (target) {
+    if (zoneTarget) {
+      const route = typeof map.navigationWaypoint === "function"
+        ? map.navigationWaypoint(transform, zoneTarget)
+        : null;
+      const target = route ?? zoneTarget;
+      openRouteDoor(bot.id, transform, route, now);
       const steering = steeringTo(transform, target);
-      movement.setInput(bot.id, {
+      setNavigatedInput(bot, transform, state, {
         forward: 1,
         strafe: 0,
         turn: steering.turn,
-        sprint: enemy ? enemy.distance > 30 : true,
+        sprint: steering.distance > 10,
         fireHeld: false,
-      });
-      state.nextThinkAt = now + (enemy ? 170 : 230);
+      }, now);
+      state.nextThinkAt = now + 220;
       return;
     }
 
     const seed = Number.parseInt(String(bot.id).replace(/\D/g, ""), 10) || 1;
     const phase = (Math.floor(now / 2200) + seed) % 7;
     const turn = phase < 2 ? state.wanderTurn : phase === 6 ? -state.wanderTurn : 0;
-    movement.setInput(bot.id, {
+    setNavigatedInput(bot, transform, state, {
       forward: 0.82,
-      strafe: 0,
+      strafe: phase === 5 ? state.strafeDirection * 0.25 : 0,
       turn,
       sprint: phase === 3,
       fireHeld: false,
-    });
-    state.nextThinkAt = now + 340;
+    }, now);
+    state.nextThinkAt = now + 300;
   }
 
   const api = {
