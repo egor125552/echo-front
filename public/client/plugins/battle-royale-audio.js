@@ -14,11 +14,16 @@ const DEFEAT_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Defeat [Sou
 const CRATE_AUDIO_RADIUS = 10;
 const CRATE_START_RADIUS = 9.5;
 const CRATE_FLOOR_TOLERANCE = 1.75;
+const CRATE_OCCLUSION_RESTART_DELTA = 0.08;
 
 export const manifest = {
   id: "battle-royale-audio",
   requires: ["spatial-audio-web", "cloudflare-session"],
 };
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
 
 function createDoorBuffer(audioContext, open) {
   const duration = open ? 0.34 : 0.24;
@@ -71,12 +76,14 @@ export async function setup(ctx) {
   async function startCrateLoop(crate, generation) {
     if (pendingCrates.has(crate.id) || crateLoops.has(crate.id)) return;
     pendingCrates.add(crate.id);
+    const occlusion = clamp01(crate.occlusion);
     try {
       const handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
         radius: CRATE_AUDIO_RADIUS,
         gain: 0.48,
         referenceDistance: 1.1,
         rolloffFactor: 4.5,
+        occlusion,
         loop: true,
         channel: crateChannel(crate.id),
         replace: true,
@@ -85,7 +92,10 @@ export async function setup(ctx) {
         try { handle?.source?.stop(); } catch {}
         return;
       }
-      if (handle) crateLoops.set(crate.id, handle);
+      if (handle) {
+        handle.crateOcclusion = occlusion;
+        crateLoops.set(crate.id, handle);
+      }
     } catch (error) {
       console.warn("Battle royale crate ambient audio", error);
     } finally {
@@ -120,6 +130,12 @@ export async function setup(ctx) {
 
       const active = crateLoops.get(crate.id);
       if (active) {
+        const nextOcclusion = clamp01(crate.occlusion);
+        if (Math.abs((active.crateOcclusion ?? 0) - nextOcclusion) >= CRATE_OCCLUSION_RESTART_DELTA) {
+          stopCrateLoop(crate.id);
+          void startCrateLoop(crate, generation);
+          continue;
+        }
         active.update(crate);
         continue;
       }
@@ -159,6 +175,7 @@ export async function setup(ctx) {
           gain: 0.68,
           referenceDistance: 1.2,
           rolloffFactor: 3.2,
+          occlusion: clamp01(payload.occlusion),
         });
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
