@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { ENGINE_DIAGNOSTICS_CONTROL } from "../config/engine-diagnostics.js";
 import { createEchoFrontGame, normalizeGameMode } from "./game.js";
+import { handleEngineControlRequest } from "./engine-control-route.js";
 import {
   activeSocketCount,
   cleanupDeadline,
@@ -192,6 +193,7 @@ export class MatchRoom extends DurableObject {
   async fetch(request) {
     const requestUrl = new URL(request.url);
     if (requestUrl.pathname === "/api/diagnostics") return this.diagnosticsResponse(requestUrl);
+    if (requestUrl.pathname === "/api/engine-command") return handleEngineControlRequest(this, request);
 
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket required", { status: 426 });
