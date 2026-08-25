@@ -1,10 +1,10 @@
-export const BOT_VISIBLE_MEMORY_MS = 7000;
-export const BOT_DAMAGE_MEMORY_MS = 8500;
+export const BOT_VISIBLE_MEMORY_MS = 10_000;
+export const BOT_DAMAGE_MEMORY_MS = 12_000;
 export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
 
 export const manifest = {
   id: "bot-combat",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "movement", "weapons",
     "entities", "spatial-grid", "battle-royale", "map-test-arena",
@@ -111,6 +111,39 @@ export async function setup(ctx) {
     movement.setInput(bot.id, navigation.avoid(bot.id, transform, state, input, now));
   }
 
+  function setRouteInput(bot, transform, state, route, input, now) {
+    if (route?.kind === "stair") {
+      // A stair is already a deliberately selected safe corridor. Generic
+      // obstacle avoidance can mistake the ramp/floor transition for a wall
+      // and steer the bot sideways off the narrow run, so keep it centered.
+      movement.setInput(bot.id, {
+        ...input,
+        strafe: 0,
+        sprint: false,
+      });
+      return;
+    }
+    setNavigatedInput(bot, transform, state, input, now);
+  }
+
+  function routeToward(bot, transform, state, route, now, thinkDelay = 120) {
+    if (!route) return false;
+    openRouteDoor(bot.id, transform, route, now);
+    const steering = steeringTo(transform, route);
+    const headingError = Math.abs(wrapAngle(
+      Math.atan2(route.x - transform.x, -(route.z - transform.z)) - transform.angle,
+    ));
+    setRouteInput(bot, transform, state, route, {
+      forward: headingError > 1.35 ? 0.28 : 1,
+      strafe: 0,
+      turn: steering.turn,
+      sprint: route.kind !== "stair" && steering.distance > 18,
+      fireHeld: false,
+    }, now);
+    state.nextThinkAt = now + thinkDelay;
+    return true;
+  }
+
   function think(bot, now) {
     const transform = ctx.components.get(bot.id, "Transform");
     const state = ctx.components.get(bot.id, "Bot");
@@ -125,6 +158,15 @@ export async function setup(ctx) {
     const visible = perception.nearestVisibleEnemy(bot.id, 28, { now });
     if (visible) {
       rememberTarget(state, visible.entityId, visible.transform, now, BOT_VISIBLE_MEMORY_MS);
+      const route = typeof map.navigationWaypoint === "function"
+        ? map.navigationWaypoint(transform, visible.transform)
+        : null;
+
+      // If the map says a door or stair is required, reaching that route is
+      // more important than combat strafing. This prevents a bot that spots an
+      // upper-floor player from endlessly dancing halfway up the stairs.
+      if (routeToward(bot, transform, state, route, now, 95)) return;
+
       const steering = steeringTo(transform, visible.transform);
       setNavigatedInput(bot, transform, state, {
         forward: visible.distance > 9 ? 1 : visible.distance < 4.5 ? -0.45 : 0.2,
@@ -146,8 +188,8 @@ export async function setup(ctx) {
         clearMemory(state);
         memory = null;
       } else {
-        const target = route ?? memory.transform;
-        openRouteDoor(bot.id, transform, route, now);
+        if (routeToward(bot, transform, state, route, now, 135)) return;
+        const target = memory.transform;
         const steering = steeringTo(transform, target);
         const verticalDifference = Math.abs((target.y ?? 0) - (transform.y ?? 0));
         setNavigatedInput(bot, transform, state, {
@@ -167,9 +209,8 @@ export async function setup(ctx) {
       const route = typeof map.navigationWaypoint === "function"
         ? map.navigationWaypoint(transform, zoneTarget)
         : null;
-      const target = route ?? zoneTarget;
-      openRouteDoor(bot.id, transform, route, now);
-      const steering = steeringTo(transform, target);
+      if (routeToward(bot, transform, state, route, now, 220)) return;
+      const steering = steeringTo(transform, zoneTarget);
       setNavigatedInput(bot, transform, state, {
         forward: 1,
         strafe: 0,
