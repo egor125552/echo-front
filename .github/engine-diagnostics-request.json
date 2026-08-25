@@ -1,0 +1,7 @@
+{
+  "id": 1,
+  "mode": "battle-royale",
+  "room": "public",
+  "samples": 8,
+  "intervalSeconds": 2
+}
