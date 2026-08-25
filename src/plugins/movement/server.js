@@ -6,6 +6,8 @@ export const FOOTSTEP_SPRINT_RADIUS = 44;
 export const CHARACTER_GRAVITY = 18;
 export const CHARACTER_MAX_FALL_SPEED = 16;
 
+const NAVIGABLE_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
+
 export function normalizeFootstepSurface(value) {
   const surface = String(value ?? "default").trim().toLowerCase();
   return /^[a-z0-9-]+$/.test(surface) ? surface : "default";
@@ -46,6 +48,14 @@ function blockageFromRapier(attempted, moved) {
   return null;
 }
 
+export function hasOnlyNavigableSupportCollisions(moved = {}) {
+  const collisions = Array.isArray(moved.collisions) ? moved.collisions : [];
+  const worldKinds = collisions
+    .map((collision) => String(collision?.worldObject?.kind ?? ""))
+    .filter(Boolean);
+  return worldKinds.length > 0 && worldKinds.every((kind) => NAVIGABLE_SUPPORT_KINDS.has(kind));
+}
+
 function blockageKey(blockage) {
   return [
     blockage?.kind ?? "unknown",
@@ -55,7 +65,7 @@ function blockageKey(blockage) {
 
 export const manifest = {
   id: "movement",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -210,8 +220,10 @@ export async function setup(ctx) {
 
           if (!entity.bot) {
             const attempted = { x: dx, y: dy, z: dz };
-            const blockage = blockageFromRapier(attempted, moved)
-              ?? (typeof map.describeBlockedMove === "function"
+            const rapierBlockage = blockageFromRapier(attempted, moved);
+            const supportCorrection = !rapierBlockage && hasOnlyNavigableSupportCollisions(moved);
+            const blockage = rapierBlockage
+              ?? (!supportCorrection && typeof map.describeBlockedMove === "function"
                 ? map.describeBlockedMove(
                   { x: transform.x, y: transform.y, z: transform.z },
                   attempted,
