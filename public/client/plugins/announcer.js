@@ -10,6 +10,7 @@ export async function setup(ctx) {
   let lastMessage = "";
   let team = 0;
   let lastArmorPlates = null;
+  let lastArmorReserve = null;
   let mode = "tdm";
   let lastLocation = null;
   let lastSpectatorTargetId = null;
@@ -35,6 +36,7 @@ export async function setup(ctx) {
     team = joinedTeam;
     mode = joinedMode === "battle-royale" ? "battle-royale" : "tdm";
     lastArmorPlates = null;
+    lastArmorReserve = null;
     lastLocation = null;
     if (mode === "battle-royale") {
       announce(
@@ -59,6 +61,7 @@ export async function setup(ctx) {
     if (!self) return;
     mode = snapshot.mode === "battle-royale" ? "battle-royale" : mode;
     if (self.armorPlates != null && lastArmorPlates == null) lastArmorPlates = Number(self.armorPlates);
+    if (self.armorReserve != null && lastArmorReserve == null) lastArmorReserve = Number(self.armorReserve);
     const spectator = snapshot?.spectator;
     const observedId = spectator?.active ? spectator.targetId : network.playerId;
     const observed = snapshot?.entities?.find((entity) => entity.id === observedId) ?? self;
@@ -96,6 +99,19 @@ export async function setup(ctx) {
 
     if (packet.event === "armor:changed" && payload.entityId === network.playerId) {
       const next = Number(payload.platesRemaining);
+      const reserve = Number(payload.reservePlates);
+      const capacity = Number(payload.reserveCapacity);
+      if (Number.isFinite(reserve)) {
+        if (lastArmorReserve != null && reserve > lastArmorReserve) {
+          announce(
+            Number.isFinite(capacity)
+              ? `Бронепластина подобрана. В запасе ${reserve} из ${capacity}`
+              : `Бронепластина подобрана. В запасе ${reserve}`,
+            { interrupt: false, repeat: true },
+          );
+        }
+        lastArmorReserve = reserve;
+      }
       if (Number.isFinite(next)) {
         if (lastArmorPlates != null && next < lastArmorPlates) {
           announce(`Осталось ${next} ${next === 1 ? "пластина" : next >= 2 && next <= 4 ? "пластины" : "пластин"}`, {
@@ -110,7 +126,9 @@ export async function setup(ctx) {
 
     if (packet.event === "armor:plating-completed" && payload.entityId === network.playerId) {
       const next = Number(payload.plateNumber);
+      const reserve = Number(payload.reservePlates);
       if (Number.isFinite(next)) lastArmorPlates = next;
+      if (Number.isFinite(reserve)) lastArmorReserve = reserve;
       return;
     }
 
@@ -125,6 +143,7 @@ export async function setup(ctx) {
 
     if (packet.event === "entity:respawned" && payload.entityId === network.playerId && mode !== "battle-royale") {
       lastArmorPlates = null;
+      lastArmorReserve = null;
       announce("Вы снова в бою", { interrupt: true });
     }
 
@@ -152,7 +171,7 @@ export async function setup(ctx) {
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
         if (payload.loot === "rifle") announce(payload.applied ? "Автомат подобран" : "Автомат уже есть", { interrupt: false });
-        if (payload.loot === "armor") announce(payload.applied ? "Бронепластина подобрана" : "Броня уже полная", { interrupt: false });
+        if (payload.loot === "armor" && !payload.applied) announce("Запас бронепластин полон", { interrupt: false });
       }
       if (packet.event === "battle-royale:ended") {
         announce(payload.winnerId === network.playerId ? "Победа. Вы последний выживший" : "Королевская битва завершена", { interrupt: true });
