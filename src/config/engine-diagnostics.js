@@ -1,6 +1,6 @@
 export const ENGINE_DIAGNOSTICS_CONTROL = Object.freeze({
-  enabled: true,
-  revision: 2,
+  enabled: false,
+  revision: 3,
   maxEntities: 128,
   maxTickSamples: 120,
 });
