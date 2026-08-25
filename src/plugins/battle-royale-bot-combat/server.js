@@ -1,10 +1,19 @@
 export const BOT_VISIBLE_MEMORY_MS = 10_000;
 export const BOT_DAMAGE_MEMORY_MS = 12_000;
 export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
+export const BOT_REACTION_MIN_MS = 650;
+export const BOT_REACTION_SPREAD_MS = 450;
+export const BOT_RETURN_FIRE_REACTION_MS = 220;
+export const BOT_BURST_MIN_MS = 260;
+export const BOT_BURST_SPREAD_MS = 220;
+export const BOT_BURST_PAUSE_MIN_MS = 420;
+export const BOT_BURST_PAUSE_SPREAD_MS = 480;
+export const BOT_STAIR_ENTRY_OFFSET = 1.15;
+export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "2.3.0",
+  version: "2.4.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "movement", "weapons", "entities", "spatial-grid", "battle-royale", "map-test-arena",
@@ -19,12 +28,25 @@ function wrapAngle(value) {
   return angle;
 }
 
+function distance2(a, b) {
+  return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.z ?? 0) - (b.z ?? 0));
+}
+
 function distance3(a, b) {
   return Math.hypot(
     (a.x ?? 0) - (b.x ?? 0),
     (a.y ?? 0) - (b.y ?? 0),
     (a.z ?? 0) - (b.z ?? 0),
   );
+}
+
+function stableSeed(value) {
+  let hash = 2166136261;
+  for (const char of String(value)) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
 function steeringTo(transform, target) {
@@ -80,6 +102,59 @@ function rememberedTarget(state, entities, now) {
   };
 }
 
+function reactionDelay(botId, targetId) {
+  const spread = BOT_REACTION_SPREAD_MS + 1;
+  return BOT_REACTION_MIN_MS + (stableSeed(`${botId}:${targetId}:reaction`) % spread);
+}
+
+function reactionReady(botId, state, targetId, now) {
+  if (state.reactionTargetId !== targetId) {
+    state.reactionTargetId = targetId;
+    state.reactionUntil = now + reactionDelay(botId, targetId);
+    state.burstUntil = 0;
+    state.nextBurstAt = 0;
+    state.burstCycle = 0;
+    return false;
+  }
+  return now >= (state.reactionUntil ?? 0);
+}
+
+function burstAllowsFire(botId, state, now) {
+  if (now < (state.burstUntil ?? 0)) return true;
+  if (now < (state.nextBurstAt ?? 0)) return false;
+
+  state.burstCycle = (state.burstCycle ?? 0) + 1;
+  const seed = stableSeed(`${botId}:${state.burstCycle}:burst`);
+  const burstMs = BOT_BURST_MIN_MS + (seed % (BOT_BURST_SPREAD_MS + 1));
+  const pauseMs = BOT_BURST_PAUSE_MIN_MS
+    + ((seed >>> 8) % (BOT_BURST_PAUSE_SPREAD_MS + 1));
+  state.burstUntil = now + burstMs;
+  state.nextBurstAt = state.burstUntil + pauseMs;
+  return true;
+}
+
+function stagedStairRoute(transform, route) {
+  if (route?.kind !== "stair") return route;
+
+  const transformY = Number(transform?.y) || 0;
+  const routeY = Number(route?.y) || 0;
+  const approachingBottomFromEast = (
+    transformY < 0.45
+    && routeY < 0.2
+    && transform.x >= route.x - 0.15
+  );
+  if (!approachingBottomFromEast) return route;
+
+  const approach = {
+    ...route,
+    x: route.x + BOT_STAIR_ENTRY_OFFSET,
+    stairStage: "align",
+  };
+  const centered = Math.abs(transform.z - route.z) <= 0.22;
+  if (!centered || distance2(transform, approach) > BOT_STAIR_ENTRY_TOLERANCE) return approach;
+  return route;
+}
+
 export async function setup(ctx) {
   const bots = ctx.services.get("bots");
   const perception = ctx.services.get("bot-perception");
@@ -99,6 +174,14 @@ export async function setup(ctx) {
     const state = ctx.components.get(targetId, "Bot");
     const attackerTransform = ctx.components.get(attackerId, "Transform");
     rememberTarget(state, attackerId, attackerTransform, now, BOT_DAMAGE_MEMORY_MS);
+    if (state) {
+      state.reactionTargetId = attackerId;
+      state.reactionUntil = Math.min(
+        Number.isFinite(state.reactionUntil) ? state.reactionUntil : Infinity,
+        now + BOT_RETURN_FIRE_REACTION_MS,
+      );
+      state.nextBurstAt = Math.min(Number(state.nextBurstAt) || 0, now);
+    }
   });
 
   function openRouteDoor(botId, transform, waypoint, now) {
@@ -114,9 +197,8 @@ export async function setup(ctx) {
 
   function setRouteInput(bot, transform, state, route, input, now) {
     if (route?.kind === "stair") {
-      // A stair is already a deliberately selected safe corridor. Generic
-      // obstacle avoidance can mistake the ramp/floor transition for a wall
-      // and steer the bot sideways off the narrow run, so keep it centered.
+      // Stair routing is deliberately precise. Generic obstacle avoidance can
+      // steer a bot off the ramp edge, so the route itself owns centering.
       movement.setInput(bot.id, {
         ...input,
         strafe: 0,
@@ -130,15 +212,30 @@ export async function setup(ctx) {
   function routeToward(bot, transform, state, route, now, thinkDelay = 120) {
     if (!route) return false;
     openRouteDoor(bot.id, transform, route, now);
-    const steering = steeringTo(transform, route);
+    const preciseRoute = stagedStairRoute(transform, route);
+    const steering = steeringTo(transform, preciseRoute);
     const headingError = Math.abs(wrapAngle(
-      Math.atan2(route.x - transform.x, -(route.z - transform.z)) - transform.angle,
+      Math.atan2(preciseRoute.x - transform.x, -(preciseRoute.z - transform.z)) - transform.angle,
     ));
-    setRouteInput(bot, transform, state, route, {
-      forward: headingError > 1.35 ? 0.28 : 1,
+
+    let forward;
+    if (preciseRoute.kind === "stair") {
+      // Do not charge the lower ramp edge while still turning. First align to
+      // the centerline, then enter at a controlled walk, then climb normally.
+      forward = headingError > 0.28
+        ? 0
+        : headingError > 0.14
+          ? 0.3
+          : (preciseRoute.stairStage === "align" ? 0.55 : 0.82);
+    } else {
+      forward = headingError > 1.35 ? 0.28 : 1;
+    }
+
+    setRouteInput(bot, transform, state, preciseRoute, {
+      forward,
       strafe: 0,
       turn: steering.turn,
-      sprint: route.kind !== "stair" && steering.distance > 18,
+      sprint: preciseRoute.kind !== "stair" && steering.distance > 18,
       fireHeld: false,
     }, now);
     state.nextThinkAt = now + thinkDelay;
@@ -186,18 +283,20 @@ export async function setup(ctx) {
         ? map.navigationWaypoint(transform, visible.transform)
         : null;
 
-      // If the map says a door or stair is required, reaching that route is
-      // more important than combat strafing. This prevents a bot that spots an
-      // upper-floor player from endlessly dancing halfway up the stairs.
+      // Doors and stairs outrank combat strafing when the enemy is on the
+      // other side of map structure.
       if (routeToward(bot, transform, state, route, now, 95)) return;
 
       const steering = steeringTo(transform, visible.transform);
+      const aimed = steering.aligned && visible.distance <= 28;
+      const reacted = reactionReady(bot.id, state, visible.entityId, now);
+      const fireHeld = reacted && aimed && burstAllowsFire(bot.id, state, now);
       setNavigatedInput(bot, transform, state, {
         forward: visible.distance > 9 ? 1 : visible.distance < 4.5 ? -0.45 : 0.2,
         strafe: visible.distance < 13 ? state.strafeDirection * 0.7 : 0,
         turn: steering.turn,
         sprint: visible.distance > 18,
-        fireHeld: steering.aligned && visible.distance <= 28,
+        fireHeld,
       }, now);
       state.nextThinkAt = now + 95;
       return;
