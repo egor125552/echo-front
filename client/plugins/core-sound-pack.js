@@ -189,9 +189,13 @@ export async function setup(ctx) {
       const profile = spatialProfileForKey(payload.key);
       const sourceZone = payload.acousticZone ?? "outdoor";
       const crossBoundary = sourceZone !== selfAcousticZone;
-      const occlusion = crossBoundary
+      const fallbackOcclusion = crossBoundary
         ? (sourceZone === "outdoor" || selfAcousticZone === "outdoor" ? 0.68 : 0.45)
         : 0;
+      const physicalOcclusion = Number(payload.occlusion);
+      const occlusion = Number.isFinite(physicalOcclusion)
+        ? Math.max(0, Math.min(1, physicalOcclusion))
+        : fallbackOcclusion;
       await audio.playSpatial(url, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
         radius: payload.radius ?? 40,
         gain: profile.gain,
