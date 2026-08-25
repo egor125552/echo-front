@@ -1,6 +1,6 @@
 export const manifest = {
   id: "health",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -31,6 +31,17 @@ export async function setup(ctx) {
       const before = health.current;
       health.current = Math.max(0, health.current - amount);
       const applied = before - health.current;
+      const now = Number(source.now) || Date.now();
+      if (applied > 0) {
+        ctx.events.emit("health:damaged", {
+          entityId: targetId,
+          amount: applied,
+          requested: amount,
+          attackerId: source.attackerId ?? null,
+          weaponId: source.weaponId ?? null,
+          now,
+        });
+      }
       ctx.events.emit("health:changed", { entityId: targetId, health: health.current, maximum: health.maximum });
       if (health.current <= 0) {
         entities.setAlive(targetId, false);
