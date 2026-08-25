@@ -59,7 +59,6 @@ export async function setup(ctx) {
     if (!crateId) return;
     audio.stopChannel(crateChannel(crateId));
     crateLoops.delete(crateId);
-    pendingCrates.delete(crateId);
   }
 
   function stopAllCrateLoops() {
@@ -96,7 +95,7 @@ export async function setup(ctx) {
 
   function syncCrateLoops(snapshot) {
     if (mode !== "battle-royale" || snapshot?.mode !== "battle-royale") {
-      stopAllCrateLoops();
+      if (crateLoops.size || pendingCrates.size) stopAllCrateLoops();
       return;
     }
 
@@ -153,6 +152,7 @@ export async function setup(ctx) {
         }, { radius: 30, gain: 0.78, referenceDistance: 2, rolloffFactor: 0.55 });
       }
       if (packet.event === "loot:opened") {
+        crateGeneration += 1;
         stopCrateLoop(payload.crateId);
         await audio.playSpatial(CRATE_OPEN_URL, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
           radius: 40,
