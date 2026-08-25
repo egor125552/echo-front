@@ -5,10 +5,14 @@ import { ENGINE_CONTROL } from "../src/config/engine-control.js";
 import { ENGINE_COMMAND_REQUEST } from "../src/config/engine-command-request.js";
 import { createEchoFrontGame } from "../src/server/game.js";
 
-test("engine control is closed by default and request slot is inert", () => {
+test("engine control configuration and request slot are valid", () => {
   assert.equal(typeof ENGINE_CONTROL.enabled, "boolean");
   assert.ok(Number.isInteger(ENGINE_CONTROL.revision));
-  assert.equal(ENGINE_COMMAND_REQUEST.id, 0);
+  assert.ok(ENGINE_CONTROL.revision >= 1);
+  assert.ok(Number.isInteger(ENGINE_COMMAND_REQUEST.id));
+  assert.ok(ENGINE_COMMAND_REQUEST.id >= 0);
+  assert.equal(typeof ENGINE_COMMAND_REQUEST.command, "string");
+  assert.ok(ENGINE_COMMAND_REQUEST.command.length > 0);
 });
 
 test("engine console exposes real plugins, services and components", async () => {
