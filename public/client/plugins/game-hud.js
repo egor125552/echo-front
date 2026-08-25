@@ -59,7 +59,11 @@ export async function setup(ctx) {
     if (self.armor == null) armor.textContent = "нет";
     else if (self.armorPlates != null && self.armorPlateMax != null) {
       const plating = self.plating ? ", установка" : "";
-      armor.textContent = `${self.armorPlates} из ${self.armorPlateMax} пластин, ${Math.round(self.armor)} брони${plating}`;
+      const reserve = self.armorReserve != null && self.armorReserveMax != null
+        ? `, запас ${self.armorReserve} из ${self.armorReserveMax}`
+        : "";
+      const satchel = self.armorSatchel ? ", бронесумка" : "";
+      armor.textContent = `${self.armorPlates} из ${self.armorPlateMax} пластин, ${Math.round(self.armor)} брони${reserve}${satchel}${plating}`;
     } else armor.textContent = String(Math.round(self.armor));
   });
 }
