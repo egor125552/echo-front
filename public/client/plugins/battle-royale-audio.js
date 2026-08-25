@@ -11,8 +11,8 @@ const LOOT_PICKUP_URL = warzoneSound("Call of Duty： Warzone ｜ Legendary Loot
 const CIRCLE_CLOSING_URL = warzoneSound("Call of Duty： Warzone ｜ Circle Closing Now! [Sound Effect].mp3");
 const VICTORY_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Victory! [Sound Effect].mp3");
 const DEFEAT_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Defeat [Sound Effect].mp3");
-const CRATE_AUDIO_RADIUS = 32;
-const CRATE_START_RADIUS = 30;
+const CRATE_AUDIO_RADIUS = 26;
+const CRATE_START_RADIUS = 25;
 const CRATE_FLOOR_TOLERANCE = 1.75;
 
 export const manifest = {
@@ -74,9 +74,9 @@ export async function setup(ctx) {
     try {
       const handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
         radius: CRATE_AUDIO_RADIUS,
-        gain: 0.92,
-        referenceDistance: 3,
-        rolloffFactor: 0.38,
+        gain: 0.52,
+        referenceDistance: 2,
+        rolloffFactor: 1.15,
         loop: true,
         channel: crateChannel(crate.id),
         replace: true,
@@ -155,10 +155,10 @@ export async function setup(ctx) {
         crateGeneration += 1;
         stopCrateLoop(payload.crateId);
         await audio.playSpatial(CRATE_OPEN_URL, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
-          radius: 40,
-          gain: 1.15,
-          referenceDistance: 3,
-          rolloffFactor: 0.45,
+          radius: 30,
+          gain: 0.82,
+          referenceDistance: 2,
+          rolloffFactor: 1,
         });
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
