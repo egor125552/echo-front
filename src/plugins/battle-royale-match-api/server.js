@@ -3,7 +3,7 @@ export const ENTITY_INTEREST_RADIUS = 125;
 
 export const manifest = {
   id: "match-api",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: [
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat",
@@ -17,6 +17,10 @@ export const manifest = {
 
 function distance2(a, b) {
   return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.z ?? 0) - (b.z ?? 0));
+}
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
 export async function setup(ctx) {
@@ -37,6 +41,12 @@ export async function setup(ctx) {
 
   botFill.ensure();
   const spectatorTargets = new Map();
+
+  function acousticOcclusion(listener, source) {
+    if (!listener || !source || typeof map.acousticOcclusionBetween !== "function") return null;
+    const value = Number(map.acousticOcclusionBetween(listener, source));
+    return Number.isFinite(value) ? clamp01(value) : null;
+  }
 
   function nearestAliveEntity(reference, excludedId = null) {
     let best = null;
@@ -246,7 +256,7 @@ export async function setup(ctx) {
     };
   }
 
-  function mapSnapshot() {
+  function mapSnapshot(listener = null) {
     return {
       id: map.id,
       halfSize: map.halfSize,
@@ -257,6 +267,7 @@ export async function setup(ctx) {
           y: crate.y ?? 0,
           z: crate.z,
           opened: Boolean(crate.opened),
+          occlusion: listener ? (acousticOcclusion(listener, crate) ?? 0) : 0,
         }))
         : [],
     };
@@ -294,7 +305,7 @@ export async function setup(ctx) {
     return {
       now,
       mode: "battle-royale",
-      map: mapSnapshot(),
+      map: mapSnapshot(listenerTransform),
       match: battleRoyale.status(now),
       playerPlacement: battleRoyale.placementOf(playerId),
       spectator: spectatorTarget ? {
@@ -318,7 +329,7 @@ export async function setup(ctx) {
       "battle-royale:ended",
       "battle-royale:zone-closing",
     ]);
-    return packets.filter((packet) => {
+    const selected = packets.filter((packet) => {
       const payload = packet.payload ?? {};
       if (globalEvents.has(packet.event)) return true;
       if (packet.event === "feedback:sound") return payload.recipientId === playerId;
@@ -339,6 +350,19 @@ export async function setup(ctx) {
       if (packet.event === "loot:opened") return payload.entityId === playerId || distance2(self, payload) <= 28;
       if (packet.event === "battle-royale:eliminated") return payload.entityId === playerId || payload.killerId === playerId;
       return false;
+    });
+
+    if (!self) return selected;
+    return selected.map((packet) => {
+      if (packet.event !== "sound:spatial" && packet.event !== "loot:opened") return packet;
+      const payload = packet.payload ?? {};
+      if (!Number.isFinite(payload.x) || !Number.isFinite(payload.z)) return packet;
+      const occlusion = acousticOcclusion(self, payload);
+      if (occlusion == null) return packet;
+      return {
+        ...packet,
+        payload: { ...payload, occlusion },
+      };
     });
   }
 
