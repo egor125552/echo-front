@@ -3,6 +3,8 @@ export const BOT_TURN_SPEED = 2.6;
 export const FOOTSTEP_VARIANT_COUNT = 3;
 export const FOOTSTEP_WALK_RADIUS = 32;
 export const FOOTSTEP_SPRINT_RADIUS = 44;
+export const CHARACTER_GRAVITY = 18;
+export const CHARACTER_MAX_FALL_SPEED = 16;
 
 export function normalizeFootstepSurface(value) {
   const surface = String(value ?? "default").trim().toLowerCase();
@@ -17,7 +19,7 @@ export function footstepKey(surface, variant) {
 
 export const manifest = {
   id: "movement",
-  version: "1.9.0",
+  version: "2.0.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -46,6 +48,8 @@ export async function setup(ctx) {
       angle: spawn.angle ?? 0,
       stepDistance: 0,
       stepIndex: 0,
+      verticalVelocity: 0,
+      grounded: false,
     });
     ctx.components.add(entityId, "Input", {
       forward: 0,
@@ -59,6 +63,11 @@ export async function setup(ctx) {
   ctx.events.on("entity:died", ({ entityId }) => {
     physics.setCharacterEnabled(entityId, false);
     blockedEntities.delete(entityId);
+    const transform = ctx.components.get(entityId, "Transform");
+    if (transform) {
+      transform.verticalVelocity = 0;
+      transform.grounded = false;
+    }
     const input = ctx.components.get(entityId, "Input");
     if (input) {
       input.forward = 0;
@@ -73,7 +82,11 @@ export async function setup(ctx) {
     physics.setCharacterEnabled(entityId, true);
     blockedEntities.delete(entityId);
     const transform = ctx.components.get(entityId, "Transform");
-    if (transform) transform.stepDistance = 0;
+    if (transform) {
+      transform.stepDistance = 0;
+      transform.verticalVelocity = 0;
+      transform.grounded = false;
+    }
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
@@ -105,6 +118,8 @@ export async function setup(ctx) {
       transform.x = target.x;
       transform.y = target.y;
       transform.z = target.z;
+      transform.verticalVelocity = 0;
+      transform.grounded = false;
       if (Number.isFinite(position.angle)) transform.angle = position.angle;
       transform.stepDistance = 0;
       blockedEntities.delete(entityId);
@@ -140,27 +155,20 @@ export async function setup(ctx) {
             Math.sin(transform.angle) * strafe
           ) * distance;
 
-          if (Math.hypot(dx, dz) < 0.0001) {
-            blockedEntities.delete(entityId);
-            continue;
-          }
-
-          const requestedPosition = {
-            x: transform.x + dx,
-            y: transform.y,
-            z: transform.z + dz,
-            currentY: transform.y,
-            entityId,
-          };
-          const targetY = typeof map.heightAt === "function"
-            ? Number(map.heightAt(requestedPosition))
-            : transform.y;
-          const dy = Number.isFinite(targetY) ? targetY - transform.y : 0;
+          const previousVerticalVelocity = Number(transform.verticalVelocity) || 0;
+          const verticalVelocity = Math.max(
+            -CHARACTER_MAX_FALL_SPEED,
+            previousVerticalVelocity - CHARACTER_GRAVITY * safeDt,
+          );
+          const dy = verticalVelocity * safeDt;
           const moved = physics.move(entityId, dx, dz, dy);
+          transform.grounded = Boolean(moved.grounded);
+          transform.verticalVelocity = moved.grounded ? 0 : verticalVelocity;
+
           const pos = physics.position(entityId);
           if (pos) {
             transform.x = pos.x;
-            transform.y = Number(pos.y) || 0;
+            transform.y = Math.abs(pos.y) < 0.0001 ? 0 : pos.y;
             transform.z = pos.z;
           }
 
@@ -185,7 +193,9 @@ export async function setup(ctx) {
             }
           }
 
-          transform.stepDistance += Math.hypot(moved.x, moved.z);
+          const horizontalMoved = Math.hypot(moved.x, moved.z);
+          if (horizontalMoved < 0.0001) continue;
+          transform.stepDistance += horizontalMoved;
           const threshold = input.sprint ? 1.15 : 1.55;
           if (transform.stepDistance >= threshold) {
             transform.stepDistance %= threshold;
