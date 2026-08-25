@@ -3,7 +3,7 @@ export const BOT_DECISION_HOLD_SPREAD_MS = 650;
 
 export const manifest = {
   id: "bot-brain",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["bot-controller", "entities", "battle-royale"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -48,6 +48,13 @@ function enemyDurability(enemy) {
   return clamp01((health + armor) / Math.max(1, maxHealth + maxArmor));
 }
 
+function zonePressure(zoneTarget) {
+  if (!zoneTarget) return 0;
+  const distance = Math.max(0, Number(zoneTarget.distance) || 0);
+  const radius = Math.max(1, Number(zoneTarget.radius) || 1);
+  return clamp01((distance - radius * 0.72) / (radius * 0.28));
+}
+
 export function chooseUtilityDecision({
   profile,
   ownDurability = 1,
@@ -66,6 +73,9 @@ export function chooseUtilityDecision({
   for (const enemy of visible) {
     const distance = Math.max(0.1, Number(enemy.distance) || 999);
     const weakness = 1 - enemyDurability(enemy);
+    // Distance matters most, but a wounded target becomes somewhat more
+    // attractive. Bots therefore finish opportunities without magically
+    // knowing every player's exact importance.
     const score = distance * (1 - weakness * 0.22);
     if (score >= targetScore) continue;
     target = enemy;
@@ -78,6 +88,7 @@ export function chooseUtilityDecision({
   const closePressure = Number.isFinite(nearestDistance)
     ? clamp01((8 - nearestDistance) / 8)
     : 0;
+  const ringPressure = zonePressure(zoneTarget);
 
   const engageScore = target ? clamp01(
     0.22
@@ -86,6 +97,7 @@ export function chooseUtilityDecision({
     + targetWeakness * 0.18
     - safeProfile.caution * surrounded * 0.34
     - (1 - durability) * 0.34
+    - ringPressure * safeProfile.caution * 0.18
   ) : 0;
 
   const evadeScore = target ? clamp01(
@@ -98,7 +110,7 @@ export function chooseUtilityDecision({
   ) : 0;
 
   const zoneScore = zoneTarget ? clamp01(
-    0.7 + safeProfile.caution * 0.2 + (1 - durability) * 0.1
+    0.38 + ringPressure * 0.48 + safeProfile.caution * 0.18 + (1 - durability) * 0.08
   ) : 0;
   const huntScore = !target && memory ? clamp01(
     0.3 + safeProfile.persistence * 0.52 + durability * 0.12
@@ -112,8 +124,14 @@ export function chooseUtilityDecision({
   }
 
   if (target) {
+    // Near the ring edge a cautious bot may refuse a distant gunfight and
+    // rotate first. A close enemy is still an immediate tactical problem.
+    if (zoneTarget && nearestDistance > 8 && zoneScore > engageScore + 0.04 && zoneScore > evadeScore) {
+      return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
+    }
+
     // A badly hurt or outnumbered bot is allowed to refuse a fight. This is
-    // intentionally utility-based instead of a hard "if HP < X flee" script.
+    // utility scoring, not a fixed "HP < X means flee" script.
     if (evadeScore > engageScore + 0.06) {
       return {
         goal: "evade",
@@ -208,15 +226,23 @@ export async function setup(ctx) {
     const visibleEnemies = enrichEnemies(context.visibleEnemies);
     const urgent = Boolean(context.zoneTarget) && !visibleEnemies.length;
     const previous = commitments.get(botId);
-    const previousTargetStillVisible = previous?.targetEntityId
-      && visibleEnemies.some((enemy) => enemy.entityId === previous.targetEntityId);
+    const currentPreviousTarget = previous?.targetEntityId
+      ? visibleEnemies.find((enemy) => enemy.entityId === previous.targetEntityId)
+      : null;
 
     if (!urgent && previous && now < previous.holdUntil && (
       previous.goal === "roam"
       || previous.goal === "investigate"
       || previous.goal === "hunt"
-      || previousTargetStillVisible
+      || currentPreviousTarget
     )) {
+      if (currentPreviousTarget) {
+        const refreshed = { ...previous, target: currentPreviousTarget, profile };
+        if (refreshed.goal === "evade") {
+          refreshed.moveTarget = retreatPoint(transform, currentPreviousTarget, profile);
+        }
+        return refreshed;
+      }
       return { ...previous, profile };
     }
 
@@ -244,6 +270,12 @@ export async function setup(ctx) {
     return decision;
   }
 
+  // Damage is new information. Drop the short commitment so the next think
+  // cycle can reassess whether the fight is still worth taking.
+  ctx.events.on("combat:damage", ({ targetId }) => {
+    const entity = entities.get(targetId);
+    if (entity?.bot) commitments.delete(targetId);
+  });
   ctx.events.on("entity:died", ({ entityId }) => commitments.delete(entityId));
   ctx.events.on("entity:removed", ({ entityId }) => commitments.delete(entityId));
   ctx.events.on("entity:respawned", ({ entityId }) => commitments.delete(entityId));
