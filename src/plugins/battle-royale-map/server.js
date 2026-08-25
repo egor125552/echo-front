@@ -22,11 +22,13 @@ export const WAREHOUSE_FRONT_DOOR = Object.freeze({
   z: BUILDING_CENTER_Z,
 });
 
-// The staircase stays in its original east-side warehouse position. Its physical
-// walking surface faces the entrance: east is the bottom and west is the top.
+// Keep the staircase centered in its original east-side warehouse position.
+// The physical run is a little longer around the same x=70,z=0 centre so the
+// character controller sees a normal walkable slope instead of a near-wall.
+// East is the bottom facing the entrance; west is the top on the second floor.
 export const STAIR = Object.freeze({
-  minX: BUILDING_CENTER_X + 8,
-  maxX: BUILDING_CENTER_X + 12,
+  minX: BUILDING_CENTER_X + 7,
+  maxX: BUILDING_CENTER_X + 13,
   minZ: BUILDING_CENTER_Z - 2,
   maxZ: BUILDING_CENTER_Z + 2,
 });
@@ -41,7 +43,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "4.1.0",
+  version: "4.1.1",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -187,10 +189,11 @@ export async function setup(ctx) {
     addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
 
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
-    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 3.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 13.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 7, hx: 2, hz: 5, height: 0.18 });
-    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 7, hx: 2, hz: 5, height: 0.18 });
+    // Split the upper slab around the actual stair opening x=67..73,z=-2..2.
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 4, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11, hz: 12, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 14, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1, hz: 12, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 7, hx: 3, hz: 5, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 7, hx: 3, hz: 5, height: 0.18 });
 
     const stairSpec = {
       kind: "building-stair",
