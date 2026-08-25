@@ -1,6 +1,6 @@
 export const manifest = {
   id: "bot-perception",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["bot-controller", "teams", "rapier-physics", "movement", "spatial-grid"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
@@ -32,12 +32,15 @@ export async function setup(ctx) {
     return best;
   }
 
-  function nearestVisibleEnemy(botId, maxDistance = 28, options = {}) {
+  function visibleEnemies(botId, maxDistance = 28, options = {}) {
     const transform = ctx.components.get(botId, "Transform");
-    if (!transform) return null;
+    if (!transform) return [];
     const candidates = [];
     const ownTeam = teams.teamOf(botId);
-    for (const entry of grid.query(transform, maxDistance, options.now ?? Date.now())) {
+    const now = options.now ?? Date.now();
+    const limit = Math.max(1, Math.min(12, Number(options.limit) || 8));
+
+    for (const entry of grid.query(transform, maxDistance, now)) {
       const enemy = entry.entity;
       if (enemy.id === botId || !enemy.alive || teams.teamOf(enemy.id) === ownTeam) continue;
       const vertical = Math.abs((entry.transform.y ?? 0) - (transform.y ?? 0));
@@ -46,19 +49,26 @@ export async function setup(ctx) {
       if (distance > maxDistance) continue;
       candidates.push({ entry, distance });
     }
+
     candidates.sort((a, b) => a.distance - b.distance);
-    for (const candidate of candidates.slice(0, 6)) {
+    const result = [];
+    for (const candidate of candidates.slice(0, limit + 4)) {
       if (!physics.lineOfSight(transform, candidate.entry.transform, botId, candidate.entry.entity.id)) continue;
-      return {
+      result.push({
         entityId: candidate.entry.entity.id,
         entity: candidate.entry.entity,
         transform: candidate.entry.transform,
         distance: candidate.distance,
         score: candidate.distance,
-      };
+      });
+      if (result.length >= limit) break;
     }
-    return null;
+    return result;
   }
 
-  ctx.services.provide("bot-perception", { nearestEnemy, nearestVisibleEnemy });
+  function nearestVisibleEnemy(botId, maxDistance = 28, options = {}) {
+    return visibleEnemies(botId, maxDistance, { ...options, limit: 1 })[0] ?? null;
+  }
+
+  ctx.services.provide("bot-perception", { nearestEnemy, nearestVisibleEnemy, visibleEnemies });
 }
