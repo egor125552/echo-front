@@ -3,7 +3,7 @@ export const ENTITY_INTEREST_RADIUS = 125;
 
 export const manifest = {
   id: "match-api",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: [
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat",
@@ -115,7 +115,10 @@ export async function setup(ctx) {
       bot: false,
       team,
       health: 200,
-      armorPlates: 4,
+      armorPlates: 3,
+      armorPlateValue: 50,
+      armorCurrent: 100,
+      armorReserve: 0,
       weapons: ["pistol"],
     });
     battleRoyale.arm(Date.now());
@@ -155,13 +158,18 @@ export async function setup(ctx) {
     if (!result || result.type !== "crate") return Boolean(result);
 
     let applied = false;
+    let quantity = 0;
     if (result.loot === "rifle") applied = weapons.grant(playerId, "rifle");
-    if (result.loot === "armor") applied = (armorService?.grantPlates(playerId, 1) ?? 0) > 0;
+    if (result.loot === "armor") {
+      quantity = armorService?.grantPlates(playerId, 1) ?? 0;
+      applied = quantity > 0;
+    }
     ctx.events.emit("loot:picked", {
       entityId: playerId,
       crateId: result.crateId,
       loot: result.loot,
       applied,
+      quantity,
       x: result.x,
       y: result.y,
       z: result.z,
@@ -248,6 +256,9 @@ export async function setup(ctx) {
       armorMax: armor?.maximum ?? null,
       armorPlates: armorDescription?.platesRemaining ?? null,
       armorPlateMax: armorDescription?.maximumPlates ?? null,
+      armorReserve: armorDescription?.reservePlates ?? null,
+      armorReserveMax: armorDescription?.reserveCapacity ?? null,
+      armorSatchel: armorDescription?.hasSatchel ?? false,
       plating: armorDescription?.plating ?? false,
       weapon: selected?.id ?? null,
       weapons: inventory?.items?.map((item) => item.id) ?? [],
