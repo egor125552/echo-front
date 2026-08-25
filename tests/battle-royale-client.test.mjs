@@ -48,11 +48,15 @@ test("battle royale cues reuse existing Warzone assets instead of missing alias 
   assert.doesNotMatch(source, /assets\/audio\/battle-royale\//);
 });
 
-test("unopened loot crates use a continuous spatial locator loop", async () => {
+test("unopened loot crates use a continuous, extremely local spatial locator loop", async () => {
   const audioSource = await readFile(new URL("../client/plugins/battle-royale-audio.js", import.meta.url), "utf8");
   const announcerSource = await readFile(new URL("../client/plugins/announcer.js", import.meta.url), "utf8");
   assert.match(audioSource, /snapshot\?\.map\?\.crates/);
   assert.match(audioSource, /loop: true/);
+  assert.match(audioSource, /const CRATE_AUDIO_RADIUS = 10/);
+  assert.match(audioSource, /const CRATE_START_RADIUS = 9\.5/);
+  assert.match(audioSource, /referenceDistance: 1\.1/);
+  assert.match(audioSource, /rolloffFactor: 4\.5/);
   assert.match(audioSource, /CRATE_FLOOR_TOLERANCE/);
   assert.match(audioSource, /stopCrateLoop\(payload\.crateId\)/);
   assert.match(announcerSource, /payload\.speech/);
