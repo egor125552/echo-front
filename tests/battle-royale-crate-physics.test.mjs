@@ -11,7 +11,7 @@ import {
   CRATE_HEIGHT,
 } from "../src/plugins/battle-royale-crate-physics/server.js";
 
-test("loot crates are real Rapier obstacles and stay solid after opening", async () => {
+test("loot crates are real Rapier obstacles, announce themselves, and stay solid after opening", async () => {
   const host = await new PluginHost({
     plugins: [
       rapierPhysics,
@@ -36,6 +36,10 @@ test("loot crates are real Rapier obstacles and stay solid after opening", async
   );
   assert.equal(rayHit?.worldObject?.kind, "loot-crate");
   assert.equal(rayHit?.worldObject?.crateId, crate.id);
+  assert.equal(rayHit?.worldObject?.accessibleName, "ящик");
+
+  const blockedEvents = [];
+  host.events.on("movement:blocked", (payload) => blockedEvents.push(payload));
 
   const id = entities.spawn({
     id: "crate-walker",
@@ -60,6 +64,12 @@ test("loot crates are real Rapier obstacles and stay solid after opening", async
     transform.x < crate.x + 1.6,
     `walker did not actually reach the crate collider: player x=${transform.x}, crate x=${crate.x}`,
   );
+
+  const crateBlock = blockedEvents.find((event) => event.objectId === crate.id);
+  assert.ok(crateBlock, `crate collision was not exposed to accessibility: ${JSON.stringify(blockedEvents)}`);
+  assert.equal(crateBlock.kind, "loot-crate");
+  assert.equal(crateBlock.objectName, "ящик");
+  assert.equal(crateBlock.speech, "Здесь ящик");
 
   const opened = map.interact({ entityId: id, ...transform });
   assert.equal(opened?.type, "crate");
