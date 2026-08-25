@@ -16,6 +16,7 @@ import * as botLoadouts from "../plugins/battle-royale-bot-loadouts/server.js";
 import * as spatialGrid from "../plugins/battle-royale-spatial-grid/server.js";
 import * as botPerception from "../plugins/battle-royale-bot-perception/server.js";
 import * as battleRoyale from "../plugins/battle-royale/server.js";
+import * as botInterest from "../plugins/battle-royale-bot-interest/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
@@ -39,6 +40,7 @@ export const battleRoyalePreset = [
   spatialGrid,
   botPerception,
   battleRoyale,
+  botInterest,
   botCombat,
   botFill,
   matchApi,
