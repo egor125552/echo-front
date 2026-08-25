@@ -4,7 +4,7 @@ export const DEFAULT_GROUND_SURFACE = "forest";
 
 export const manifest = {
   id: "map-test-arena",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -36,13 +36,28 @@ export function describeBlockedMove(position, attempted, moved) {
 
 export async function setup(ctx) {
   const physics = ctx.services.get("physics");
+  physics.beginBatch?.();
   const walls = [
     { kind: "world-boundary", side: "north", x: 0, z: -WORLD_HALF_SIZE, hx: WORLD_HALF_SIZE, hz: BOUNDARY_HALF_THICKNESS },
     { kind: "world-boundary", side: "south", x: 0, z: WORLD_HALF_SIZE, hx: WORLD_HALF_SIZE, hz: BOUNDARY_HALF_THICKNESS },
     { kind: "world-boundary", side: "west", x: -WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE },
     { kind: "world-boundary", side: "east", x: WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE },
   ];
-  for (const wall of walls) physics.createWall(wall);
+  try {
+    physics.createFloor({
+      kind: "ground",
+      material: DEFAULT_GROUND_SURFACE,
+      x: 0,
+      y: 0,
+      z: 0,
+      hx: WORLD_HALF_SIZE,
+      hz: WORLD_HALF_SIZE,
+      thickness: 0.3,
+    });
+    for (const wall of walls) physics.createWall(wall);
+  } finally {
+    physics.endBatch?.();
+  }
 
   const spawns = {
     1: [
