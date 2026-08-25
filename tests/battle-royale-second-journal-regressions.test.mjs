@@ -1,10 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { createEchoFrontGame } from "../src/server/game.js";
 import {
   STAIR,
   UPPER_FLOOR_Y,
 } from "../src/plugins/battle-royale-map/server.js";
+import {
+  ZONE_WARNING_INTERVAL_MS,
+  zoneDirectionLabel,
+} from "../client/plugins/announcer.js";
 
 async function activeBattleRoyale(playerId) {
   const game = await createEchoFrontGame({ mode: "battle-royale" });
@@ -88,4 +93,20 @@ test("a BR bot already halfway up the stair keeps climbing instead of combat-str
   assert.ok(Math.abs(transform.z) < 1.5, `bot should stay near the stair centreline instead of falling off the side: z=${transform.z}`);
 
   await game.host.stop();
+});
+
+test("safe-zone speech tells a blind player which relative direction leads back inside", () => {
+  const zone = { x: 0, z: 0, radius: 60 };
+  assert.equal(zoneDirectionLabel({ x: 100, z: 0, angle: Math.PI / 2 }, zone), "сзади");
+  assert.equal(zoneDirectionLabel({ x: 100, z: 0, angle: -Math.PI / 2 }, zone), "впереди");
+  assert.equal(zoneDirectionLabel({ x: 0, z: 100, angle: 0 }, zone), "впереди");
+  assert.equal(ZONE_WARNING_INTERVAL_MS, 3000);
+});
+
+test("public announcer mirrors directional zone guidance", async () => {
+  const source = await readFile(new URL("../client/plugins/announcer.js", import.meta.url), "utf8");
+  const publicCopy = await readFile(new URL("../public/client/plugins/announcer.js", import.meta.url), "utf8");
+  assert.equal(publicCopy, source);
+  assert.match(source, /Зона \$\{direction\}/);
+  assert.match(source, /ZONE_WARNING_INTERVAL_MS = 3000/);
 });
