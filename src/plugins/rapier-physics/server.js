@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -199,9 +199,22 @@ async function createRapierPhysics() {
     syncQueries();
   }
 
+  function describeCharacterCollision(collision) {
+    const collider = collision?.collider;
+    if (!collider) return null;
+    return {
+      entityId: colliderToEntity.get(collider.handle) ?? null,
+      colliderHandle: collider.handle,
+      worldObject: colliderMetadata.get(collider.handle) ?? null,
+      normal: collision.normal1
+        ? { x: collision.normal1.x, y: collision.normal1.y, z: collision.normal1.z }
+        : null,
+    };
+  }
+
   function move(entityId, dx, dz, dy = 0) {
     const entry = characters.get(entityId);
-    if (!entry) return { x: 0, y: 0, z: 0, grounded: false };
+    if (!entry) return { x: 0, y: 0, z: 0, grounded: false, collisions: [] };
     controller.computeColliderMovement(
       entry.collider,
       { x: dx, y: dy, z: dz },
@@ -211,6 +224,12 @@ async function createRapierPhysics() {
     );
     const corrected = controller.computedMovement();
     const grounded = controller.computedGrounded();
+    const collisions = [];
+    const collisionCount = controller.numComputedCollisions();
+    for (let i = 0; i < collisionCount; i += 1) {
+      const described = describeCharacterCollision(controller.computedCollision(i));
+      if (described) collisions.push(described);
+    }
     const p = entry.collider.translation();
     entry.collider.setTranslation({
       x: p.x + corrected.x,
@@ -218,7 +237,7 @@ async function createRapierPhysics() {
       z: p.z + corrected.z,
     });
     syncQueries();
-    return { x: corrected.x, y: corrected.y, z: corrected.z, grounded };
+    return { x: corrected.x, y: corrected.y, z: corrected.z, grounded, collisions };
   }
 
   function makeRay(origin, direction) {
