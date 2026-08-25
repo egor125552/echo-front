@@ -3,7 +3,7 @@ export const REGEN_RATE_PER_SECOND = 25;
 
 export const manifest = {
   id: "health-regeneration",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "health"],
   capabilities: [
     "services.consume", "services.provide",
@@ -16,9 +16,9 @@ export async function setup(ctx) {
   const health = ctx.services.get("health");
   const lastHealthDamageAt = new Map();
 
-  ctx.events.on("combat:damage", (payload = {}) => {
-    if (Number(payload.healthApplied) <= 0) return;
-    lastHealthDamageAt.set(payload.targetId, Number(payload.now) || Date.now());
+  ctx.events.on("health:damaged", (payload = {}) => {
+    if (Number(payload.amount) <= 0) return;
+    lastHealthDamageAt.set(payload.entityId, Number(payload.now) || Date.now());
   });
 
   ctx.events.on("entity:respawned", ({ entityId }) => {
