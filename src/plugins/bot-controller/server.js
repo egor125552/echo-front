@@ -1,6 +1,6 @@
 export const manifest = {
   id: "bot-controller",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -22,6 +22,11 @@ export async function setup(ctx) {
     botState.navSampleX = null;
     botState.navSampleZ = null;
     botState.stuckSamples = 0;
+    botState.lastKnownTargetId = null;
+    botState.lastKnownX = null;
+    botState.lastKnownY = null;
+    botState.lastKnownZ = null;
+    botState.lastKnownUntil = 0;
   }
 
   ctx.events.on("entity:spawned", ({ entityId, spec }) => {
@@ -38,6 +43,11 @@ export async function setup(ctx) {
       navSampleX: null,
       navSampleZ: null,
       stuckSamples: 0,
+      lastKnownTargetId: null,
+      lastKnownX: null,
+      lastKnownY: null,
+      lastKnownZ: null,
+      lastKnownUntil: 0,
     });
   });
 
