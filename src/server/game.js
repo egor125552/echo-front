@@ -2,6 +2,7 @@ import { PluginHost } from "../core/plugin-host.js";
 import { echoFrontPreset } from "../presets/echo-front.js";
 import { battleRoyalePreset } from "../presets/battle-royale.js";
 import { collectGameDiagnostics } from "./engine-diagnostics.js";
+import { createEngineConsole } from "./engine-console.js";
 
 const FORWARDED_EVENTS = new Set([
   "sound:spatial",
@@ -61,6 +62,10 @@ export async function createEchoFrontGame({ mode = "tdm" } = {}) {
       return collectGameDiagnostics(game, options);
     },
   };
+
+  const engineConsole = createEngineConsole(game);
+  game.command = (request) => engineConsole.execute(request);
+  game.engineCommands = () => engineConsole.list();
 
   return game;
 }
