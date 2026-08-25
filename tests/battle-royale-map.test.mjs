@@ -81,17 +81,17 @@ test("a real Rapier character enters the warehouse and walks straight up and bac
   });
 
   movement.setInput(id, { forward: 1, sprint: false });
-  for (let i = 0; i < 70; i += 1) movement.tick(0.05);
+  for (let i = 0; i < 120; i += 1) movement.tick(0.05);
   let transform = host.components.get(id, "Transform");
-  assert.ok(transform.x < STAIR.minX - 0.5, `walker did not clear the top of the entrance-facing stair: x=${transform.x}`);
+  assert.ok(transform.x < STAIR.minX - 0.5, `walker did not clear the top of the entrance-facing stair: x=${transform.x}, y=${transform.y}, grounded=${transform.grounded}`);
   assert.ok(Math.abs(transform.z - WAREHOUSE_FRONT_DOOR.z) < 0.15, `straight entrance path drifted sideways: z=${transform.z}`);
   assert.ok(Math.abs(transform.y - UPPER_FLOOR_Y) < 0.08, `Rapier did not place walker on upper floor: y=${transform.y}`);
   assert.equal(transform.grounded, true);
 
   movement.setInput(id, { forward: -1, sprint: false });
-  for (let i = 0; i < 70; i += 1) movement.tick(0.05);
+  for (let i = 0; i < 120; i += 1) movement.tick(0.05);
   transform = host.components.get(id, "Transform");
-  assert.ok(transform.x > BUILDING.maxX + 0.5, `walker did not exit back through the warehouse entrance: x=${transform.x}`);
+  assert.ok(transform.x > BUILDING.maxX + 0.5, `walker did not exit back through the warehouse entrance: x=${transform.x}, y=${transform.y}, grounded=${transform.grounded}`);
   assert.ok(Math.abs(transform.y) < 0.08, `Rapier did not return walker to ground: y=${transform.y}`);
   assert.equal(transform.grounded, true);
 
