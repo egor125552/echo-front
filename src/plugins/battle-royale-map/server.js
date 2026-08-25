@@ -24,11 +24,14 @@ export const WAREHOUSE_FRONT_DOOR = Object.freeze({
   z: BUILDING_CENTER_Z,
 });
 
+// The staircase stays in its original east-side warehouse position. The physical
+// run now faces the entrance, so walking straight in reaches the first low step
+// instead of colliding with the tall side of the flight.
 export const STAIR = Object.freeze({
   minX: BUILDING_CENTER_X + 8,
   maxX: BUILDING_CENTER_X + 12,
-  minZ: BUILDING_CENTER_Z - 8,
-  maxZ: BUILDING_CENTER_Z + 8,
+  minZ: BUILDING_CENTER_Z - 2,
+  maxZ: BUILDING_CENTER_Z + 2,
 });
 
 const SURFACE_VARIANTS = Object.freeze({
@@ -41,7 +44,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "4.0.0",
+  version: "4.0.1",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -61,10 +64,10 @@ function distance3(a, b) {
 
 export function stairHeightAt(position) {
   if (!insideRect(position, STAIR)) return null;
-  const stepDepth = (STAIR.maxZ - STAIR.minZ) / STAIR_STEP_COUNT;
+  const stepDepth = (STAIR.maxX - STAIR.minX) / STAIR_STEP_COUNT;
   const distanceFromBottom = Math.max(0, Math.min(
-    STAIR.maxZ - STAIR.minZ,
-    STAIR.maxZ - position.z,
+    STAIR.maxX - STAIR.minX,
+    STAIR.maxX - position.x,
   ));
   const stepIndex = Math.min(
     STAIR_STEP_COUNT - 1,
@@ -194,24 +197,25 @@ export async function setup(ctx) {
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 3.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11.5, hz: 12, height: 0.18 });
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 13.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1.5, hz: 12, height: 0.18 });
-    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 10, hx: 2, hz: 2, height: 0.18 });
-    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 10, hx: 2, hz: 2, height: 0.18 });
+    // Fill the old oversized stairwell opening, leaving only the real four-metre-wide run.
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 7, hx: 2, hz: 5, height: 0.18 });
+    addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 7, hx: 2, hz: 5, height: 0.18 });
 
-    const stairDepth = (STAIR.maxZ - STAIR.minZ) / STAIR_STEP_COUNT;
-    const stairHalfX = (STAIR.maxX - STAIR.minX) / 2;
-    const stairCenterX = (STAIR.minX + STAIR.maxX) / 2;
+    const stairDepth = (STAIR.maxX - STAIR.minX) / STAIR_STEP_COUNT;
+    const stairHalfZ = (STAIR.maxZ - STAIR.minZ) / 2;
+    const stairCenterZ = (STAIR.minZ + STAIR.maxZ) / 2;
     for (let index = 0; index < STAIR_STEP_COUNT; index += 1) {
       const topY = (index + 1) * STAIR_STEP_HEIGHT;
-      const z = STAIR.maxZ - (index + 0.5) * stairDepth;
+      const x = STAIR.maxX - (index + 0.5) * stairDepth;
       addWall({
         kind: "building-stair",
         material: "metal",
         stairIndex: index,
-        x: stairCenterX,
+        x,
         y: 0,
-        z,
-        hx: stairHalfX,
-        hz: stairDepth / 2,
+        z: stairCenterZ,
+        hx: stairDepth / 2,
+        hz: stairHalfZ,
         height: topY,
       });
     }
