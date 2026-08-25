@@ -3,7 +3,7 @@ export const BOT_DECISION_HOLD_SPREAD_MS = 650;
 
 export const manifest = {
   id: "bot-brain",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["bot-controller", "entities", "battle-royale"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -73,9 +73,6 @@ export function chooseUtilityDecision({
   for (const enemy of visible) {
     const distance = Math.max(0.1, Number(enemy.distance) || 999);
     const weakness = 1 - enemyDurability(enemy);
-    // Distance matters most, but a wounded target becomes somewhat more
-    // attractive. Bots therefore finish opportunities without magically
-    // knowing every player's exact importance.
     const score = distance * (1 - weakness * 0.22);
     if (score >= targetScore) continue;
     target = enemy;
@@ -124,14 +121,10 @@ export function chooseUtilityDecision({
   }
 
   if (target) {
-    // Near the ring edge a cautious bot may refuse a distant gunfight and
-    // rotate first. A close enemy is still an immediate tactical problem.
     if (zoneTarget && nearestDistance > 8 && zoneScore > engageScore + 0.04 && zoneScore > evadeScore) {
       return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
     }
 
-    // A badly hurt or outnumbered bot is allowed to refuse a fight. This is
-    // utility scoring, not a fixed "HP < X means flee" script.
     if (evadeScore > engageScore + 0.06) {
       return {
         goal: "evade",
@@ -224,18 +217,19 @@ export async function setup(ctx) {
 
     const profile = botPersonality(botId, weaponId(botId));
     const visibleEnemies = enrichEnemies(context.visibleEnemies);
-    const urgent = Boolean(context.zoneTarget) && !visibleEnemies.length;
+    const hasVisibleThreat = visibleEnemies.length > 0;
+    const urgentZone = Boolean(context.zoneTarget) && !hasVisibleThreat;
     const previous = commitments.get(botId);
     const currentPreviousTarget = previous?.targetEntityId
       ? visibleEnemies.find((enemy) => enemy.entityId === previous.targetEntityId)
       : null;
 
-    if (!urgent && previous && now < previous.holdUntil && (
-      previous.goal === "roam"
-      || previous.goal === "investigate"
-      || previous.goal === "hunt"
-      || currentPreviousTarget
-    )) {
+    const peacefulCommitment = previous && ["roam", "investigate", "hunt", "zone"].includes(previous.goal);
+    const mayKeepPeacefulPlan = peacefulCommitment && !hasVisibleThreat && !urgentZone;
+    const mayKeepCombatPlan = Boolean(currentPreviousTarget)
+      && (previous?.goal === "engage" || previous?.goal === "evade");
+
+    if (previous && now < previous.holdUntil && (mayKeepPeacefulPlan || mayKeepCombatPlan)) {
       if (currentPreviousTarget) {
         const refreshed = { ...previous, target: currentPreviousTarget, profile };
         if (refreshed.goal === "evade") {
@@ -270,8 +264,6 @@ export async function setup(ctx) {
     return decision;
   }
 
-  // Damage is new information. Drop the short commitment so the next think
-  // cycle can reassess whether the fight is still worth taking.
   ctx.events.on("combat:damage", ({ targetId }) => {
     const entity = entities.get(targetId);
     if (entity?.bot) commitments.delete(targetId);
