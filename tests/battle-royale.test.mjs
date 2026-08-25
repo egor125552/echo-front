@@ -94,8 +94,15 @@ test("warehouse front door toggles and a crate can grant the rifle", async () =>
     z: rifleCrate.z,
     angle: 0,
   });
+  const beforeOpen = game.api.snapshotFor("br-human-loot");
+  const crateBefore = beforeOpen.map.crates.find((crate) => crate.id === rifleCrate.id);
+  assert.equal(crateBefore.opened, false);
+
   game.api.handleInput("br-human-loot", { interactPressed: true }, Date.now() + 1);
-  const self = game.api.snapshot().entities.find((entity) => entity.id === "br-human-loot");
+  const afterOpen = game.api.snapshotFor("br-human-loot");
+  const crateAfter = afterOpen.map.crates.find((crate) => crate.id === rifleCrate.id);
+  assert.equal(crateAfter.opened, true);
+  const self = afterOpen.entities.find((entity) => entity.id === "br-human-loot");
   assert.ok(self.weapons.includes("rifle"));
 
   movement.teleport("br-human-loot", {
