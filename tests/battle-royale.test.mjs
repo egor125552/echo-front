@@ -2,7 +2,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
 import { TARGET_PLAYERS } from "../src/plugins/battle-royale-bot-fill/server.js";
-import { UPPER_FLOOR_Y } from "../src/plugins/battle-royale-map/server.js";
+import {
+  PLAYER_SPAWN_CLEARANCE,
+  UPPER_FLOOR_Y,
+} from "../src/plugins/battle-royale-map/server.js";
 
 async function activeGame(playerId = "br-human") {
   const game = await createEchoFrontGame({ mode: "battle-royale" });
@@ -23,6 +26,19 @@ test("battle royale keeps 96 participants when a human replaces one bot", async 
   assert.equal(snapshot.entities.filter((entity) => entity.bot).length, TARGET_PLAYERS - 1);
   assert.equal(new Set(snapshot.entities.map((entity) => entity.team)).size, TARGET_PLAYERS);
   assert.equal(snapshot.match.phase, "deploying");
+  await game.host.stop();
+});
+
+test("opening spawn does not place an enemy beside the human", async () => {
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const playerId = "br-human-clearance";
+  game.api.connectHuman(playerId);
+  const snapshot = game.api.snapshot();
+  const self = snapshot.entities.find((entity) => entity.id === playerId);
+  const nearestBot = Math.min(...snapshot.entities
+    .filter((entity) => entity.bot && entity.alive)
+    .map((entity) => Math.hypot(entity.x - self.x, entity.z - self.z)));
+  assert.ok(nearestBot >= PLAYER_SPAWN_CLEARANCE);
   await game.host.stop();
 });
 
@@ -64,10 +80,10 @@ test("warehouse front door toggles and a crate can grant the rifle", async () =>
   const rifleCrate = map.crates.find((crate) => crate.id === "crate-ground-rifle");
 
   movement.teleport("br-human-loot", {
-    x: frontDoor.x,
+    x: frontDoor.x + 1.4,
     y: frontDoor.y,
-    z: frontDoor.z + 1.4,
-    angle: Math.PI,
+    z: frontDoor.z,
+    angle: -Math.PI / 2,
   });
   game.api.handleInput("br-human-loot", { interactPressed: true }, Date.now());
   assert.equal(frontDoor.open, true);
