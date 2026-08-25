@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { ENGINE_DIAGNOSTICS_CONTROL } from "../config/engine-diagnostics.js";
 import { createEchoFrontGame, normalizeGameMode } from "./game.js";
 import {
   activeSocketCount,
@@ -7,6 +8,27 @@ import {
   reconnectExpired,
 } from "./room-lifecycle.js";
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
+
+function monotonicNow() {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
+}
+
+function freshDiagnosticsStats() {
+  return {
+    tickCount: 0,
+    snapshotBroadcasts: 0,
+    eventBroadcasts: 0,
+    eventPacketsBroadcast: 0,
+    droppedMsTotal: 0,
+    maxTickWallMs: 0,
+    lastTickWallMs: 0,
+    lastTickAt: null,
+    lastSimulation: null,
+    tickSamples: [],
+  };
+}
 
 export class MatchRoom extends DurableObject {
   constructor(ctx, env) {
@@ -17,6 +39,7 @@ export class MatchRoom extends DurableObject {
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
     this.disconnectedHumans = new Map();
+    this.diagnosticsStats = freshDiagnosticsStats();
 
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
@@ -47,6 +70,7 @@ export class MatchRoom extends DurableObject {
       this.game = await createEchoFrontGame({ mode: normalized });
       this.lastStepAt = Date.now();
       this.lastSnapshotAt = 0;
+      this.diagnosticsStats = freshDiagnosticsStats();
     }
     return this.game;
   }
@@ -82,6 +106,31 @@ export class MatchRoom extends DurableObject {
     this.gameLoopTimer = null;
   }
 
+  recordTickDiagnostics(now, startedAt, result) {
+    const wallMs = Math.max(0, monotonicNow() - startedAt);
+    const stats = this.diagnosticsStats;
+    stats.tickCount += 1;
+    stats.lastTickAt = now;
+    stats.lastTickWallMs = wallMs;
+    stats.maxTickWallMs = Math.max(stats.maxTickWallMs, wallMs);
+    stats.droppedMsTotal += result.droppedMs;
+    stats.lastSimulation = {
+      simulatedMs: result.simulatedMs,
+      droppedMs: result.droppedMs,
+      steps: result.steps,
+    };
+    stats.tickSamples.push({
+      at: now,
+      wallMs: Number(wallMs.toFixed(3)),
+      simulatedMs: result.simulatedMs,
+      droppedMs: result.droppedMs,
+      steps: result.steps,
+      sockets: activeSocketCount(this.ctx.getWebSockets()),
+    });
+    const max = Math.max(10, ENGINE_DIAGNOSTICS_CONTROL.maxTickSamples || 120);
+    if (stats.tickSamples.length > max) stats.tickSamples.splice(0, stats.tickSamples.length - max);
+  }
+
   runGameLoopTick() {
     if (!this.game) return;
     if (!activeSocketCount(this.ctx.getWebSockets())) {
@@ -89,10 +138,12 @@ export class MatchRoom extends DurableObject {
       return;
     }
     const now = Date.now();
+    const startedAt = monotonicNow();
     try {
       this.cleanupDisconnectedHumans(now);
       const result = advanceSimulation(this.game, this.lastStepAt, now);
       this.lastStepAt = result.lastStepAt;
+      this.recordTickDiagnostics(now, startedAt, result);
       if (result.droppedMs > 0) {
         console.warn(JSON.stringify({
           event: "echo-front-simulation-catchup-capped",
@@ -110,12 +161,42 @@ export class MatchRoom extends DurableObject {
     }
   }
 
+  diagnosticsResponse(requestUrl) {
+    const headers = { "Cache-Control": "no-store" };
+    if (!this.game) {
+      return Response.json({
+        ok: true,
+        diagnosticsEnabled: true,
+        roomActive: false,
+        mode: this.mode,
+        sockets: activeSocketCount(this.ctx.getWebSockets()),
+        room: this.diagnosticsStats,
+      }, { headers });
+    }
+    const entityId = requestUrl.searchParams.get("entity") || null;
+    return Response.json({
+      ok: true,
+      diagnosticsEnabled: true,
+      roomActive: true,
+      mode: this.mode,
+      sockets: activeSocketCount(this.ctx.getWebSockets()),
+      disconnectedHumans: this.disconnectedHumans.size,
+      loopRunning: Boolean(this.gameLoopTimer),
+      lastStepAt: this.lastStepAt,
+      lastSnapshotAt: this.lastSnapshotAt,
+      room: this.diagnosticsStats,
+      game: this.game.diagnostics({ entityId }),
+    }, { headers });
+  }
+
   async fetch(request) {
+    const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/api/diagnostics") return this.diagnosticsResponse(requestUrl);
+
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket required", { status: 426 });
     }
 
-    const requestUrl = new URL(request.url);
     const mode = normalizeGameMode(requestUrl.searchParams.get("mode"));
     await this.ctx.storage.deleteAlarm();
     await this.ensureGame(mode);
@@ -207,6 +288,7 @@ export class MatchRoom extends DurableObject {
     this.disconnectedHumans.clear();
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
+    this.diagnosticsStats = freshDiagnosticsStats();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
   }
@@ -215,6 +297,8 @@ export class MatchRoom extends DurableObject {
     if (!this.game) return;
     const packets = this.game.drainEvents();
     if (!packets.length) return;
+    this.diagnosticsStats.eventBroadcasts += 1;
+    this.diagnosticsStats.eventPacketsBroadcast += packets.length;
     for (const socket of this.ctx.getWebSockets()) {
       try {
         const playerId = socket.deserializeAttachment()?.playerId;
@@ -233,6 +317,7 @@ export class MatchRoom extends DurableObject {
     const interval = Number(this.game.api.snapshotIntervalMs) || 100;
     if (!force && now - this.lastSnapshotAt < interval) return;
     this.lastSnapshotAt = now;
+    this.diagnosticsStats.snapshotBroadcasts += 1;
 
     if (typeof this.game.api.snapshotFor !== "function") {
       const message = JSON.stringify({ type: "snapshot", snapshot: this.game.api.snapshot(now) });
