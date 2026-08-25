@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "2.0.0",
+  version: "2.0.1",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -26,7 +26,7 @@ async function createRapierPhysics() {
   const RAPIER = await loadRapier();
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const controller = world.createCharacterController(CHARACTER_CONTROLLER_OFFSET);
-  controller.enableAutostep(0.24, 0.35, false);
+  controller.enableAutostep(0.24, 0.18, false);
   controller.enableSnapToGround(0.35);
   controller.setMaxSlopeClimbAngle(Math.PI / 4);
   controller.setMinSlopeSlideAngle(Math.PI / 3);
