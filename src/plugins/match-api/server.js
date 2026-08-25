@@ -1,6 +1,6 @@
 export const manifest = {
   id: "match-api",
-  version: "1.7.0",
+  version: "1.8.0",
   requires: [
     "entities", "movement", "weapons", "teams",
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
@@ -63,7 +63,11 @@ export async function setup(ctx) {
       bot: false,
       team,
       health: 200,
-      ...(ctx.hasPlugin("armor") ? { armorPlates: 4 } : {}),
+      ...(ctx.hasPlugin("armor") ? {
+        armorPlates: 4,
+        armorPlateValue: 31.25,
+        armorReserve: 5,
+      } : {}),
       weapons: ["pistol"],
     });
     botFill.ensure();
@@ -164,6 +168,9 @@ export async function setup(ctx) {
           armorMax: armor?.maximum ?? null,
           armorPlates: armorDescription?.platesRemaining ?? null,
           armorPlateMax: armorDescription?.maximumPlates ?? null,
+          armorReserve: armorDescription?.reservePlates ?? null,
+          armorReserveMax: armorDescription?.reserveCapacity ?? null,
+          armorSatchel: armorDescription?.hasSatchel ?? false,
           plating: armorDescription?.plating ?? false,
           weapon: selected?.id ?? null,
           weapons: inventory?.items?.map((item) => item.id) ?? [],
