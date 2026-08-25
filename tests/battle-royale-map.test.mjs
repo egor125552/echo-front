@@ -13,8 +13,6 @@ import {
   BUILDING_CENTER_Z,
   DEFAULT_GROUND_SURFACE,
   STAIR,
-  STAIR_STEP_COUNT,
-  STAIR_STEP_HEIGHT,
   UPPER_FLOOR_Y,
   WAREHOUSE_FRONT_DOOR,
   WORLD_HALF_SIZE,
@@ -47,14 +45,12 @@ test("walking straight from the first spawn reaches the warehouse entrance after
 });
 
 test("warehouse staircase stays on the original entrance line and rises westward", () => {
-  assert.equal(STAIR_STEP_COUNT, 16);
-  assert.ok(Math.abs(STAIR_STEP_HEIGHT - 0.2) < 0.0001);
   assert.ok(WAREHOUSE_FRONT_DOOR.x > STAIR.maxX);
   assert.ok(WAREHOUSE_FRONT_DOOR.z >= STAIR.minZ && WAREHOUSE_FRONT_DOOR.z <= STAIR.maxZ);
   const stairZ = (STAIR.minZ + STAIR.maxZ) / 2;
-  assert.ok(Math.abs(stairHeightAt({ x: 71.9, z: stairZ }) - 0.2) < 0.0001);
-  assert.ok(Math.abs(stairHeightAt({ x: 70.1, z: stairZ }) - 1.6) < 0.0001);
-  assert.ok(Math.abs(stairHeightAt({ x: 68.1, z: stairZ }) - UPPER_FLOOR_Y) < 0.0001);
+  assert.ok(Math.abs(stairHeightAt({ x: STAIR.maxX, z: stairZ })) < 0.0001);
+  assert.ok(Math.abs(stairHeightAt({ x: (STAIR.minX + STAIR.maxX) / 2, z: stairZ }) - 1.6) < 0.0001);
+  assert.ok(Math.abs(stairHeightAt({ x: STAIR.minX, z: stairZ }) - UPPER_FLOOR_Y) < 0.0001);
 });
 
 test("a real Rapier character enters the warehouse and walks straight up and back down the stairs", async () => {
@@ -121,6 +117,7 @@ test("closed warehouse door is announced as a door instead of a wall", async () 
     endBatch() {},
     createFloor(spec) { return { spec }; },
     createWall(spec) { return { spec }; },
+    createRamp(spec) { return { spec }; },
     setWallEnabled() {},
     raycastWorld() { return null; },
   };
@@ -176,11 +173,12 @@ test("physical acoustic ray hears concrete and reacts to an opening door", async
   await host.stop();
 });
 
-test("warehouse declares a physical second-floor slab and physical stair blocks", async () => {
+test("warehouse declares a physical second-floor slab and physical stair ramp", async () => {
   const source = await readFile(new URL("../src/plugins/battle-royale-map/server.js", import.meta.url), "utf8");
   assert.match(source, /kind: "building-floor"/);
   assert.match(source, /kind: "building-stair"/);
   assert.match(source, /physics\.createFloor/);
+  assert.match(source, /physics\.createRamp/);
 });
 
 test("upper room separator leaves exactly the physical door opening", async () => {
