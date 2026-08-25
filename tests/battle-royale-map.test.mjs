@@ -9,6 +9,7 @@ import {
   DEFAULT_GROUND_SURFACE,
   STAIR,
   UPPER_FLOOR_Y,
+  WAREHOUSE_FRONT_DOOR,
   WORLD_HALF_SIZE,
   acousticZoneAt,
   heightAt,
@@ -25,10 +26,11 @@ test("battle royale map is an 800 metre wilderness with a two-floor warehouse", 
   assert.equal(UPPER_FLOOR_Y, 3.2);
 });
 
-test("warehouse is reached after about 50 metres straight from the first spawn", () => {
-  assert.equal(BASE_SPAWN_RADIUS - BUILDING.maxX, 50);
+test("walking straight from the first spawn reaches the warehouse entrance after about 50 metres", () => {
+  assert.equal(WAREHOUSE_FRONT_DOOR.x, BUILDING.maxX);
+  assert.equal(WAREHOUSE_FRONT_DOOR.z, 0);
+  assert.equal(BASE_SPAWN_RADIUS - WAREHOUSE_FRONT_DOOR.x, 50);
   assert.equal(BUILDING_CENTER_Z, 0);
-  assert.ok(BUILDING.minZ <= 0 && BUILDING.maxZ >= 0);
 });
 
 test("warehouse stairs provide continuous physical elevation between floors", () => {
