@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
 
-test("human survives fifteen full pistol hits and dies on the sixteenth", async () => {
+test("human survives fourteen full pistol hits and dies on the fifteenth with armor spill damage", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("human-survivability");
 
@@ -18,7 +18,7 @@ test("human survives fifteen full pistol hits and dies on the sixteenth", async 
   assert.equal(self.health, 200);
   assert.equal(self.armor, 125);
 
-  for (let hit = 1; hit <= 15; hit += 1) {
+  for (let hit = 1; hit <= 14; hit += 1) {
     combat.damage("human-survivability", pistolDamage, {
       attackerId: "bot-test",
       weaponId: "pistol",
@@ -29,12 +29,12 @@ test("human survives fifteen full pistol hits and dies on the sixteenth", async 
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-survivability");
   assert.equal(self.alive, true);
   assert.equal(self.armor, 0);
-  assert.equal(self.health, 2);
+  assert.equal(self.health, 17);
 
   combat.damage("human-survivability", pistolDamage, {
     attackerId: "bot-test",
     weaponId: "pistol",
-    now: 4200,
+    now: 4000,
   });
 
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-survivability");
