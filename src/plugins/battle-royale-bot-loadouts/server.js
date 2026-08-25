@@ -1,12 +1,12 @@
 export const manifest = {
   id: "bot-loadouts",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["entities", "weapons"],
   optional: ["armor"],
   capabilities: ["services.consume", "services.provide"],
 };
 
-const ARMOR_LEVELS = [0, 31.25, 62.5, 93.75, 125];
+const ARMOR_LEVELS = [0, 50, 100, 150];
 
 export async function setup(ctx) {
   ctx.services.get("entities");
@@ -22,8 +22,10 @@ export async function setup(ctx) {
         bot: true,
         team,
         health: 200,
-        armorPlates: 4,
+        armorPlates: 3,
+        armorPlateValue: 50,
         armorCurrent,
+        armorReserve: 0,
         weapons: rifle ? ["rifle"] : ["pistol"],
       };
     },
