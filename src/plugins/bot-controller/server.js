@@ -1,6 +1,6 @@
 export const manifest = {
   id: "bot-controller",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -15,7 +15,11 @@ export async function setup(ctx) {
 
   function resetCombatState(botState) {
     if (!botState) return;
+    botState.reactionTargetId = null;
     botState.reactionUntil = 0;
+    botState.burstUntil = 0;
+    botState.nextBurstAt = 0;
+    botState.burstCycle = 0;
     botState.tacticUntil = 0;
     botState.avoidUntil = 0;
     botState.navSampleAt = 0;
@@ -33,7 +37,11 @@ export async function setup(ctx) {
     if (!spec.bot) return;
     const seed = entityId.charCodeAt(entityId.length - 1) || 1;
     ctx.components.add(entityId, "Bot", {
+      reactionTargetId: null,
       reactionUntil: 0,
+      burstUntil: 0,
+      nextBurstAt: 0,
+      burstCycle: 0,
       wanderTurn: (seed % 2 ? 1 : -1) * (0.22 + (seed % 4) * 0.06),
       strafeDirection: seed % 2 ? 1 : -1,
       tacticUntil: 0,
