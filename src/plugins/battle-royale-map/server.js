@@ -15,6 +15,12 @@ export const BUILDING = Object.freeze({
   upperY: UPPER_FLOOR_Y,
 });
 
+export const WAREHOUSE_FRONT_DOOR = Object.freeze({
+  x: BUILDING.maxX,
+  y: 0,
+  z: BUILDING_CENTER_Z,
+});
+
 export const STAIR = Object.freeze({
   minX: BUILDING_CENTER_X + 8,
   maxX: BUILDING_CENTER_X + 12,
@@ -32,7 +38,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "3.0.0",
+  version: "3.1.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -147,12 +153,13 @@ export async function setup(ctx) {
     addWall({ kind: "world-boundary", side: "west", x: -WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
     addWall({ kind: "world-boundary", side: "east", x: WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
 
-    // Ground-floor warehouse shell. The southern/front wall leaves a 2.4 m door opening.
+    // Ground-floor warehouse shell. The east wall faces the first human spawn and
+    // leaves a 2.4 m entrance exactly on the straight-ahead path.
     addWall({ kind: "building-wall", x: BUILDING.minX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING.maxX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING.maxX, z: BUILDING_CENTER_Z - 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING.maxX, z: BUILDING_CENTER_Z + 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
     addWall({ kind: "building-wall", x: BUILDING_CENTER_X, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X - 8.1, z: BUILDING.maxZ, hx: 6.9, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", x: BUILDING_CENTER_X + 8.1, z: BUILDING.maxZ, hx: 6.9, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
 
     // A thin physical second-floor slab blocks shots and line of sight between floors.
     // It is split into four pieces so the metal stairwell remains a real opening.
@@ -177,11 +184,9 @@ export async function setup(ctx) {
     {
       id: "warehouse-front-door",
       name: "Входная дверь склада",
-      x: BUILDING_CENTER_X,
-      y: 0,
-      z: BUILDING.maxZ,
+      ...WAREHOUSE_FRONT_DOOR,
       open: false,
-      collider: physics.createWall({ x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 1.2, hz: 0.25, height: 2.6 }),
+      collider: physics.createWall({ ...WAREHOUSE_FRONT_DOOR, hx: 0.25, hz: 1.2, height: 2.6 }),
     },
     {
       id: "warehouse-upper-room-door",
