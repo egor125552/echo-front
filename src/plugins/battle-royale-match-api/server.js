@@ -3,7 +3,7 @@ export const ENTITY_INTEREST_RADIUS = 125;
 
 export const manifest = {
   id: "match-api",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: [
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat",
@@ -246,11 +246,27 @@ export async function setup(ctx) {
     };
   }
 
+  function mapSnapshot() {
+    return {
+      id: map.id,
+      halfSize: map.halfSize,
+      crates: Array.isArray(map.crates)
+        ? map.crates.map((crate) => ({
+          id: crate.id,
+          x: crate.x,
+          y: crate.y ?? 0,
+          z: crate.z,
+          opened: Boolean(crate.opened),
+        }))
+        : [],
+    };
+  }
+
   function snapshot(now = Date.now()) {
     return {
       now,
       mode: "battle-royale",
-      map: { id: map.id, halfSize: map.halfSize },
+      map: mapSnapshot(),
       match: battleRoyale.status(now),
       entities: entities.all().map(entitySnapshot),
     };
@@ -278,7 +294,7 @@ export async function setup(ctx) {
     return {
       now,
       mode: "battle-royale",
-      map: { id: map.id, halfSize: map.halfSize },
+      map: mapSnapshot(),
       match: battleRoyale.status(now),
       playerPlacement: battleRoyale.placementOf(playerId),
       spectator: spectatorTarget ? {
