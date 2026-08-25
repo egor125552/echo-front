@@ -17,9 +17,45 @@ export function footstepKey(surface, variant) {
   return `footstep.${normalizedSurface}.${safeVariant}`;
 }
 
+function horizontalMovementLoss(attempted, moved) {
+  const attemptedDistance = Math.hypot(attempted.x, attempted.z);
+  if (attemptedDistance < 0.01) return 0;
+  const alongAttempt = (moved.x * attempted.x + moved.z * attempted.z) / attemptedDistance;
+  return attemptedDistance - Math.max(0, alongAttempt);
+}
+
+function blockageFromRapier(attempted, moved) {
+  if (horizontalMovementLoss(attempted, moved) < 0.035) return null;
+  const collisions = Array.isArray(moved.collisions) ? moved.collisions : [];
+  for (const collision of collisions) {
+    const worldObject = collision?.worldObject;
+    if (!worldObject) continue;
+    const explicitSpeech = String(worldObject.accessibleSpeech ?? "").trim();
+    const accessibleName = String(worldObject.accessibleName ?? "").trim();
+    if (!explicitSpeech && !accessibleName) continue;
+    const hint = String(worldObject.interactionHint ?? "").trim();
+    const speech = explicitSpeech || `Здесь ${accessibleName}${hint ? `. ${hint}` : ""}`;
+    return {
+      kind: worldObject.kind ?? "world-object",
+      speech,
+      colliderHandle: collision.colliderHandle ?? null,
+      objectId: worldObject.crateId ?? worldObject.doorId ?? worldObject.id ?? null,
+      objectName: accessibleName || null,
+    };
+  }
+  return null;
+}
+
+function blockageKey(blockage) {
+  return [
+    blockage?.kind ?? "unknown",
+    blockage?.objectId ?? blockage?.colliderHandle ?? blockage?.speech ?? "",
+  ].join(":");
+}
+
 export const manifest = {
   id: "movement",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -32,7 +68,7 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const physics = ctx.services.get("physics");
   const map = ctx.services.get("map");
-  const blockedEntities = new Set();
+  const blockedEntities = new Map();
 
   ctx.components.register("Transform");
   ctx.components.register("Input");
@@ -172,19 +208,26 @@ export async function setup(ctx) {
             transform.z = pos.z;
           }
 
-          if (!entity.bot && typeof map.describeBlockedMove === "function") {
-            const blockage = map.describeBlockedMove(
-              { x: transform.x, y: transform.y, z: transform.z },
-              { x: dx, y: dy, z: dz },
-              moved,
-            );
+          if (!entity.bot) {
+            const attempted = { x: dx, y: dy, z: dz };
+            const blockage = blockageFromRapier(attempted, moved)
+              ?? (typeof map.describeBlockedMove === "function"
+                ? map.describeBlockedMove(
+                  { x: transform.x, y: transform.y, z: transform.z },
+                  attempted,
+                  moved,
+                )
+                : null);
             if (blockage) {
-              if (!blockedEntities.has(entityId)) {
-                blockedEntities.add(entityId);
+              const key = blockageKey(blockage);
+              if (blockedEntities.get(entityId) !== key) {
+                blockedEntities.set(entityId, key);
                 ctx.events.emit("movement:blocked", {
                   recipientId: entityId,
                   kind: blockage.kind,
                   speech: blockage.speech,
+                  objectId: blockage.objectId ?? null,
+                  objectName: blockage.objectName ?? null,
                   now,
                 });
               }
