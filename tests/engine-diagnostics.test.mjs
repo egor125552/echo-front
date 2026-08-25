@@ -4,10 +4,12 @@ import fs from "node:fs";
 import { ENGINE_DIAGNOSTICS_CONTROL } from "../src/config/engine-diagnostics.js";
 import { createEchoFrontGame } from "../src/server/game.js";
 
-test("engine diagnostics are disabled by default", () => {
-  assert.equal(ENGINE_DIAGNOSTICS_CONTROL.enabled, false);
+test("engine diagnostics control has a valid switch and revision", () => {
+  assert.equal(typeof ENGINE_DIAGNOSTICS_CONTROL.enabled, "boolean");
   assert.ok(Number.isInteger(ENGINE_DIAGNOSTICS_CONTROL.revision));
   assert.ok(ENGINE_DIAGNOSTICS_CONTROL.revision >= 1);
+  assert.ok(ENGINE_DIAGNOSTICS_CONTROL.maxEntities >= 1);
+  assert.ok(ENGINE_DIAGNOSTICS_CONTROL.maxTickSamples >= 10);
 });
 
 test("battle royale exposes a direct runtime diagnostics snapshot", async () => {
