@@ -6,6 +6,7 @@ import {
   STAIR,
   UPPER_FLOOR_Y,
 } from "../src/plugins/battle-royale-map/server.js";
+import { hasOnlyNavigableSupportCollisions } from "../src/plugins/movement/server.js";
 import {
   ZONE_WARNING_INTERVAL_MS,
   zoneDirectionLabel,
@@ -93,6 +94,25 @@ test("a BR bot already halfway up the stair keeps climbing instead of combat-str
   assert.ok(Math.abs(transform.z) < 1.5, `bot should stay near the stair centreline instead of falling off the side: z=${transform.z}`);
 
   await game.host.stop();
+});
+
+test("Rapier stair and floor support corrections are not misreported as generic walls", () => {
+  assert.equal(hasOnlyNavigableSupportCollisions({
+    collisions: [
+      { worldObject: { kind: "building-stair" } },
+      { worldObject: { kind: "building-floor" } },
+    ],
+  }), true);
+  assert.equal(hasOnlyNavigableSupportCollisions({
+    collisions: [{ worldObject: { kind: "ground" } }],
+  }), true);
+  assert.equal(hasOnlyNavigableSupportCollisions({
+    collisions: [
+      { worldObject: { kind: "building-stair" } },
+      { worldObject: { kind: "building-wall" } },
+    ],
+  }), false);
+  assert.equal(hasOnlyNavigableSupportCollisions({ collisions: [] }), false);
 });
 
 test("safe-zone speech tells a blind player which relative direction leads back inside", () => {
