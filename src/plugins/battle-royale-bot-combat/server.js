@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "2.4.0",
+  version: "2.5.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "movement", "weapons", "entities", "spatial-grid", "battle-royale", "map-test-arena",
@@ -174,13 +174,21 @@ export async function setup(ctx) {
     const state = ctx.components.get(targetId, "Bot");
     const attackerTransform = ctx.components.get(attackerId, "Transform");
     rememberTarget(state, attackerId, attackerTransform, now, BOT_DAMAGE_MEMORY_MS);
-    if (state) {
+    if (!state) return;
+
+    // Taking damage may shorten the initial reaction to a NEW attacker, but it
+    // must never cancel an already scheduled pause between bursts. The old
+    // code moved nextBurstAt back to `now` on every hit, so two bots trading
+    // damage could bypass burst pacing indefinitely and recreate full-auto
+    // laser fights.
+    if (state.reactionTargetId !== attackerId) {
       state.reactionTargetId = attackerId;
-      state.reactionUntil = Math.min(
-        Number.isFinite(state.reactionUntil) ? state.reactionUntil : Infinity,
-        now + BOT_RETURN_FIRE_REACTION_MS,
-      );
-      state.nextBurstAt = Math.min(Number(state.nextBurstAt) || 0, now);
+      state.reactionUntil = now + BOT_RETURN_FIRE_REACTION_MS;
+      state.burstUntil = 0;
+      state.nextBurstAt = 0;
+      state.burstCycle = 0;
+    } else if (now < (state.reactionUntil ?? 0)) {
+      state.reactionUntil = Math.min(state.reactionUntil, now + BOT_RETURN_FIRE_REACTION_MS);
     }
   });
 
@@ -197,8 +205,6 @@ export async function setup(ctx) {
 
   function setRouteInput(bot, transform, state, route, input, now) {
     if (route?.kind === "stair") {
-      // Stair routing is deliberately precise. Generic obstacle avoidance can
-      // steer a bot off the ramp edge, so the route itself owns centering.
       movement.setInput(bot.id, {
         ...input,
         strafe: 0,
@@ -220,8 +226,6 @@ export async function setup(ctx) {
 
     let forward;
     if (preciseRoute.kind === "stair") {
-      // Do not charge the lower ramp edge while still turning. First align to
-      // the centerline, then enter at a controlled walk, then climb normally.
       forward = headingError > 0.28
         ? 0
         : headingError > 0.14
@@ -282,9 +286,6 @@ export async function setup(ctx) {
       const route = typeof map.navigationWaypoint === "function"
         ? map.navigationWaypoint(transform, visible.transform)
         : null;
-
-      // Doors and stairs outrank combat strafing when the enemy is on the
-      // other side of map structure.
       if (routeToward(bot, transform, state, route, now, 95)) return;
 
       const steering = steeringTo(transform, visible.transform);
@@ -327,8 +328,6 @@ export async function setup(ctx) {
       }
     }
 
-    // Survival still wins over curiosity. A bot near or outside the ring must
-    // return to safety before it investigates a warehouse or a sound cue.
     const zoneTarget = battleRoyale.zoneSteeringTarget(bot.id, now);
     if (zoneTarget) {
       const route = typeof map.navigationWaypoint === "function"
