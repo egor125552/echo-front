@@ -6,8 +6,6 @@ export const BASE_SPAWN_RADIUS = 125;
 export const PLAYER_SPAWN_CLEARANCE = 60;
 export const BUILDING_CENTER_X = 60;
 export const BUILDING_CENTER_Z = 0;
-export const STAIR_STEP_COUNT = 16;
-export const STAIR_STEP_HEIGHT = UPPER_FLOOR_Y / STAIR_STEP_COUNT;
 
 export const BUILDING = Object.freeze({
   id: "warehouse",
@@ -24,9 +22,8 @@ export const WAREHOUSE_FRONT_DOOR = Object.freeze({
   z: BUILDING_CENTER_Z,
 });
 
-// The staircase stays in its original east-side warehouse position. The physical
-// run now faces the entrance, so walking straight in reaches the first low step
-// instead of colliding with the tall side of the flight.
+// The staircase stays in its original east-side warehouse position. Its physical
+// walking surface faces the entrance: east is the bottom and west is the top.
 export const STAIR = Object.freeze({
   minX: BUILDING_CENTER_X + 8,
   maxX: BUILDING_CENTER_X + 12,
@@ -44,7 +41,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "4.0.1",
+  version: "4.1.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -64,16 +61,11 @@ function distance3(a, b) {
 
 export function stairHeightAt(position) {
   if (!insideRect(position, STAIR)) return null;
-  const stepDepth = (STAIR.maxX - STAIR.minX) / STAIR_STEP_COUNT;
-  const distanceFromBottom = Math.max(0, Math.min(
-    STAIR.maxX - STAIR.minX,
-    STAIR.maxX - position.x,
+  const progress = Math.max(0, Math.min(
+    1,
+    (STAIR.maxX - position.x) / (STAIR.maxX - STAIR.minX),
   ));
-  const stepIndex = Math.min(
-    STAIR_STEP_COUNT - 1,
-    Math.floor(distanceFromBottom / stepDepth),
-  );
-  return (stepIndex + 1) * STAIR_STEP_HEIGHT;
+  return progress * UPPER_FLOOR_Y;
 }
 
 // Compatibility/diagnostic helper only. Runtime vertical motion is resolved by
@@ -197,28 +189,23 @@ export async function setup(ctx) {
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 3.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11.5, hz: 12, height: 0.18 });
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 13.5, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 1.5, hz: 12, height: 0.18 });
-    // Fill the old oversized stairwell opening, leaving only the real four-metre-wide run.
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z - 7, hx: 2, hz: 5, height: 0.18 });
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X + 10, y: floorBottomY, z: BUILDING_CENTER_Z + 7, hx: 2, hz: 5, height: 0.18 });
 
-    const stairDepth = (STAIR.maxX - STAIR.minX) / STAIR_STEP_COUNT;
-    const stairHalfZ = (STAIR.maxZ - STAIR.minZ) / 2;
-    const stairCenterZ = (STAIR.minZ + STAIR.maxZ) / 2;
-    for (let index = 0; index < STAIR_STEP_COUNT; index += 1) {
-      const topY = (index + 1) * STAIR_STEP_HEIGHT;
-      const x = STAIR.maxX - (index + 0.5) * stairDepth;
-      addWall({
-        kind: "building-stair",
-        material: "metal",
-        stairIndex: index,
-        x,
-        y: 0,
-        z: stairCenterZ,
-        hx: stairDepth / 2,
-        hz: stairHalfZ,
-        height: topY,
-      });
-    }
+    const stairSpec = {
+      kind: "building-stair",
+      material: "metal",
+      x: (STAIR.minX + STAIR.maxX) / 2,
+      y: 0,
+      z: (STAIR.minZ + STAIR.maxZ) / 2,
+      run: STAIR.maxX - STAIR.minX,
+      rise: UPPER_FLOOR_Y,
+      width: STAIR.maxZ - STAIR.minZ,
+      thickness: 0.2,
+      risesToward: "west",
+    };
+    const stairCollider = physics.createRamp(stairSpec);
+    walls.push({ ...stairSpec, collider: stairCollider });
 
     addWall({ kind: "building-wall", material: "concrete", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
     addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
