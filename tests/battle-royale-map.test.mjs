@@ -14,6 +14,7 @@ import {
   acousticZoneAt,
   heightAt,
   locationAt,
+  setup as setupBattleRoyaleMap,
   stairHeightAt,
   surfaceAt,
 } from "../src/plugins/battle-royale-map/server.js";
@@ -55,6 +56,37 @@ test("map exposes surfaces, locations and indoor acoustic zones", () => {
   assert.equal(acousticZoneAt({ x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z }), "warehouse-upper");
   assert.equal(acousticZoneAt({ x: 0, y: 0, z: 0 }), "outdoor");
   assert.equal(locationAt({ x: BUILDING_CENTER_X - 10, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z }), "Склад, второй этаж");
+});
+
+test("closed warehouse door is announced as a door instead of a wall", async () => {
+  let map = null;
+  const physics = {
+    beginBatch() {},
+    endBatch() {},
+    createWall(spec) { return { spec }; },
+    setWallEnabled() {},
+  };
+  await setupBattleRoyaleMap({
+    services: {
+      get(name) {
+        assert.equal(name, "physics");
+        return physics;
+      },
+      provide(name, value) {
+        assert.equal(name, "map");
+        map = value;
+      },
+    },
+    events: { emit() {} },
+  });
+
+  const blockage = map.describeBlockedMove(
+    { x: WAREHOUSE_FRONT_DOOR.x + 0.6, y: 0, z: WAREHOUSE_FRONT_DOOR.z },
+    { x: -0.2, y: 0, z: 0 },
+    { x: 0, y: 0, z: 0 },
+  );
+  assert.equal(blockage.kind, "door");
+  assert.match(blockage.speech, /Здесь дверь/i);
 });
 
 test("warehouse declares a physical second-floor slab around the stair opening", async () => {
