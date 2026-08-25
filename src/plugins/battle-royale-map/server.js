@@ -3,6 +3,7 @@ export const BOUNDARY_HALF_THICKNESS = 1;
 export const UPPER_FLOOR_Y = 3.2;
 export const DEFAULT_GROUND_SURFACE = "forest";
 export const BASE_SPAWN_RADIUS = 125;
+export const PLAYER_SPAWN_CLEARANCE = 60;
 export const BUILDING_CENTER_X = 60;
 export const BUILDING_CENTER_Z = 0;
 
@@ -38,7 +39,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "3.1.0",
+  version: "3.1.1",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -124,10 +125,19 @@ export function describeBlockedMove(position, attempted, moved) {
 function generatedSpawn(index) {
   const golden = Math.PI * (3 - Math.sqrt(5));
   const ring = index % 96;
-  const angle = ring * golden;
+  let angle = ring * golden;
   const radius = BASE_SPAWN_RADIUS + ((ring * 47) % 215);
-  const x = Math.cos(angle) * radius;
-  const z = Math.sin(angle) * radius;
+  let x = Math.cos(angle) * radius;
+  let z = Math.sin(angle) * radius;
+
+  // Ring 0 is the slot replaced by the first human. Keep every other initial
+  // fighter comfortably away so combat cannot begin immediately beside them.
+  if (ring !== 0 && Math.hypot(x - BASE_SPAWN_RADIUS, z) < PLAYER_SPAWN_CLEARANCE) {
+    angle += ring % 2 === 0 ? -0.7 : 0.7;
+    x = Math.cos(angle) * radius;
+    z = Math.sin(angle) * radius;
+  }
+
   return {
     x,
     y: 0,
