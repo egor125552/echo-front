@@ -1,12 +1,14 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "1.5.0",
+  version: "2.0.0",
   requires: [],
   capabilities: ["services.provide"],
 };
 
+const CHARACTER_HALF_HEIGHT = 0.45;
 const CHARACTER_RADIUS = 0.32;
-const CHARACTER_BASE_OFFSET = 1;
+const CHARACTER_CONTROLLER_OFFSET = 0.02;
+const CHARACTER_BASE_OFFSET = CHARACTER_HALF_HEIGHT + CHARACTER_RADIUS + CHARACTER_CONTROLLER_OFFSET;
 
 async function loadRapier() {
   if (typeof WebSocketPair !== "undefined") {
@@ -23,9 +25,15 @@ async function loadRapier() {
 async function createRapierPhysics() {
   const RAPIER = await loadRapier();
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
-  const controller = world.createCharacterController(0.02);
+  const controller = world.createCharacterController(CHARACTER_CONTROLLER_OFFSET);
+  controller.enableAutostep(0.24, 0.35, false);
+  controller.enableSnapToGround(0.35);
+  controller.setMaxSlopeClimbAngle(Math.PI / 4);
+  controller.setMinSlopeSlideAngle(Math.PI / 3);
+
   const characters = new Map();
   const colliderToEntity = new Map();
+  const colliderMetadata = new Map();
   let batchDepth = 0;
   let queryDirty = false;
 
@@ -52,11 +60,42 @@ async function createRapierPhysics() {
     if (batchDepth === 0 && queryDirty) flushQueries();
   }
 
-  function createWall({ x, y = 0, z, hx, hz, height = 2 }) {
+  function rememberCollider(collider, spec) {
+    const {
+      x, y = 0, z, hx, hz, height, thickness,
+      ...metadata
+    } = spec;
+    colliderMetadata.set(collider.handle, {
+      ...metadata,
+      x,
+      y,
+      z,
+      hx,
+      hz,
+      height,
+      thickness,
+    });
+    return collider;
+  }
+
+  function createWall(spec) {
+    const { x, y = 0, z, hx, hz, height = 2 } = spec;
     const collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(hx, height / 2, hz)
         .setTranslation(x, y + height / 2, z),
     );
+    rememberCollider(collider, { ...spec, height });
+    syncQueries();
+    return collider;
+  }
+
+  function createFloor(spec) {
+    const { x = 0, y = 0, z = 0, hx, hz, thickness = 0.2 } = spec;
+    const collider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(hx, thickness / 2, hz)
+        .setTranslation(x, y - thickness / 2, z),
+    );
+    rememberCollider(collider, { ...spec, thickness });
     syncQueries();
     return collider;
   }
@@ -70,6 +109,7 @@ async function createRapierPhysics() {
 
   function removeWall(collider) {
     if (!collider) return false;
+    colliderMetadata.delete(collider.handle);
     world.removeCollider(collider, true);
     syncQueries();
     return true;
@@ -78,7 +118,7 @@ async function createRapierPhysics() {
   function createCharacter(entityId, { x = 0, y = 0, z = 0 } = {}) {
     if (characters.has(entityId)) return characters.get(entityId);
     const collider = world.createCollider(
-      RAPIER.ColliderDesc.capsule(0.45, CHARACTER_RADIUS)
+      RAPIER.ColliderDesc.capsule(CHARACTER_HALF_HEIGHT, CHARACTER_RADIUS)
         .setTranslation(x, y + CHARACTER_BASE_OFFSET, z),
     );
     const entry = { collider };
@@ -121,7 +161,7 @@ async function createRapierPhysics() {
 
   function move(entityId, dx, dz, dy = 0) {
     const entry = characters.get(entityId);
-    if (!entry) return { x: 0, y: 0, z: 0 };
+    if (!entry) return { x: 0, y: 0, z: 0, grounded: false };
     controller.computeColliderMovement(
       entry.collider,
       { x: dx, y: dy, z: dz },
@@ -130,6 +170,7 @@ async function createRapierPhysics() {
       collider => collider.handle !== entry.collider.handle,
     );
     const corrected = controller.computedMovement();
+    const grounded = controller.computedGrounded();
     const p = entry.collider.translation();
     entry.collider.setTranslation({
       x: p.x + corrected.x,
@@ -137,23 +178,47 @@ async function createRapierPhysics() {
       z: p.z + corrected.z,
     });
     syncQueries();
-    return { x: corrected.x, y: corrected.y, z: corrected.z };
+    return { x: corrected.x, y: corrected.y, z: corrected.z, grounded };
   }
 
-  function raycast(origin, direction, maxDistance, excludeEntityId = null) {
+  function makeRay(origin, direction) {
     const length = Math.hypot(direction.x, direction.y ?? 0, direction.z) || 1;
-    const ray = new RAPIER.Ray(
+    return new RAPIER.Ray(
       { x: origin.x, y: origin.y ?? 1, z: origin.z },
       { x: direction.x / length, y: (direction.y ?? 0) / length, z: direction.z / length },
     );
-    const exclude = characters.get(excludeEntityId)?.collider;
-    const hit = world.castRay(ray, maxDistance, true, undefined, undefined, exclude);
+  }
+
+  function describeRayHit(hit) {
     if (!hit) return null;
     return {
       entityId: colliderToEntity.get(hit.collider.handle) ?? null,
       distance: hit.timeOfImpact,
       colliderHandle: hit.collider.handle,
+      worldObject: colliderMetadata.get(hit.collider.handle) ?? null,
     };
+  }
+
+  function raycast(origin, direction, maxDistance, excludeEntityId = null) {
+    const ray = makeRay(origin, direction);
+    const exclude = characters.get(excludeEntityId)?.collider;
+    const hit = world.castRay(ray, maxDistance, true, undefined, undefined, exclude);
+    return describeRayHit(hit);
+  }
+
+  function raycastWorld(origin, direction, maxDistance) {
+    const ray = makeRay(origin, direction);
+    const hit = world.castRay(
+      ray,
+      maxDistance,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      collider => !colliderToEntity.has(collider.handle),
+    );
+    return describeRayHit(hit);
   }
 
   function lineOfSight(from, to, excludeEntityId = null, targetEntityId = null) {
@@ -175,7 +240,9 @@ async function createRapierPhysics() {
   return {
     RAPIER,
     world,
+    controller,
     createWall,
+    createFloor,
     setWallEnabled,
     removeWall,
     createCharacter,
@@ -185,6 +252,7 @@ async function createRapierPhysics() {
     teleport,
     move,
     raycast,
+    raycastWorld,
     lineOfSight,
     syncQueries,
     beginBatch,
