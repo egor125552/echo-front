@@ -1,0 +1,93 @@
+name: Engine Diagnostics Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Engine diagnostics mode
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - on
+          - off
+  push:
+    branches:
+      - main
+    paths:
+      - src/config/engine-diagnostics.js
+      - scripts/set-engine-diagnostics.mjs
+      - .github/workflows/engine-diagnostics.yml
+
+permissions:
+  contents: write
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply requested mode
+        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'status'
+        run: node scripts/set-engine-diagnostics.mjs "${{ inputs.mode }}"
+
+      - name: Commit requested mode
+        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'status'
+        run: |
+          if git diff --quiet -- src/config/engine-diagnostics.js; then
+            echo "Diagnostics already in requested state."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/config/engine-diagnostics.js
+          git commit -m "Set engine diagnostics ${{ inputs.mode }}"
+          git push origin HEAD:main
+
+      - name: Read control state
+        id: control
+        run: |
+          STATE=$(node scripts/set-engine-diagnostics.mjs status)
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "$STATE"
+
+      - name: Install dependencies
+        run: npm install
+      - name: Verify repository
+        run: npm test
+      - name: Verify Worker bundle
+        run: npx wrangler deploy --dry-run
+
+      - name: Wait for Cloudflare control state
+        if: github.event_name == 'push'
+        env:
+          HEALTH_URL: https://echo-front.k69ysrndm7.workers.dev/api/health
+        run: |
+          WANTED=$(node -e 'import("./src/config/engine-diagnostics.js").then(m => process.stdout.write(String(m.ENGINE_DIAGNOSTICS_CONTROL.enabled)))')
+          REVISION=$(node -e 'import("./src/config/engine-diagnostics.js").then(m => process.stdout.write(String(m.ENGINE_DIAGNOSTICS_CONTROL.revision)))')
+          echo "Waiting for diagnosticsEnabled=$WANTED revision=$REVISION"
+          for i in {1..60}; do
+            BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
+            LIVE_ENABLED=$(printf '%s' "$BODY" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).diagnosticsEnabled))}catch{}})')
+            LIVE_REVISION=$(printf '%s' "$BODY" | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).diagnosticsRevision))}catch{}})')
+            if [ "$LIVE_ENABLED" = "$WANTED" ] && [ "$LIVE_REVISION" = "$REVISION" ]; then
+              echo "Live Worker confirmed diagnosticsEnabled=$LIVE_ENABLED revision=$LIVE_REVISION"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Cloudflare did not confirm the requested diagnostics control state."
+          exit 1
+
+      - name: Summary
+        run: |
+          echo "### Engine diagnostics" >> "$GITHUB_STEP_SUMMARY"
+          echo '\`${{ steps.control.outputs.state }}\`' >> "$GITHUB_STEP_SUMMARY"
+          echo "Endpoint when enabled: /api/diagnostics?mode=battle-royale&room=public" >> "$GITHUB_STEP_SUMMARY"
