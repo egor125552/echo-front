@@ -22,11 +22,13 @@ jobs:
           ROOM=$(jq -r '.room // "public"' .github/engine-diagnostics-request.json)
           SAMPLES=$(jq -r '.samples // 20' .github/engine-diagnostics-request.json)
           INTERVAL=$(jq -r '.intervalSeconds // 3' .github/engine-diagnostics-request.json)
+          WAIT=$(jq -r '.waitForRoomSeconds // 300' .github/engine-diagnostics-request.json)
           echo "id=$REQUEST_ID" >> "$GITHUB_OUTPUT"
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "room=$ROOM" >> "$GITHUB_OUTPUT"
           echo "samples=$SAMPLES" >> "$GITHUB_OUTPUT"
           echo "interval=$INTERVAL" >> "$GITHUB_OUTPUT"
+          echo "wait=$WAIT" >> "$GITHUB_OUTPUT"
 
       - name: Verify diagnostics are live
         run: |
@@ -36,6 +38,28 @@ jobs:
             echo "Engine diagnostics are not enabled on the live Worker."
             exit 1
           fi
+
+      - name: Wait for active Durable Object room
+        env:
+          MODE: ${{ steps.request.outputs.mode }}
+          ROOM: ${{ steps.request.outputs.room }}
+          WAIT_SECONDS: ${{ steps.request.outputs.wait }}
+        run: |
+          URL="https://echo-front.k69ysrndm7.workers.dev/api/diagnostics?mode=${MODE}&room=${ROOM}"
+          DEADLINE=$((SECONDS + WAIT_SECONDS))
+          while [ "$SECONDS" -le "$DEADLINE" ]; do
+            BODY=$(curl --fail --silent --show-error "$URL")
+            ACTIVE=$(printf '%s' "$BODY" | jq -r '.roomActive')
+            SOCKETS=$(printf '%s' "$BODY" | jq -r '.sockets')
+            if [ "$ACTIVE" = "true" ] && [ "$SOCKETS" -gt 0 ]; then
+              echo "Room active with $SOCKETS socket(s)."
+              exit 0
+            fi
+            echo "Waiting for active room..."
+            sleep 3
+          done
+          echo "Room did not become active within ${WAIT_SECONDS}s."
+          exit 1
 
       - name: Capture live Durable Object diagnostics
         env:
@@ -53,7 +77,7 @@ jobs:
             echo "Captured sample $i/$SAMPLES"
             if [ "$i" -lt "$SAMPLES" ]; then sleep "$INTERVAL"; fi
           done
-          jq -s '{samples:length, first:.[0].game.generatedAt, last:.[-1].game.generatedAt, roomActive:.[-1].roomActive, mode:.[-1].mode}' engine-diagnostics.jsonl > engine-diagnostics-summary.json
+          jq -s '{samples:length, first:(.[0].game.generatedAt // null), last:(.[-1].game.generatedAt // null), roomActive:.[-1].roomActive, sockets:.[-1].sockets, mode:.[-1].mode}' engine-diagnostics.jsonl > engine-diagnostics-summary.json
 
       - uses: actions/upload-artifact@v4
         with:
