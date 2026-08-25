@@ -32,16 +32,37 @@ function createDoorBuffer(audioContext, open) {
   return buffer;
 }
 
+function createCrateCloseBuffer(audioContext) {
+  const duration = 0.3;
+  const length = Math.max(1, Math.floor(audioContext.sampleRate * duration));
+  const buffer = audioContext.createBuffer(1, length, audioContext.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) {
+    const t = i / audioContext.sampleRate;
+    const envelope = Math.exp(-t * 13);
+    const lid = Math.sin(2 * Math.PI * 118 * t) * 0.82;
+    const latch = Math.sin(2 * Math.PI * 560 * t) * Math.exp(-t * 25) * 0.22;
+    const noise = (Math.random() * 2 - 1) * 0.11;
+    data[i] = (lid + latch + noise) * envelope;
+  }
+  return buffer;
+}
+
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
   let mode = "tdm";
   let doorOpenBuffer = null;
   let doorCloseBuffer = null;
+  let crateCloseBuffer = null;
 
   function ensureDoorBuffers() {
     doorOpenBuffer ??= createDoorBuffer(audio.context, true);
     doorCloseBuffer ??= createDoorBuffer(audio.context, false);
+  }
+
+  function ensureCrateCloseBuffer() {
+    crateCloseBuffer ??= createCrateCloseBuffer(audio.context);
   }
 
   ctx.events.on("network:welcome", async ({ mode: joinedMode, resumed } = {}) => {
@@ -65,11 +86,19 @@ export async function setup(ctx) {
       }
       if (packet.event === "loot:opened") {
         await audio.playSpatial(CRATE_OPEN_URL, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
-          radius: 32,
-          gain: 0.9,
-          referenceDistance: 2,
-          rolloffFactor: 0.5,
+          radius: 40,
+          gain: 1.15,
+          referenceDistance: 3,
+          rolloffFactor: 0.45,
         });
+      }
+      if (packet.event === "loot:closed") {
+        ensureCrateCloseBuffer();
+        audio.playSpatialBuffer(crateCloseBuffer, {
+          x: payload.x,
+          y: payload.y ?? 0,
+          z: payload.z,
+        }, { radius: 36, gain: 1, referenceDistance: 3, rolloffFactor: 0.5 });
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
         await audio.playCentered(LOOT_PICKUP_URL, { gain: 0.8, channel: "br-loot" });
