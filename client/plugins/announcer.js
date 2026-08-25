@@ -83,10 +83,14 @@ export async function setup(ctx) {
     const payload = packet.payload ?? {};
 
     if (packet.event === "movement:blocked" && payload.recipientId === network.playerId) {
-      announce(payload.kind === "world-boundary" ? "Здесь пройти нельзя. Граница мира" : "Здесь пройти нельзя. Стена", {
-        interrupt: true,
-        repeat: true,
-      });
+      announce(
+        payload.speech
+          || (payload.kind === "world-boundary" ? "Здесь пройти нельзя. Граница мира" : "Здесь пройти нельзя. Стена"),
+        {
+          interrupt: true,
+          repeat: true,
+        },
+      );
       return;
     }
 
