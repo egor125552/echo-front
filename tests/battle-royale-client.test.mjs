@@ -42,9 +42,20 @@ test("occlusion progressively removes high frequencies without muting a source",
 test("battle royale cues reuse existing Warzone assets instead of missing alias files", async () => {
   const source = await readFile(new URL("../client/plugins/battle-royale-audio.js", import.meta.url), "utf8");
   assert.match(source, /WARZONE_AUDIO_ROOT/);
+  assert.match(source, /Loot Cache Chest Ambient \(Loop\)/);
   assert.match(source, /Loot Cache Chest Open/);
   assert.match(source, /Warzone Victory!/);
   assert.doesNotMatch(source, /assets\/audio\/battle-royale\//);
+});
+
+test("unopened loot crates use a continuous spatial locator loop", async () => {
+  const audioSource = await readFile(new URL("../client/plugins/battle-royale-audio.js", import.meta.url), "utf8");
+  const announcerSource = await readFile(new URL("../client/plugins/announcer.js", import.meta.url), "utf8");
+  assert.match(audioSource, /snapshot\?\.map\?\.crates/);
+  assert.match(audioSource, /loop: true/);
+  assert.match(audioSource, /CRATE_FLOOR_TOLERANCE/);
+  assert.match(audioSource, /stopCrateLoop\(payload\.crateId\)/);
+  assert.match(announcerSource, /payload\.speech/);
 });
 
 test("local weapon audio stays silent during the deployment freeze", async () => {
