@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "2.0.1",
+  version: "2.1.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -26,7 +26,7 @@ async function createRapierPhysics() {
   const RAPIER = await loadRapier();
   const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const controller = world.createCharacterController(CHARACTER_CONTROLLER_OFFSET);
-  controller.enableAutostep(0.24, 0.18, false);
+  controller.enableAutostep(0.24, 0.35, false);
   controller.enableSnapToGround(0.35);
   controller.setMaxSlopeClimbAngle(Math.PI / 4);
   controller.setMinSlopeSlideAngle(Math.PI / 3);
@@ -96,6 +96,46 @@ async function createRapierPhysics() {
         .setTranslation(x, y - thickness / 2, z),
     );
     rememberCollider(collider, { ...spec, thickness });
+    syncQueries();
+    return collider;
+  }
+
+  function createRamp(spec) {
+    const {
+      x = 0,
+      y = 0,
+      z = 0,
+      run,
+      rise,
+      width,
+      thickness = 0.2,
+      risesToward = "west",
+    } = spec;
+    const horizontalRun = Math.max(0.01, Math.abs(Number(run) || 0));
+    const verticalRise = Math.max(0, Number(rise) || 0);
+    const rampWidth = Math.max(0.02, Math.abs(Number(width) || 0));
+    const slopeLength = Math.hypot(horizontalRun, verticalRise);
+    const angleMagnitude = Math.atan2(verticalRise, horizontalRun);
+    const angle = risesToward === "east" ? angleMagnitude : -angleMagnitude;
+    const normalX = -Math.sin(angle);
+    const normalY = Math.cos(angle);
+    const surfaceCenterY = y + verticalRise / 2;
+    const colliderCenterX = x - normalX * thickness / 2;
+    const colliderCenterY = surfaceCenterY - normalY * thickness / 2;
+    const halfAngle = angle / 2;
+    const collider = world.createCollider(
+      RAPIER.ColliderDesc.cuboid(slopeLength / 2, thickness / 2, rampWidth / 2)
+        .setTranslation(colliderCenterX, colliderCenterY, z)
+        .setRotation({ x: 0, y: 0, z: Math.sin(halfAngle), w: Math.cos(halfAngle) }),
+    );
+    rememberCollider(collider, {
+      ...spec,
+      run: horizontalRun,
+      rise: verticalRise,
+      width: rampWidth,
+      thickness,
+      slopeAngle: angle,
+    });
     syncQueries();
     return collider;
   }
@@ -243,6 +283,7 @@ async function createRapierPhysics() {
     controller,
     createWall,
     createFloor,
+    createRamp,
     setWallEnabled,
     removeWall,
     createCharacter,
