@@ -1,6 +1,6 @@
 export const manifest = {
   id: "play-journal",
-  version: "1.1.0",
+  version: "2.0.0",
   requires: ["cloudflare-session"],
 };
 
@@ -15,11 +15,14 @@ const KEY_IDS = {
   KeyZ: 9,
   ShiftLeft: 10,
   ShiftRight: 11,
+  KeyE: 12,
+  KeyB: 13,
 };
 
 export const ENTITY_FIELDS = [
-  "x", "z", "angle", "alive", "health", "armor",
-  "weapon", "ammo", "reserve", "weapons", "team",
+  "x", "y", "z", "angle", "alive", "health", "armor",
+  "armorPlates", "armorPlateMax", "armorReserve", "armorReserveMax", "armorSatchel",
+  "weapon", "ammo", "reserve", "weapons", "team", "location", "acousticZone",
 ];
 
 function round(value, digits = 3) {
@@ -31,16 +34,24 @@ function round(value, digits = 3) {
 export function compactEntity(entity = {}) {
   return [
     round(entity.x, 3),
+    round(entity.y, 3),
     round(entity.z, 3),
     round(entity.angle, 4),
     entity.alive ? 1 : 0,
     entity.health ?? null,
     entity.armor ?? null,
+    entity.armorPlates ?? null,
+    entity.armorPlateMax ?? null,
+    entity.armorReserve ?? null,
+    entity.armorReserveMax ?? null,
+    entity.armorSatchel ? 1 : 0,
     entity.weapon ?? null,
     entity.ammo ?? null,
     entity.reserve ?? null,
     Array.isArray(entity.weapons) ? [...entity.weapons] : [],
     Number(entity.team) || 0,
+    entity.location ?? null,
+    entity.acousticZone ?? null,
   ];
 }
 
@@ -71,6 +82,8 @@ export function encodeInputRecord(timeMs, input = {}) {
     input.firePressed ? 1 : 0,
     input.reload ? 1 : 0,
     Number(input.selectDelta) || 0,
+    input.interactPressed ? 1 : 0,
+    input.platePressed ? 1 : 0,
   ];
 }
 
@@ -85,14 +98,14 @@ function persistentInputSignature(input = {}) {
 }
 
 function header(epochMs) {
-  return ["EFJ", 1, epochMs, {
+  return ["EFJ", 2, epochMs, {
     clock: "client milliseconds from journal start",
-    keys: "1 up,2 down,3 left,4 right,7 X,8 R,9 Z,10 left shift,11 right shift",
+    keys: "1 up,2 down,3 left,4 right,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B",
     k: "[k,t,key,down] exact browser key transition",
-    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta] input sampled for server",
+    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed] input sampled for server",
     n: "[n,t,index,id,name,bot,team,healthMax,armorMax] entity dictionary",
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
-    c: "change=[entityIndex,bitmask,values...] bits: x,z,angle,alive,health,armor,weapon,ammo,reserve,weapons,team",
+    c: `change=[entityIndex,bitmask,values...] bits: ${ENTITY_FIELDS.join(",")}`,
     e: "[e,t,event,payload] authoritative game event",
     m: "[m,t,name,data] journal/network/input marker",
   }];
@@ -151,7 +164,13 @@ export async function setup(ctx) {
 
   function recordInput(input = {}) {
     const signature = persistentInputSignature(input);
-    const impulse = Boolean(input.firePressed || input.reload || Number(input.selectDelta));
+    const impulse = Boolean(
+      input.firePressed
+      || input.reload
+      || Number(input.selectDelta)
+      || input.interactPressed
+      || input.platePressed
+    );
     if (signature === lastInputSignature && !impulse) return;
     lastInputSignature = signature;
     append(encodeInputRecord(stamp(), input));
