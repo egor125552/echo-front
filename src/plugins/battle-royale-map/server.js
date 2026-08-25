@@ -39,7 +39,7 @@ const SURFACE_VARIANTS = Object.freeze({
 
 export const manifest = {
   id: "map-test-arena",
-  version: "3.2.0",
+  version: "3.3.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -212,8 +212,10 @@ export async function setup(ctx) {
   const crates = [
     { id: "crate-ground-rifle", x: BUILDING_CENTER_X - 8.5, y: 0, z: BUILDING_CENTER_Z - 2, loot: "rifle", opened: false },
     { id: "crate-ground-armor", x: BUILDING_CENTER_X + 11, y: 0, z: BUILDING_CENTER_Z + 3, loot: "armor", opened: false },
-    { id: "crate-upper-armor", x: BUILDING_CENTER_X - 8.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 5, loot: "armor", opened: false },
-    { id: "crate-upper-rifle", x: BUILDING_CENTER_X + 6, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 3, loot: "rifle", opened: false },
+    // Both upper crates are on the solid east-side mezzanine. The first sits just
+    // beyond the top of the stairs, while the second is farther along the same floor.
+    { id: "crate-upper-armor", x: BUILDING_CENTER_X + 5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 9, loot: "armor", opened: false },
+    { id: "crate-upper-rifle", x: BUILDING_CENTER_X + 5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 9, loot: "rifle", opened: false },
   ];
 
   let spawnIndex = 0;
