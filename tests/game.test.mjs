@@ -133,7 +133,7 @@ test("main combat selects a visible target without requiring a manual aim cone",
   await game.host.stop();
 });
 
-test("human spawn protection blocks immediate damage", async () => {
+test("human spawn protection blocks immediate damage, then armor spill works after protection ends", async () => {
   const game = await createEchoFrontGame();
   game.api.connectHuman("human-protected");
   const protection = game.host.services.get("spawn-protection");
@@ -150,11 +150,11 @@ test("human spawn protection blocks immediate damage", async () => {
   combat.damage("human-protected", 200);
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
   assert.equal(self.armor, 0);
-  assert.equal(self.health, 200, "the armor-breaking hit should not spill into health");
+  assert.equal(self.health, 125, "125 armor should absorb that portion and the remaining 75 should spill into health");
 
   combat.damage("human-protected", 10);
   self = game.api.snapshot().entities.find((entity) => entity.id === "human-protected");
-  assert.equal(self.health, 190, "health damage should begin on the hit after armor is gone");
+  assert.equal(self.health, 115, "with armor gone the full hit should damage health");
   await game.host.stop();
 });
 
