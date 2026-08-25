@@ -62,6 +62,21 @@ test("unopened loot crates use a continuous, extremely local spatial locator loo
   assert.match(announcerSource, /payload\.speech/);
 });
 
+test("battle royale audio uses server-side Rapier wall and door occlusion", async () => {
+  const matchApi = await readFile(new URL("../src/plugins/battle-royale-match-api/server.js", import.meta.url), "utf8");
+  const mapSource = await readFile(new URL("../src/plugins/battle-royale-map/server.js", import.meta.url), "utf8");
+  const soundPack = await readFile(new URL("../client/plugins/core-sound-pack.js", import.meta.url), "utf8");
+  const crateAudio = await readFile(new URL("../client/plugins/battle-royale-audio.js", import.meta.url), "utf8");
+
+  assert.match(mapSource, /acousticOcclusionBetween/);
+  assert.match(mapSource, /physics\.raycastWorld/);
+  assert.match(matchApi, /occlusion: listener \? \(acousticOcclusion\(listener, crate\)/);
+  assert.match(matchApi, /payload: \{ \.\.\.payload, occlusion \}/);
+  assert.match(soundPack, /physicalOcclusion/);
+  assert.match(crateAudio, /occlusion: clamp01\(payload\.occlusion\)/);
+  assert.match(crateAudio, /handle\.crateOcclusion = occlusion/);
+});
+
 test("local weapon audio stays silent during the deployment freeze", async () => {
   const source = await readFile(new URL("../client/plugins/core-sound-pack.js", import.meta.url), "utf8");
   assert.match(source, /canFire: !battleRoyale \|\| snapshot\.match\?\.phase === "active"/);
