@@ -4,10 +4,10 @@ export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
 
 export const manifest = {
   id: "bot-combat",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: [
-    "bot-controller", "bot-perception", "bot-navigation", "movement", "weapons",
-    "entities", "spatial-grid", "battle-royale", "map-test-arena",
+    "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
+    "movement", "weapons", "entities", "spatial-grid", "battle-royale", "map-test-arena",
   ],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -84,6 +84,7 @@ export async function setup(ctx) {
   const bots = ctx.services.get("bots");
   const perception = ctx.services.get("bot-perception");
   const navigation = ctx.services.get("bot-navigation");
+  const interest = ctx.services.get("bot-interest");
   const movement = ctx.services.get("movement");
   const entities = ctx.services.get("entities");
   const grid = ctx.services.get("spatial-grid");
@@ -141,6 +142,29 @@ export async function setup(ctx) {
       fireHeld: false,
     }, now);
     state.nextThinkAt = now + thinkDelay;
+    return true;
+  }
+
+  function moveTowardInterest(bot, transform, state, target, now) {
+    const route = typeof map.navigationWaypoint === "function"
+      ? map.navigationWaypoint(transform, target)
+      : null;
+    if (routeToward(bot, transform, state, route, now, target.kind === "sound-interest" ? 105 : 165)) {
+      return true;
+    }
+
+    const steering = steeringTo(transform, target);
+    const verticalDifference = Math.abs((target.y ?? 0) - (transform.y ?? 0));
+    setNavigatedInput(bot, transform, state, {
+      forward: steering.distance > 1.7 ? 1 : 0,
+      strafe: 0,
+      turn: steering.turn,
+      sprint: target.kind === "sound-interest"
+        ? steering.distance > 10 && verticalDifference < 1
+        : steering.distance > 16 && verticalDifference < 1,
+      fireHeld: false,
+    }, now);
+    state.nextThinkAt = now + (target.kind === "sound-interest" ? 105 : 165);
     return true;
   }
 
@@ -204,6 +228,8 @@ export async function setup(ctx) {
       }
     }
 
+    // Survival still wins over curiosity. A bot near or outside the ring must
+    // return to safety before it investigates a warehouse or a sound cue.
     const zoneTarget = battleRoyale.zoneSteeringTarget(bot.id, now);
     if (zoneTarget) {
       const route = typeof map.navigationWaypoint === "function"
@@ -221,6 +247,9 @@ export async function setup(ctx) {
       state.nextThinkAt = now + 220;
       return;
     }
+
+    const interestTarget = interest.targetFor(bot.id, transform, now);
+    if (interestTarget && moveTowardInterest(bot, transform, state, interestTarget, now)) return;
 
     const seed = Number.parseInt(String(bot.id).replace(/\D/g, ""), 10) || 1;
     const phase = (Math.floor(now / 2200) + seed) % 7;
