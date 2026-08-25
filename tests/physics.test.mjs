@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { PluginHost } from "../src/core/plugin-host.js";
 import { walkingTestPreset } from "../src/presets/walking-test.js";
 
-test("Rapier walking preset creates and moves a character", async () => {
+test("Rapier walking preset creates and moves a grounded character", async () => {
   const host = await new PluginHost({ plugins: walkingTestPreset }).start();
   const entities = host.services.get("entities");
   const movement = host.services.get("movement");
@@ -23,6 +23,28 @@ test("Rapier walking preset creates and moves a character", async () => {
 
   const after = host.components.get(id, "Transform");
   assert.ok(after.z < startZ, `expected forward motion, got ${startZ} -> ${after.z}`);
+  assert.ok(Math.abs(after.y) < 0.05, `physical ground should keep y near zero, got ${after.y}`);
+  assert.equal(after.grounded, true);
+  await host.stop();
+});
+
+test("Rapier gravity settles a character onto the physical map floor", async () => {
+  const host = await new PluginHost({ plugins: walkingTestPreset }).start();
+  const entities = host.services.get("entities");
+  const movement = host.services.get("movement");
+
+  const id = entities.spawn({
+    id: "fall-test",
+    kind: "test",
+    team: 1,
+    position: { x: 0, y: 2.5, z: 0, angle: 0 },
+  });
+  movement.setInput(id, {});
+  for (let i = 0; i < 40; i += 1) movement.tick(0.05);
+
+  const after = host.components.get(id, "Transform");
+  assert.ok(Math.abs(after.y) < 0.06, `character should land on Rapier floor, got y=${after.y}`);
+  assert.equal(after.grounded, true);
   await host.stop();
 });
 
@@ -45,7 +67,7 @@ test("Rapier forest world boundary blocks character movement", async () => {
   await host.stop();
 });
 
-test("Rapier raycasts hit characters and line of sight is blocked by physical walls", async () => {
+test("Rapier raycasts hit characters and static-world rays expose collider metadata", async () => {
   const host = await new PluginHost({ plugins: walkingTestPreset }).start();
   const entities = host.services.get("entities");
   const physics = host.services.get("physics");
@@ -82,9 +104,7 @@ test("Rapier raycasts hit characters and line of sight is blocked by physical wa
     true,
   );
 
-  // Production forest has no interior walls yet. Add a test-only collider so
-  // this remains a direct Rapier line-of-sight regression.
-  physics.createWall({ x: -7.5, z: 0, hx: 0.35, hz: 4 });
+  physics.createWall({ kind: "test-concrete-wall", material: "concrete", x: -7.5, z: 0, hx: 0.35, hz: 4 });
   assert.equal(
     physics.lineOfSight(
       { x: -9, z: 0 },
@@ -93,6 +113,15 @@ test("Rapier raycasts hit characters and line of sight is blocked by physical wa
     false,
     "physical wall at x=-7.5 must block line of sight",
   );
+
+  const staticHit = physics.raycastWorld(
+    { x: -9, y: 1, z: 0 },
+    { x: 1, y: 0, z: 0 },
+    3,
+  );
+  assert.equal(staticHit?.entityId, null);
+  assert.equal(staticHit?.worldObject?.kind, "test-concrete-wall");
+  assert.equal(staticHit?.worldObject?.material, "concrete");
 
   await host.stop();
 });
