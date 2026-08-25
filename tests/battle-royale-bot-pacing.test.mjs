@@ -5,6 +5,7 @@ import {
   BOT_REACTION_MIN_MS,
   BOT_REACTION_SPREAD_MS,
 } from "../src/plugins/battle-royale-bot-combat/server.js";
+import { BOT_MAX_START_RADIUS } from "../src/plugins/battle-royale-bot-fill/server.js";
 import {
   BUILDING_CENTER_X,
   BUILDING_CENTER_Z,
@@ -51,6 +52,41 @@ test("a bot must react to a newly seen enemy before opening fire", async () => {
   state.nextThinkAt = 0;
   botCombat.tick(0.05, state.reactionUntil + 1);
   assert.equal(input.fireHeld, true, "bot never opened fire after its reaction time elapsed");
+
+  await game.host.stop();
+});
+
+test("taking damage during a firefight cannot cancel the mandatory pause between bot bursts", async () => {
+  const { game, now } = await activeBattleRoyale("burst-pause-human");
+  const hunter = keepOneBot(game);
+  const movement = game.host.services.get("movement");
+  const botCombat = game.host.services.get("bot-combat");
+
+  movement.teleport(hunter.id, { x: 0, y: 0, z: 0, angle: 0 });
+  movement.teleport("burst-pause-human", { x: 0, y: 0, z: -6, angle: Math.PI });
+
+  const state = game.host.components.get(hunter.id, "Bot");
+  const input = game.host.components.get(hunter.id, "Input");
+  state.nextThinkAt = 0;
+  botCombat.tick(0.05, now + 100);
+  state.nextThinkAt = 0;
+  botCombat.tick(0.05, state.reactionUntil + 1);
+  assert.equal(input.fireHeld, true);
+
+  const scheduledPauseEnd = state.nextBurstAt;
+  const duringPause = state.burstUntil + 1;
+  assert.ok(scheduledPauseEnd > duringPause, "test did not create a real burst pause");
+
+  game.host.events.emit("combat:damage", {
+    targetId: hunter.id,
+    attackerId: "burst-pause-human",
+    now: state.burstUntil - 5,
+  });
+  assert.equal(state.nextBurstAt, scheduledPauseEnd, "taking damage shortened the burst cooldown");
+
+  state.nextThinkAt = 0;
+  botCombat.tick(0.05, duringPause);
+  assert.equal(input.fireHeld, false, "bot fired during its mandatory burst pause after taking damage");
 
   await game.host.stop();
 });
@@ -102,6 +138,32 @@ test("an off-center bot aligns before entering the warehouse stair and reaches t
   const transform = game.host.components.get(hunter.id, "Transform");
   assert.equal(reachedUpper, true, `bot did not reach upper floor: x=${transform?.x}, y=${transform?.y}, z=${transform?.z}`);
   assert.ok(rampResets <= 1, `bot repeatedly fell/reset at the lower stair edge: ${rampResets}`);
+
+  await game.host.stop();
+});
+
+test("all initial battle royale bots start inside the compact 325 meter play radius", async () => {
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const entities = game.host.services.get("entities");
+  const positions = entities.all()
+    .filter((entity) => entity.bot)
+    .map((entity) => game.host.components.get(entity.id, "Transform"))
+    .filter(Boolean);
+
+  assert.equal(positions.length, 96);
+  const radii = positions.map((position) => Math.hypot(position.x, position.z));
+  assert.ok(Math.max(...radii) <= BOT_MAX_START_RADIUS + 0.01, `bot started too far away: ${Math.max(...radii)}`);
+
+  let minimumSeparation = Infinity;
+  for (let i = 0; i < positions.length; i += 1) {
+    for (let j = i + 1; j < positions.length; j += 1) {
+      minimumSeparation = Math.min(
+        minimumSeparation,
+        Math.hypot(positions[i].x - positions[j].x, positions[i].z - positions[j].z),
+      );
+    }
+  }
+  assert.ok(minimumSeparation >= 38, `compact starts overlap: ${minimumSeparation}`);
 
   await game.host.stop();
 });
