@@ -1,0 +1,92 @@
+name: Engine Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Engine control mode
+        required: true
+        default: status
+        type: choice
+        options:
+          - status
+          - on
+          - off
+  push:
+    branches:
+      - main
+    paths:
+      - src/config/engine-control.js
+      - scripts/set-engine-control.mjs
+      - .github/workflows/engine-control.yml
+
+permissions:
+  contents: write
+
+jobs:
+  control:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Apply requested mode
+        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'status'
+        run: node scripts/set-engine-control.mjs "${{ inputs.mode }}"
+
+      - name: Commit requested mode
+        if: github.event_name == 'workflow_dispatch' && inputs.mode != 'status'
+        run: |
+          if git diff --quiet -- src/config/engine-control.js; then
+            echo "Engine control already in requested state."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/config/engine-control.js
+          git commit -m "Set engine control ${{ inputs.mode }}"
+          git push origin HEAD:main
+
+      - name: Read control state
+        id: control
+        run: |
+          STATE=$(node scripts/set-engine-control.mjs status)
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "$STATE"
+
+      - name: Install dependencies
+        run: npm install
+      - name: Verify repository
+        run: npm test
+      - name: Verify Worker bundle
+        run: npx wrangler deploy --dry-run
+
+      - name: Wait for Cloudflare control state
+        if: github.event_name == 'push'
+        env:
+          HEALTH_URL: https://echo-front.k69ysrndm7.workers.dev/api/health
+        run: |
+          WANTED=$(node -e 'import("./src/config/engine-control.js").then(m => process.stdout.write(String(m.ENGINE_CONTROL.enabled)))')
+          REVISION=$(node -e 'import("./src/config/engine-control.js").then(m => process.stdout.write(String(m.ENGINE_CONTROL.revision)))')
+          echo "Waiting for engineControlEnabled=$WANTED revision=$REVISION"
+          for i in {1..60}; do
+            BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
+            LIVE_ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // empty')
+            LIVE_REVISION=$(printf '%s' "$BODY" | jq -r '.engineControlRevision // empty')
+            if [ "$LIVE_ENABLED" = "$WANTED" ] && [ "$LIVE_REVISION" = "$REVISION" ]; then
+              echo "Live Worker confirmed engineControlEnabled=$LIVE_ENABLED revision=$LIVE_REVISION"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Cloudflare did not confirm engine control state."
+          exit 1
+
+      - name: Summary
+        run: |
+          echo "### Engine control" >> "$GITHUB_STEP_SUMMARY"
+          echo '${{ steps.control.outputs.state }}' >> "$GITHUB_STEP_SUMMARY"
