@@ -1,5 +1,4 @@
 import { assign, createActor, createMachine } from "xstate";
-import { usesXStateBotBrain } from "../../config/bot-ai-rollout.js";
 
 export const BOT_BEHAVIOR_STATES = Object.freeze([
   "roam",
@@ -15,9 +14,9 @@ export const BOT_BEHAVIOR_STATES = Object.freeze([
 
 export const manifest = {
   id: "bot-state-machine",
-  version: "1.1.0",
-  requires: ["bot-controller"],
-  capabilities: ["services.provide", "events.on"],
+  version: "1.2.0",
+  requires: ["bot-controller", "bot-ai-rollout"],
+  capabilities: ["services.consume", "services.provide", "events.on"],
 };
 
 const storeDecision = assign({
@@ -67,6 +66,7 @@ export const botBehaviorMachine = createMachine({
 });
 
 export async function setup(ctx) {
+  const rollout = ctx.services.get("bot-ai-rollout");
   const actors = new Map();
 
   function actorFor(botId) {
@@ -91,7 +91,7 @@ export async function setup(ctx) {
 
   function resolve(botId, candidate, meta = {}) {
     if (!candidate) return null;
-    if (!usesXStateBotBrain(botId)) {
+    if (!rollout.usesXState(botId)) {
       return { ...candidate, machineState: candidate.goal, orchestration: "legacy" };
     }
 
@@ -133,7 +133,7 @@ export async function setup(ctx) {
   ctx.services.provide("bot-state-machine", {
     resolve,
     stateFor(botId) {
-      if (!usesXStateBotBrain(botId)) {
+      if (!rollout.usesXState(botId)) {
         return { botId, orchestration: "legacy", machineState: null, decision: null };
       }
       const actor = actors.get(botId);
