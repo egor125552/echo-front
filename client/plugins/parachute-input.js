@@ -9,6 +9,12 @@ export async function setup(ctx) {
   const originalSample = input.sample.bind(input);
   let parachutePressed = false;
 
+  function trigger(reason) {
+    if (!network.connected) return;
+    parachutePressed = true;
+    ctx.events.emit("input:changed", { reason });
+  }
+
   input.sample = () => {
     const sampled = originalSample();
     const pressed = parachutePressed;
@@ -19,7 +25,12 @@ export async function setup(ctx) {
   window.addEventListener("keydown", (event) => {
     if (event.code !== "Space" || event.repeat || !network.connected) return;
     event.preventDefault();
-    parachutePressed = true;
-    ctx.events.emit("input:changed", { reason: "key:Space:down" });
+    trigger("key:Space:down");
   }, { capture: true, passive: false });
+
+  const button = document.querySelector('[data-touch-action="parachute"]');
+  button?.addEventListener("click", (event) => {
+    event.preventDefault();
+    trigger("touch:parachute");
+  });
 }
