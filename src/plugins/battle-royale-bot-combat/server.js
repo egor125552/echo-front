@@ -11,10 +11,11 @@ export const BOT_BURST_PAUSE_MIN_MS = 420;
 export const BOT_BURST_PAUSE_SPREAD_MS = 480;
 export const BOT_STAIR_ENTRY_OFFSET = 1.15;
 export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
+export const BOT_GROUND_RAMP_ESCAPE_Y = 0.45;
 
 export const manifest = {
   id: "bot-combat",
-  version: "4.3.1",
+  version: "4.3.2",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -166,6 +167,14 @@ export function stairRouteMatchesTargetFloor(route, target, upperY = 3.2) {
   return targetUpper === routeUpper;
 }
 
+export function normalizeRouteForTarget(transform, target, route, upperY = 3.2) {
+  if (route?.kind !== "stair" || !target) return route;
+  const targetUpper = Number(target?.y) > upperY / 2;
+  const currentY = Number(transform?.y) || 0;
+  if (!targetUpper && currentY < BOT_GROUND_RAMP_ESCAPE_Y) return null;
+  return route;
+}
+
 export async function setup(ctx) {
   const bots = ctx.services.get("bots");
   const perception = ctx.services.get("bot-perception");
@@ -265,9 +274,11 @@ export async function setup(ctx) {
     stopDistance = 1.5,
   } = {}) {
     if (!target) return false;
-    const route = typeof map.navigationWaypoint === "function"
+    const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
+    let route = typeof map.navigationWaypoint === "function"
       ? map.navigationWaypoint(transform, target)
       : null;
+    route = normalizeRouteForTarget(transform, target, route, upperY);
     if (routeToward(bot, transform, state, route, now, thinkDelay)) return true;
     const steering = steeringTo(transform, target);
     const headingError = Math.abs(wrapAngle(
@@ -389,12 +400,20 @@ export async function setup(ctx) {
       && Number(transform.y) > 0.02
       && Number(transform.y) < upperY - 0.12;
     if (midStair) {
-      return {
-        active: true,
-        route: previousDecision.route,
-        target: previousTraversalTarget,
-        committed: true,
-      };
+      const retainedRoute = normalizeRouteForTarget(
+        transform,
+        previousTraversalTarget,
+        previousDecision.route,
+        upperY,
+      );
+      if (retainedRoute) {
+        return {
+          active: true,
+          route: retainedRoute,
+          target: previousTraversalTarget,
+          committed: true,
+        };
+      }
     }
 
     const carriedBehaviorTarget = ["investigate", "search"].includes(previousDecision?.goal)
@@ -415,6 +434,7 @@ export async function setup(ctx) {
       ?? null;
     if (!target || typeof map.navigationWaypoint !== "function") return null;
     let route = map.navigationWaypoint(transform, target);
+    route = normalizeRouteForTarget(transform, target, route, upperY);
     if (route?.kind === "stair" && sameResolvedFloor(transform, target, upperY)) {
       route = null;
     }
