@@ -1,9 +1,9 @@
 export const manifest = {
   id: "battle-royale-observer",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "bot-controller", "entities", "battle-royale", "bot-brain",
-    "bot-state-machine", "battle-royale-bot-perception",
+    "bot-state-machine", "bot-perception",
     "battle-royale-bot-interest", "map-test-arena",
   ],
   capabilities: [
