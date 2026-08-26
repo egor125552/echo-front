@@ -4,11 +4,12 @@ export const BOT_INTEREST_VISIT_MS = 45_000;
 export const BOT_INTEREST_COOLDOWN_MS = 25_000;
 export const BOT_HEARING_FOOTSTEP_TTL_MS = 5_500;
 export const BOT_HEARING_WEAPON_TTL_MS = 8_000;
+export const BOT_WEAPON_INVESTIGATION_CAP = 6;
 export const BOT_INTEREST_REACHED_DISTANCE = 2.4;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["bot-controller", "entities", "teams", "spatial-grid", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -151,7 +152,7 @@ export async function setup(ctx) {
     };
     const sourceTeam = teams.teamOf(sound.entityId);
     const priority = soundPriority(sound.key);
-    let listeners = 0;
+    const candidates = [];
 
     for (const nearby of grid.query(sourcePosition, radius, now)) {
       const bot = nearby.entity;
@@ -164,7 +165,16 @@ export async function setup(ctx) {
         : 0;
       const effectiveRadius = radius * Math.max(0.22, 1 - occlusion * 0.7);
       if (distance > effectiveRadius) continue;
+      candidates.push({ bot, distance });
+    }
 
+    candidates.sort((a, b) => a.distance - b.distance || String(a.bot.id).localeCompare(String(b.bot.id)));
+    const selected = priority === 2
+      ? candidates.slice(0, BOT_WEAPON_INVESTIGATION_CAP)
+      : candidates;
+
+    let listeners = 0;
+    for (const { bot } of selected) {
       const previous = heard.get(bot.id);
       if (previous && previous.expiresAt > now && previous.priority > priority) continue;
       heard.set(bot.id, {
