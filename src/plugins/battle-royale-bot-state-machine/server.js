@@ -14,7 +14,7 @@ export const BOT_BEHAVIOR_STATES = Object.freeze([
 
 export const manifest = {
   id: "bot-state-machine",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["bot-controller", "bot-ai-rollout"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -65,6 +65,48 @@ export const botBehaviorMachine = createMachine({
   ),
 });
 
+function soundInvestigation(decision) {
+  return decision?.goal === "investigate" && decision?.target?.kind === "sound-interest";
+}
+
+function soundSearch(decision) {
+  return decision?.goal === "search" && decision?.searchOrigin?.kind === "sound-interest";
+}
+
+function traversingToSoundInvestigation(decision) {
+  return decision?.goal === "traverse"
+    && decision?.resumeGoal === "investigate"
+    && decision?.resumeTarget?.kind === "sound-interest";
+}
+
+export function preserveCommittedSoundWork(machineState, currentDecision, candidate, meta = {}, now = Date.now()) {
+  if (!candidate) return candidate;
+  const urgent = Boolean(meta.underFire || meta.visibleThreat || meta.freshSound);
+  if (urgent || candidate.goal !== "traverse") return candidate;
+
+  if (machineState === "search" && soundSearch(currentDecision)) {
+    return { ...currentDecision };
+  }
+
+  if (machineState === "investigate" && soundInvestigation(currentDecision)) {
+    return { ...currentDecision };
+  }
+
+  if (machineState === "traverse" && traversingToSoundInvestigation(currentDecision)) {
+    return {
+      goal: "investigate",
+      score: 1,
+      target: currentDecision.resumeTarget,
+      targetEntityId: currentDecision.targetEntityId ?? null,
+      heardAt: currentDecision.resumeHeardAt ?? currentDecision.resumeTarget.heardAt ?? null,
+      holdUntil: Number(now) + 900,
+      profile: currentDecision.profile,
+    };
+  }
+
+  return candidate;
+}
+
 export async function setup(ctx) {
   const rollout = ctx.services.get("bot-ai-rollout");
   const actors = new Map();
@@ -97,7 +139,17 @@ export async function setup(ctx) {
 
     const actor = actorFor(botId);
     const before = actor.getSnapshot();
-    const goal = BOT_BEHAVIOR_STATES.includes(candidate.goal) ? candidate.goal : "roam";
+    const now = Number(meta.now) || Date.now();
+    const protectedCandidate = preserveCommittedSoundWork(
+      String(before.value),
+      before.context.decision,
+      candidate,
+      meta,
+      now,
+    );
+    const goal = BOT_BEHAVIOR_STATES.includes(protectedCandidate.goal)
+      ? protectedCandidate.goal
+      : "roam";
     const force = Boolean(
       meta.force
       || meta.underFire
@@ -110,13 +162,13 @@ export async function setup(ctx) {
 
     actor.send({
       type: eventType(goal),
-      decision: { ...candidate, goal },
-      now: Number(meta.now) || Date.now(),
+      decision: { ...protectedCandidate, goal },
+      now,
       force,
     });
 
     const after = actor.getSnapshot();
-    const accepted = after.context.decision ?? candidate;
+    const accepted = after.context.decision ?? protectedCandidate;
     return {
       ...accepted,
       goal: String(after.value),
