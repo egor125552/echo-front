@@ -61,6 +61,7 @@ export function createEngineConsole(game) {
   const host = game.host;
   const commands = new Map();
   const history = [];
+  let simulationClock = Date.now();
 
   function register(name, description, handler) {
     if (commands.has(name)) throw new Error(`Duplicate engine command: ${name}`);
@@ -123,6 +124,7 @@ export function createEngineConsole(game) {
     services: [...host.services.services.keys()].sort(),
     componentTypes: [...host.components.types.keys()].sort(),
     historyDepth: history.length,
+    simulationClock,
   }));
 
   register("engine.history", "Return recent executed engine commands.", async ({ limit = 25 }) => {
@@ -254,11 +256,14 @@ export function createEngineConsole(game) {
     return { entityId: id, component: name, removed: existed };
   });
 
-  register("event.emit", "Emit an engine event through the real EventBus.", async ({ event, payload = {} }) => {
+  register("event.emit", "Emit an engine event through the real EventBus using the current simulation clock.", async ({ event, payload = {} }) => {
     const name = requireString(event, "event");
+    const eventPayload = structuredClone(requireObject(payload, "payload"));
+    if (!Number.isFinite(Number(eventPayload.now))) eventPayload.now = simulationClock;
     return {
       event: name,
-      listenersCalled: host.events.emit(name, structuredClone(payload)),
+      now: eventPayload.now,
+      listenersCalled: host.events.emit(name, eventPayload),
     };
   });
 
@@ -280,31 +285,37 @@ export function createEngineConsole(game) {
     return inspectEntity(id);
   });
 
-  register("bot.think", "Force bot-brain to evaluate supplied world context immediately.", async ({ entityId, context = {}, now = Date.now() }) => {
+  register("bot.think", "Force bot-brain to evaluate supplied world context immediately.", async ({ entityId, context = {}, now = null }) => {
     const id = requireString(entityId, "entityId");
     const brain = botBrain();
     if (!brain?.decide) throw new Error("bot-brain service is unavailable");
-    return brain.decide(id, requireObject(context, "context"), Number(now) || Date.now());
+    const thinkNow = Number.isFinite(Number(now)) ? Number(now) : simulationClock;
+    return brain.decide(id, requireObject(context, "context"), thinkNow);
   });
 
-  register("match.info", "Return the current battle royale status when available.", async ({ now = Date.now() }) => {
+  register("match.info", "Return the current battle royale status when available.", async ({ now = null }) => {
     if (!host.services.has("battle-royale")) return { mode: game.mode, battleRoyale: null };
     const battleRoyale = host.services.get("battle-royale");
+    const queryNow = Number.isFinite(Number(now)) ? Number(now) : simulationClock;
     return {
       mode: game.mode,
-      battleRoyale: battleRoyale.status ? battleRoyale.status(Number(now) || Date.now()) : null,
+      battleRoyale: battleRoyale.status ? battleRoyale.status(queryNow) : null,
     };
   });
 
-  register("game.step", "Advance the real game simulation without requiring a connected client.", async ({ dt = 0.05, steps = 1, now = Date.now() }) => {
+  register("game.step", "Advance the real game simulation on a monotonic Engine Control clock.", async ({ dt = 0.05, steps = 1, now = null }) => {
     const count = Math.max(1, Math.min(500, Math.floor(Number(steps) || 1)));
     const safeDt = Math.max(0.001, Math.min(0.1, Number(dt) || 0.05));
-    let simulationNow = Number(now) || Date.now();
+    const requestedNow = Number(now);
+    const baseNow = Number.isFinite(requestedNow)
+      ? Math.max(requestedNow, simulationClock)
+      : Math.max(Date.now(), simulationClock);
+    simulationClock = baseNow;
     for (let i = 0; i < count; i += 1) {
-      simulationNow += safeDt * 1000;
-      game.api.step(safeDt, simulationNow);
+      simulationClock += safeDt * 1000;
+      game.api.step(safeDt, simulationClock);
     }
-    return { steps: count, dt: safeDt, simulationNow };
+    return { steps: count, dt: safeDt, simulationNow: simulationClock };
   });
 
   return {
