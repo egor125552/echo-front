@@ -56,9 +56,11 @@ test("after reaching the last heard footsteps a bot searches the area instead of
   const hunter = keepOneBot(game);
   const movement = game.host.services.get("movement");
   const interest = game.host.services.get("bot-interest");
+  const grid = game.host.services.get("spatial-grid");
 
   movement.teleport(hunter.id, { x: 0, y: 0, z: 0, angle: 0 });
   movement.teleport("tactical-search-human", { x: 30, y: 0, z: 0, angle: Math.PI });
+  grid.rebuild(Date.now() + 1_000);
 
   for (let i = 0; i < 4; i += 1) {
     game.host.events.emit("sound:spatial", {
