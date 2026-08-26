@@ -1,4 +1,4 @@
-export const DEPLOYMENT_DURATION_MS = 6500;
+export const DEPLOYMENT_DURATION_MS = 0;
 export const INITIAL_ZONE_RADIUS = 360;
 export const FINAL_ZONE_RADIUS = 35;
 export const ZONE_GRACE_MS = 45_000;
@@ -8,7 +8,7 @@ export const REMAINING_THRESHOLDS = [75, 50, 25, 10, 5, 2, 1];
 
 export const manifest = {
   id: "battle-royale",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "health", "movement", "map-test-arena"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
@@ -21,7 +21,10 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const health = ctx.services.get("health");
   let phase = "waiting";
-  let deploymentEndsAt = 0;
+  let deploymentStartedAt = 0;
+  let deploymentCompletedAt = 0;
+  let deploymentInProgress = false;
+  let zoneClockStartedAt = 0;
   let startedAt = 0;
   let endedAt = 0;
   let winnerId = null;
@@ -31,14 +34,21 @@ export async function setup(ctx) {
   let previousAlive = 0;
   const announced = new Set();
   const placements = new Map();
+  const landedHumans = new Set();
 
   function aliveEntities() {
     return entities.all().filter((entity) => entity.alive);
   }
 
+  function aliveHumans() {
+    return entities.all().filter((entity) => (
+      entity.alive && !entity.bot && entity.kind === "human"
+    ));
+  }
+
   function zoneRadiusAt(now = Date.now()) {
-    if (!startedAt || now <= startedAt + ZONE_GRACE_MS) return INITIAL_ZONE_RADIUS;
-    const progress = clamp01((now - startedAt - ZONE_GRACE_MS) / ZONE_SHRINK_MS);
+    if (!zoneClockStartedAt || now <= zoneClockStartedAt + ZONE_GRACE_MS) return INITIAL_ZONE_RADIUS;
+    const progress = clamp01((now - zoneClockStartedAt - ZONE_GRACE_MS) / ZONE_SHRINK_MS);
     return INITIAL_ZONE_RADIUS + (FINAL_ZONE_RADIUS - INITIAL_ZONE_RADIUS) * progress;
   }
 
@@ -49,7 +59,12 @@ export async function setup(ctx) {
       phase,
       alive,
       total,
-      deploymentEndsAt: deploymentEndsAt || null,
+      deploymentEndsAt: null,
+      deployment: {
+        active: deploymentInProgress,
+        startedAt: deploymentStartedAt || null,
+        completedAt: deploymentCompletedAt || null,
+      },
       startedAt: startedAt || null,
       ended: phase === "ended",
       endedAt: endedAt || null,
@@ -58,7 +73,7 @@ export async function setup(ctx) {
         x: 0,
         z: 0,
         radius: zoneRadiusAt(now),
-        graceEndsAt: startedAt ? startedAt + ZONE_GRACE_MS : null,
+        graceEndsAt: zoneClockStartedAt ? zoneClockStartedAt + ZONE_GRACE_MS : null,
       },
     };
   }
@@ -89,22 +104,50 @@ export async function setup(ctx) {
     });
   }
 
+  function completeDeployment(now = Date.now()) {
+    if (!deploymentInProgress) return false;
+    const humans = aliveHumans();
+    if (humans.length > 0 && !humans.every((entity) => landedHumans.has(entity.id))) return false;
+    deploymentInProgress = false;
+    deploymentCompletedAt = now;
+    zoneClockStartedAt = now;
+    lastZoneDamageAt = 0;
+    ctx.events.emit("battle-royale:deployment-complete", {
+      completedAt: now,
+      durationMs: Math.max(0, now - deploymentStartedAt),
+    });
+    return true;
+  }
+
   function arm(now = Date.now()) {
     if (phase !== "waiting") return status(now);
     total = entities.all().length;
     previousAlive = aliveEntities().length;
-    deploymentEndsAt = now + DEPLOYMENT_DURATION_MS;
-    phase = "deploying";
+    startedAt = now;
+    deploymentStartedAt = now;
+    deploymentCompletedAt = 0;
+    deploymentInProgress = true;
+    zoneClockStartedAt = 0;
+    landedHumans.clear();
+    phase = "active";
     ctx.events.emit("battle-royale:deployment", {
       total,
-      deploymentEndsAt,
-      durationMs: DEPLOYMENT_DURATION_MS,
+      deploymentEndsAt: null,
+      durationMs: 0,
+      immediate: true,
+      startedAt: now,
+    });
+    ctx.events.emit("battle-royale:started", {
+      total,
+      startedAt: now,
+      deployment: true,
+      zone: { x: 0, z: 0, radius: INITIAL_ZONE_RADIUS },
     });
     return status(now);
   }
 
   function applyZone(now) {
-    if (phase !== "active" || !startedAt || now < startedAt + ZONE_GRACE_MS) return;
+    if (phase !== "active" || !zoneClockStartedAt || now < zoneClockStartedAt + ZONE_GRACE_MS) return;
     if (lastZoneDamageAt && now - lastZoneDamageAt < 1000) return;
     lastZoneDamageAt = now;
     const radius = zoneRadiusAt(now);
@@ -130,17 +173,7 @@ export async function setup(ctx) {
   }
 
   function tick(now = Date.now()) {
-    if (phase === "deploying" && now >= deploymentEndsAt) {
-      phase = "active";
-      startedAt = now;
-      lastZoneDamageAt = 0;
-      ctx.events.emit("battle-royale:started", {
-        total,
-        startedAt,
-        zone: { x: 0, z: 0, radius: INITIAL_ZONE_RADIUS },
-      });
-    }
-    if (phase === "active" && !zoneClosingAnnounced && startedAt && now >= startedAt + ZONE_GRACE_MS) {
+    if (phase === "active" && !zoneClosingAnnounced && zoneClockStartedAt && now >= zoneClockStartedAt + ZONE_GRACE_MS) {
       zoneClosingAnnounced = true;
       ctx.events.emit("battle-royale:zone-closing", {
         startedAt: now,
@@ -151,6 +184,13 @@ export async function setup(ctx) {
     if (phase === "active") finish(now);
   }
 
+  ctx.events.on("parachute:landed", ({ entityId, now }) => {
+    const entity = entities.get(entityId);
+    if (!entity || entity.bot || entity.kind !== "human") return;
+    landedHumans.add(entityId);
+    completeDeployment(Number(now) || Date.now());
+  });
+
   ctx.events.on("entity:died", ({ entityId, killerId }) => {
     if (phase !== "active") return;
     const alive = aliveEntities().length;
@@ -158,6 +198,7 @@ export async function setup(ctx) {
     placements.set(entityId, placement);
     ctx.events.emit("battle-royale:eliminated", { entityId, killerId, alive, placement, total });
     emitRemaining(alive);
+    if (deploymentInProgress) completeDeployment(Date.now());
     finish(Date.now());
   });
 
