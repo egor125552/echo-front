@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "3.2.0",
+  version: "4.0.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -104,8 +104,8 @@ function rememberedTarget(state, entities, now) {
 }
 
 function reactionDelay(botId, targetId) {
-  const spread = BOT_REACTION_SPREAD_MS + 1;
-  return BOT_REACTION_MIN_MS + (stableSeed(`${botId}:${targetId}:reaction`) % spread);
+  return BOT_REACTION_MIN_MS
+    + (stableSeed(`${botId}:${targetId}:reaction`) % (BOT_REACTION_SPREAD_MS + 1));
 }
 
 function reactionReady(botId, state, targetId, now) {
@@ -123,7 +123,6 @@ function reactionReady(botId, state, targetId, now) {
 function burstAllowsFire(botId, state, now) {
   if (now < (state.burstUntil ?? 0)) return true;
   if (now < (state.nextBurstAt ?? 0)) return false;
-
   state.burstCycle = (state.burstCycle ?? 0) + 1;
   const seed = stableSeed(`${botId}:${state.burstCycle}:burst`);
   const burstMs = BOT_BURST_MIN_MS + (seed % (BOT_BURST_SPREAD_MS + 1));
@@ -144,12 +143,7 @@ function stagedStairRoute(transform, route) {
     && transform.x >= route.x - 0.15
   );
   if (!approachingBottomFromEast) return route;
-
-  const approach = {
-    ...route,
-    x: route.x + BOT_STAIR_ENTRY_OFFSET,
-    stairStage: "align",
-  };
+  const approach = { ...route, x: route.x + BOT_STAIR_ENTRY_OFFSET, stairStage: "align" };
   const centered = Math.abs(transform.z - route.z) <= 0.22;
   if (!centered || distance2(transform, approach) > BOT_STAIR_ENTRY_TOLERANCE) return approach;
   return route;
@@ -176,7 +170,6 @@ export async function setup(ctx) {
     const attackerTransform = ctx.components.get(attackerId, "Transform");
     rememberTarget(state, attackerId, attackerTransform, now, BOT_DAMAGE_MEMORY_MS);
     if (!state) return;
-
     if (state.reactionTargetId !== attackerId) {
       state.reactionTargetId = attackerId;
       state.reactionUntil = now + BOT_RETURN_FIRE_REACTION_MS;
@@ -222,7 +215,6 @@ export async function setup(ctx) {
     const headingError = Math.abs(wrapAngle(
       Math.atan2(preciseRoute.x - transform.x, -(preciseRoute.z - transform.z)) - transform.angle,
     ));
-
     let forward;
     if (preciseRoute.kind === "stair") {
       forward = headingError > 0.28
@@ -233,7 +225,6 @@ export async function setup(ctx) {
     } else {
       forward = headingError > 1.35 ? 0.28 : 1;
     }
-
     setRouteInput(bot, transform, state, preciseRoute, {
       forward,
       strafe: 0,
@@ -250,6 +241,7 @@ export async function setup(ctx) {
     thinkDelay = 150,
     stopDistance = 1.5,
   } = {}) {
+    if (!target) return false;
     const route = typeof map.navigationWaypoint === "function"
       ? map.navigationWaypoint(transform, target)
       : null;
@@ -274,17 +266,10 @@ export async function setup(ctx) {
       ?? visibleEnemies[0];
     if (!visible) return false;
     rememberTarget(state, visible.entityId, visible.transform, now, BOT_VISIBLE_MEMORY_MS);
-
-    const route = typeof map.navigationWaypoint === "function"
-      ? map.navigationWaypoint(transform, visible.transform)
-      : null;
-    if (routeToward(bot, transform, state, route, now, 95)) return true;
-
     const steering = steeringTo(transform, visible.transform);
     const desiredRange = Math.max(4, Number(decision.desiredRange) || 8);
     let forward = 0.12;
     let strafe = 0;
-
     if (decision.tactic === "flank") {
       forward = steering.distance > desiredRange + 3 ? 0.65 : 0.18;
       strafe = state.strafeDirection * 0.9;
@@ -299,7 +284,6 @@ export async function setup(ctx) {
           : 0.14;
       if (Math.abs(steering.distance - desiredRange) < 4) strafe = state.strafeDirection * 0.5;
     }
-
     const aimed = steering.aligned && visible.distance <= 28;
     const reacted = reactionReady(bot.id, state, visible.entityId, now);
     const fireHeld = reacted && aimed && burstAllowsFire(bot.id, state, now);
@@ -314,25 +298,34 @@ export async function setup(ctx) {
     return true;
   }
 
-  function executeEvade(bot, transform, state, decision, now) {
+  function executeEvade(bot, transform, state, decision, visibleEnemies, now) {
+    const attacker = decision.returnFire
+      ? visibleEnemies.find((enemy) => enemy.entityId === decision.targetEntityId)
+      : null;
+    if (attacker) {
+      rememberTarget(state, attacker.entityId, attacker.transform, now, BOT_VISIBLE_MEMORY_MS);
+      const steering = steeringTo(transform, attacker.transform);
+      const reacted = reactionReady(bot.id, state, attacker.entityId, now);
+      const fireHeld = reacted && steering.aligned && attacker.distance <= 28
+        && burstAllowsFire(bot.id, state, now);
+      setNavigatedInput(bot, transform, state, {
+        forward: -0.72,
+        strafe: state.strafeDirection * 0.48,
+        turn: steering.turn,
+        sprint: false,
+        fireHeld,
+      }, now);
+      state.nextThinkAt = now + 95;
+      return true;
+    }
+
     const target = decision.moveTarget;
     if (!target) return false;
-    const route = typeof map.navigationWaypoint === "function"
-      ? map.navigationWaypoint(transform, target)
-      : null;
-    if (routeToward(bot, transform, state, route, now, 105)) return true;
-
-    const steering = steeringTo(transform, target);
-    const strafe = decision.tactic === "break-angle" ? state.strafeDirection * 0.35 : 0;
-    setNavigatedInput(bot, transform, state, {
-      forward: steering.distance > 1.5 ? 1 : 0,
-      strafe,
-      turn: steering.turn,
-      sprint: steering.distance > 3,
-      fireHeld: false,
-    }, now);
-    state.nextThinkAt = now + 105;
-    return true;
+    return moveTowardPosition(bot, transform, state, target, now, {
+      sprint: true,
+      thinkDelay: 105,
+      stopDistance: 1.5,
+    });
   }
 
   function executeHunt(bot, transform, state, decision, now) {
@@ -364,6 +357,32 @@ export async function setup(ctx) {
     return true;
   }
 
+  function traversalFor(transform, visibleEnemies, memory, interestTarget, zoneTarget, previousDecision) {
+    const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
+    const midStair = previousDecision?.goal === "traverse"
+      && previousDecision.route?.kind === "stair"
+      && Number(transform.y) > 0.02
+      && Number(transform.y) < upperY - 0.12;
+    if (midStair) {
+      return {
+        active: true,
+        route: previousDecision.route,
+        target: previousDecision.target,
+        committed: true,
+      };
+    }
+
+    const target = visibleEnemies[0]?.transform
+      ?? memory?.transform
+      ?? interestTarget
+      ?? zoneTarget
+      ?? null;
+    if (!target || typeof map.navigationWaypoint !== "function") return null;
+    const route = map.navigationWaypoint(transform, target);
+    if (!route || (route.kind !== "stair" && route.kind !== "door")) return null;
+    return { active: true, route, target, committed: false };
+  }
+
   function think(bot, now) {
     const transform = ctx.components.get(bot.id, "Transform");
     const state = ctx.components.get(bot.id, "Bot");
@@ -388,36 +407,42 @@ export async function setup(ctx) {
     const interestTarget = !visibleEnemies.length
       ? interest.targetFor(bot.id, transform, now)
       : null;
-
-    const traversalTarget = visibleEnemies[0]?.transform ?? interestTarget ?? memory?.transform;
-    if (traversalTarget && typeof map.navigationWaypoint === "function") {
-      const route = map.navigationWaypoint(transform, traversalTarget);
-      const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
-      const midStair = route?.kind === "stair"
-        && Number(transform.y) > 0.2
-        && Number(transform.y) < upperY - 0.15;
-      if (midStair && routeToward(bot, transform, state, route, now, 95)) return;
-    }
+    const previousDecision = brain.commitmentFor(bot.id);
+    const traversal = traversalFor(
+      transform,
+      visibleEnemies,
+      memory,
+      interestTarget,
+      zoneTarget,
+      previousDecision,
+    );
+    const investigationReached = previousDecision?.goal === "investigate"
+      && previousDecision.target
+      && distance3(transform, previousDecision.target) <= 1.8;
 
     const decision = brain.decide(bot.id, {
       visibleEnemies,
       memory,
       zoneTarget,
       interestTarget,
+      traversal,
+      investigationReached,
     }, now);
 
     if (!decision) return;
-    if (decision.goal === "engage" && executeEngage(bot, transform, state, decision, visibleEnemies, now)) return;
-    if (decision.goal === "evade" && executeEvade(bot, transform, state, decision, now)) return;
+    if (decision.goal === "traverse" && routeToward(bot, transform, state, decision.route, now, 95)) return;
+    if ((decision.goal === "engage" || decision.goal === "defend")
+      && executeEngage(bot, transform, state, decision, visibleEnemies, now)) return;
+    if (decision.goal === "evade" && executeEvade(bot, transform, state, decision, visibleEnemies, now)) return;
     if (decision.goal === "zone" && decision.target) {
       if (moveTowardPosition(bot, transform, state, decision.target, now, { sprint: true, thinkDelay: 180 })) return;
     }
     if (decision.goal === "hunt" && executeHunt(bot, transform, state, decision, now)) return;
-    if (decision.goal === "investigate" && decision.target) {
+    if ((decision.goal === "investigate" || decision.goal === "search") && decision.target) {
       if (moveTowardPosition(bot, transform, state, decision.target, now, {
-        sprint: decision.target.kind === "sound-interest",
-        thinkDelay: decision.target.kind === "sound-interest" ? 105 : 165,
-        stopDistance: 1.7,
+        sprint: decision.goal === "investigate" && decision.target.kind === "sound-interest",
+        thinkDelay: decision.goal === "search" ? 120 : (decision.target.kind === "sound-interest" ? 105 : 165),
+        stopDistance: decision.goal === "search" ? 1.25 : 1.7,
       })) return;
     }
     executeRoam(bot, transform, state, now);
