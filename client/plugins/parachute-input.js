@@ -1,11 +1,12 @@
 export const manifest = {
   id: "parachute-input",
-  requires: ["keyboard-input", "cloudflare-session"],
+  requires: ["keyboard-input", "cloudflare-session", "speech-settings"],
 };
 
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const network = ctx.services.get("network");
+  const speech = ctx.services.get("speech");
   const originalSample = input.sample.bind(input);
   let parachutePressed = false;
   let latestParachute = null;
@@ -17,8 +18,10 @@ export async function setup(ctx) {
   }
 
   function announce(text) {
+    if (!text) return;
+    speech.say(text, { interrupt: true });
     const live = document.getElementById("announcer");
-    if (!live) return;
+    if (!live || speech.enabled) return;
     live.textContent = "";
     requestAnimationFrame(() => {
       live.textContent = text;
@@ -40,7 +43,7 @@ export async function setup(ctx) {
       ? `Купол раскрыт на ${Math.round((Number(state.inflation) || 0) * 100)} процентов.`
       : "Свободное падение.";
     const stall = Number(state.stall) >= 0.35
-      ? `Купол близок к сваливанию, ${Math.round(Number(state.stall) * 100)} процентов.`
+      ? `Сваливание купола ${Math.round(Number(state.stall) * 100)} процентов.`
       : "";
     const environment = state.canopyEnvironment === "indoor"
       ? "Купол под перекрытием."
@@ -73,9 +76,16 @@ export async function setup(ctx) {
   });
 
   window.addEventListener("keydown", (event) => {
-    if (event.code !== "Space" || event.repeat || !network.connected) return;
-    event.preventDefault();
-    trigger("key:Space:down");
+    if (!network.connected || event.repeat) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      trigger("key:Space:down");
+      return;
+    }
+    if (event.code === "KeyH") {
+      event.preventDefault();
+      announce(flightStatusText());
+    }
   }, { capture: true, passive: false });
 
   const button = document.querySelector('[data-touch-action="parachute"]');
