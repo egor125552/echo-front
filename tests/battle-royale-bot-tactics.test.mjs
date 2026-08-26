@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
+import { BOT_AI_ROLLOUT } from "../src/config/bot-ai-rollout.js";
 
 async function activeBattleRoyale(playerId) {
   const game = await createEchoFrontGame({ mode: "battle-royale" });
@@ -11,20 +12,22 @@ async function activeBattleRoyale(playerId) {
   return { game, now };
 }
 
-function keepOneBot(game) {
+function keepCanaryBot(game) {
   const entities = game.host.services.get("entities");
-  const bots = entities.all().filter((entity) => entity.bot);
-  const hunter = bots[0];
-  assert.ok(hunter);
-  for (const bot of bots.slice(1)) entities.remove(bot.id);
+  const hunter = entities.get(BOT_AI_ROLLOUT.canaryBotId);
+  assert.ok(hunter?.bot, `missing XState canary ${BOT_AI_ROLLOUT.canaryBotId}`);
+  for (const bot of entities.all().filter((entity) => entity.bot)) {
+    if (bot.id !== hunter.id) entities.remove(bot.id);
+  }
   return hunter;
 }
 
-test("a visible attacker cannot shoot a BR bot repeatedly without provoking return fire", async () => {
+test("a visible attacker cannot shoot the XState BR bot repeatedly without provoking return fire", async () => {
   const { game, now } = await activeBattleRoyale("tactical-return-fire-human");
-  const hunter = keepOneBot(game);
+  const hunter = keepCanaryBot(game);
   const movement = game.host.services.get("movement");
   const botCombat = game.host.services.get("bot-combat");
+  const brain = game.host.services.get("bot-brain");
 
   movement.teleport(hunter.id, { x: 0, y: 0, z: 0, angle: 0 });
   movement.teleport("tactical-return-fire-human", { x: 0, y: 0, z: -9, angle: Math.PI });
@@ -38,64 +41,77 @@ test("a visible attacker cannot shoot a BR bot repeatedly without provoking retu
   const state = game.host.components.get(hunter.id, "Bot");
   const input = game.host.components.get(hunter.id, "Input");
   let fired = false;
+  let sawDefend = false;
   for (let offset = 150; offset <= 1_200; offset += 50) {
     state.nextThinkAt = 0;
     botCombat.tick(0.05, now + offset);
+    sawDefend ||= brain.stateFor(hunter.id).machineState === "defend";
     if (input.fireHeld) {
       fired = true;
       break;
     }
   }
 
-  assert.equal(fired, true, "bot stayed passive after being hit by a visible attacker");
+  assert.equal(sawDefend, true, "damage never interrupted the state machine into defend");
+  assert.equal(fired, true, "XState bot stayed passive after being hit by a visible attacker");
   await game.host.stop();
 });
 
-test("after reaching the last heard footsteps a bot searches the area instead of instantly roaming away", async () => {
-  const { game } = await activeBattleRoyale("tactical-search-human");
-  const hunter = keepOneBot(game);
+test("after reaching heard footsteps the XState bot enters a bounded search instead of instantly roaming", async () => {
+  const { game, now } = await activeBattleRoyale("tactical-search-human");
+  const hunter = keepCanaryBot(game);
   const movement = game.host.services.get("movement");
-  const interest = game.host.services.get("bot-interest");
-  const grid = game.host.services.get("spatial-grid");
-  const soundNow = Date.now() + 1_000;
+  const brain = game.host.services.get("bot-brain");
 
   movement.teleport(hunter.id, { x: 0, y: 0, z: 0, angle: 0 });
-  movement.teleport("tactical-search-human", { x: 30, y: 0, z: 0, angle: Math.PI });
-  grid.rebuild(soundNow);
+  const sound = {
+    kind: "sound-interest",
+    sourceId: "tactical-search-human",
+    key: "footstep.forest.1",
+    gait: "walk",
+    priority: 1,
+    confidence: 4,
+    heardAt: now + 100,
+    expiresAt: now + 7_000,
+    x: 30,
+    y: 0,
+    z: 0,
+  };
 
-  for (let i = 0; i < 4; i += 1) {
-    const heardBy = interest.recordSound({
-      entityId: "tactical-search-human",
-      key: `footstep.forest.${(i % 3) + 1}`,
-      gait: "walk",
-      x: 30,
-      y: 0,
-      z: 0,
-      radius: 32,
-    }, soundNow + i * 200);
-    assert.equal(heardBy, 1, `synthetic footstep ${i + 1} was not heard by the nearby bot`);
-  }
-
-  let transform = game.host.components.get(hunter.id, "Transform");
-  const heard = interest.targetFor(hunter.id, transform, soundNow + 700);
-  assert.equal(heard?.kind, "sound-interest");
-  assert.equal(heard?.x, 30);
-  assert.equal(heard?.confidence, 4);
+  const investigate = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: sound,
+  }, now + 150);
+  assert.equal(investigate.orchestration, "xstate");
+  assert.equal(investigate.goal, "investigate");
 
   movement.teleport(hunter.id, { x: 30, y: 0, z: 0, angle: 0 });
-  transform = game.host.components.get(hunter.id, "Transform");
-  const search = interest.targetFor(hunter.id, transform, soundNow + 800);
-  assert.equal(search?.kind, "sound-interest");
-  assert.equal(search?.phase, "search");
-  assert.ok(Math.hypot(search.x - 30, search.z) >= 4, "search point never expanded beyond the heard coordinate");
+  const search = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: null,
+    investigationReached: true,
+  }, now + 400);
 
-  movement.teleport("tactical-search-human", { x: 120, y: 0, z: 80, angle: 0 });
-  const stillSearching = interest.targetFor(hunter.id, transform, soundNow + 1_000);
-  assert.equal(stillSearching?.phase, "search");
+  assert.equal(search.goal, "search");
+  assert.equal(brain.stateFor(hunter.id).machineState, "search");
+  assert.ok(search.searchPoints.length >= 5);
   assert.ok(
-    Math.hypot(stillSearching.x - 30, stillSearching.z) < 20,
-    "bot magically tracked the silently moved source instead of searching the old sound area",
+    Math.hypot(search.target.x - 30, search.target.z) >= 4,
+    "search never expanded beyond the last heard coordinate",
   );
+
+  const continued = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: null,
+  }, now + 1_000);
+  assert.equal(continued.goal, "search");
+  assert.equal(continued.searchOrigin.sourceId, "tactical-search-human");
 
   await game.host.stop();
 });
