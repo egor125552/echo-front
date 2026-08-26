@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "4.1.0",
+  version: "4.2.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -155,6 +155,14 @@ function sameResolvedFloor(transform, target, upperY) {
   const targetUpper = Number(target?.y) > upperY / 2;
   const landed = Number(transform?.y) <= 0.15 || Number(transform?.y) >= upperY - 0.15;
   return landed && fromUpper === targetUpper;
+}
+
+export function stairRouteMatchesTargetFloor(route, target, upperY = 3.2) {
+  if (route?.kind !== "stair") return true;
+  if (!target) return false;
+  const targetUpper = Number(target?.y) > upperY / 2;
+  const routeUpper = Number(route?.y) > upperY / 2;
+  return targetUpper === routeUpper;
 }
 
 export async function setup(ctx) {
@@ -367,15 +375,17 @@ export async function setup(ctx) {
 
   function traversalFor(transform, visibleEnemies, memory, interestTarget, zoneTarget, previousDecision) {
     const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
+    const previousTraversalTarget = previousDecision?.target ?? previousDecision?.resumeTarget ?? null;
     const midStair = previousDecision?.goal === "traverse"
       && previousDecision.route?.kind === "stair"
+      && stairRouteMatchesTargetFloor(previousDecision.route, previousTraversalTarget, upperY)
       && Number(transform.y) > 0.02
       && Number(transform.y) < upperY - 0.12;
     if (midStair) {
       return {
         active: true,
         route: previousDecision.route,
-        target: previousDecision.target,
+        target: previousTraversalTarget,
         committed: true,
       };
     }
