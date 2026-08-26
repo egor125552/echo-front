@@ -37,17 +37,24 @@ jobs:
           REQUEST_ID: ${{ steps.request.outputs.id }}
           HEALTH_URL: https://echo-front.k69ysrndm7.workers.dev/api/health
         run: |
+          LAST_ENABLED="unknown"
+          LAST_ID="unknown"
           for i in {1..60}; do
             BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
             ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // false')
             LIVE_ID=$(printf '%s' "$BODY" | jq -r '.engineCommandRequestId // 0')
+            LAST_ENABLED="$ENABLED"
+            LAST_ID="$LIVE_ID"
+            if [ $i -eq 1 ] || [ $((i % 10)) -eq 0 ]; then
+              echo "Live engine state: enabled=$ENABLED requestId=$LIVE_ID; wanted requestId=$REQUEST_ID"
+            fi
             if [ "$ENABLED" = "true" ] && [ "$LIVE_ID" = "$REQUEST_ID" ]; then
               echo "Live Worker has engine request $LIVE_ID and control is enabled."
               exit 0
             fi
             sleep 3
           done
-          echo "Live Worker never exposed the requested engine command."
+          echo "Live Worker never exposed request $REQUEST_ID. Final state: enabled=$LAST_ENABLED requestId=$LAST_ID"
           exit 1
 
       - name: Invoke compiled engine command
