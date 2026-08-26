@@ -1,14 +1,16 @@
 export const PARACHUTE_LAUNCH_ALTITUDE = 92;
 export const PARACHUTE_AUTO_DEPLOY_ALTITUDE = 22;
 export const PARACHUTE_MIN_DEPLOY_ALTITUDE = 5.5;
-export const PARACHUTE_GRAVITY = 18;
-export const PARACHUTE_DRAG = PARACHUTE_GRAVITY / 25;
+export const PARACHUTE_GRAVITY = 9.81;
+export const PARACHUTE_FREEFALL_TERMINAL_SPEED = 52;
+export const PARACHUTE_CANOPY_TERMINAL_SPEED = 5;
 export const PARACHUTE_REDEPLOY_COOLDOWN_MS = 450;
 export const PARACHUTE_STEP_DISTANCE_SENTINEL = -1_000_000;
+const MOVEMENT_GRAVITY = 18;
 
 export const manifest = {
   id: "battle-royale-parachute",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "movement", "rapier-physics", "battle-royale"],
   capabilities: [
     "services.consume", "services.provide",
@@ -19,6 +21,16 @@ export const manifest = {
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
+}
+
+function aerodynamicDownwardSpeed(currentSpeed, terminalSpeed, dt) {
+  const current = Math.max(0, Number(currentSpeed) || 0);
+  const terminal = Math.max(0.1, Number(terminalSpeed) || 0.1);
+  const drag = PARACHUTE_GRAVITY / (terminal * terminal);
+  const acceleration = PARACHUTE_GRAVITY - drag * current * current;
+  const candidate = Math.max(0, current + acceleration * dt);
+  if (current <= terminal) return Math.min(terminal, candidate);
+  return Math.max(terminal, candidate);
 }
 
 function publicState(state, transform = null) {
@@ -68,6 +80,7 @@ export async function setup(ctx) {
       cutCooldownUntil: 0,
       manualCut: false,
       savedSprint: null,
+      beforeMovementY: null,
     };
     ctx.components.add(entityId, "Parachute", state);
     return state;
@@ -103,6 +116,7 @@ export async function setup(ctx) {
       cutCooldownUntil: 0,
       manualCut: false,
       savedSprint: null,
+      beforeMovementY: null,
     });
     transform.verticalVelocity = -1.5;
     transform.grounded = false;
@@ -168,7 +182,7 @@ export async function setup(ctx) {
     return state.phase === "deployed" ? cut(entityId, now) : deploy(entityId, now);
   }
 
-  function prepareMovement(dt, now = Date.now()) {
+  function prepareMovement(dt) {
     const safeDt = clamp(dt, 0, 0.1);
     for (const entity of entities.all()) {
       if (!isHuman(entity.id)) continue;
@@ -177,25 +191,27 @@ export async function setup(ctx) {
       const input = ctx.components.get(entity.id, "Input");
       if (!state?.airborne || !transform || !input) continue;
 
+      state.beforeMovementY = transform.y;
       transform.stepDistance = PARACHUTE_STEP_DISTANCE_SENTINEL;
-      if (state.phase !== "deployed") {
-        state.simulatedVerticalVelocity = Number(transform.verticalVelocity) || 0;
-        continue;
+
+      if (state.phase === "deployed") {
+        if (state.savedSprint === null) state.savedSprint = Boolean(input.sprint);
+        input.sprint = true;
       }
 
-      if (state.savedSprint === null) state.savedSprint = Boolean(input.sprint);
-      input.sprint = true;
-
+      const terminalSpeed = state.phase === "deployed"
+        ? PARACHUTE_CANOPY_TERMINAL_SPEED
+        : PARACHUTE_FREEFALL_TERMINAL_SPEED;
       const currentDownwardSpeed = Math.max(0, -(Number(transform.verticalVelocity) || 0));
-      const accelerationDown = PARACHUTE_GRAVITY - PARACHUTE_DRAG * currentDownwardSpeed * currentDownwardSpeed;
-      const nextDownwardSpeed = Math.max(0, currentDownwardSpeed + accelerationDown * safeDt);
+      const nextDownwardSpeed = aerodynamicDownwardSpeed(currentDownwardSpeed, terminalSpeed, safeDt);
       const desiredVerticalVelocity = -nextDownwardSpeed;
       state.simulatedVerticalVelocity = desiredVerticalVelocity;
 
-      // movement applies its own 18 m/s² gravity immediately afterwards. Feed it
-      // the pre-gravity value so the resulting displacement equals our aerodynamic
-      // Rapier motion for this tick rather than stacking two gravities.
-      transform.verticalVelocity = desiredVerticalVelocity + PARACHUTE_GRAVITY * safeDt;
+      // movement subtracts its normal game gravity after this hook. Offset that
+      // so Rapier receives our aerodynamic velocity. If movement's legacy
+      // terminal clamp still clips a fast freefall, finishMovement applies only
+      // the missing Rapier displacement for this tick.
+      transform.verticalVelocity = desiredVerticalVelocity + MOVEMENT_GRAVITY * safeDt;
     }
   }
 
@@ -208,16 +224,27 @@ export async function setup(ctx) {
       const input = ctx.components.get(entity.id, "Input");
       if (!state?.airborne || !transform) continue;
 
-      if (state.phase === "deployed") {
-        transform.verticalVelocity = state.simulatedVerticalVelocity;
-      } else {
-        state.simulatedVerticalVelocity = Number(transform.verticalVelocity) || 0;
-      }
-
       if (input && state.savedSprint !== null) {
         input.sprint = state.savedSprint;
         state.savedSprint = null;
       }
+
+      if (!transform.grounded && Number.isFinite(state.beforeMovementY)) {
+        const desiredDy = state.simulatedVerticalVelocity * safeDt;
+        const actualDy = transform.y - state.beforeMovementY;
+        const missingDy = desiredDy - actualDy;
+        if (missingDy < -0.0001) {
+          const supplemented = physics.move(entity.id, 0, 0, missingDy);
+          transform.grounded = Boolean(supplemented.grounded);
+          const position = physics.position(entity.id);
+          if (position) {
+            transform.x = position.x;
+            transform.y = Math.abs(position.y) < 0.0001 ? 0 : position.y;
+            transform.z = position.z;
+          }
+        }
+      }
+      state.beforeMovementY = null;
 
       const impactSpeed = Math.max(0, -state.simulatedVerticalVelocity);
       state.lastImpactSpeed = impactSpeed;
@@ -240,6 +267,8 @@ export async function setup(ctx) {
         });
         continue;
       }
+
+      transform.verticalVelocity = state.simulatedVerticalVelocity;
 
       if (
         state.phase === "freefall"
@@ -268,6 +297,7 @@ export async function setup(ctx) {
     state.phase = "grounded";
     state.airborne = false;
     state.savedSprint = null;
+    state.beforeMovementY = null;
   });
 
   ctx.events.on("battle-royale:started", ({ startedAt }) => {
@@ -289,6 +319,9 @@ export async function setup(ctx) {
       launchAltitude: PARACHUTE_LAUNCH_ALTITUDE,
       autoDeployAltitude: PARACHUTE_AUTO_DEPLOY_ALTITUDE,
       minimumDeployAltitude: PARACHUTE_MIN_DEPLOY_ALTITUDE,
+      gravity: PARACHUTE_GRAVITY,
+      freefallTerminalSpeed: PARACHUTE_FREEFALL_TERMINAL_SPEED,
+      canopyTerminalSpeed: PARACHUTE_CANOPY_TERMINAL_SPEED,
     },
   });
 }
