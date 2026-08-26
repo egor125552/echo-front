@@ -12,14 +12,18 @@ async function activeBattleRoyale(playerId) {
   return { game, now };
 }
 
-function keepCanaryBot(game) {
+function keepBot(game, botId) {
   const entities = game.host.services.get("entities");
-  const hunter = entities.get(BOT_AI_ROLLOUT.canaryBotId);
-  assert.ok(hunter?.bot, `missing XState canary ${BOT_AI_ROLLOUT.canaryBotId}`);
+  const hunter = entities.get(botId);
+  assert.ok(hunter?.bot, `missing BR bot ${botId}`);
   for (const bot of entities.all().filter((entity) => entity.bot)) {
     if (bot.id !== hunter.id) entities.remove(bot.id);
   }
   return hunter;
+}
+
+function keepCanaryBot(game) {
+  return keepBot(game, BOT_AI_ROLLOUT.canaryBotId);
 }
 
 test("a visible attacker cannot shoot the XState BR bot repeatedly without provoking return fire", async () => {
@@ -174,6 +178,53 @@ test("a slow warehouse traversal carries the heard gunshot into investigate and 
   assert.equal(searched.goal, "search");
   assert.ok(searched.searchPoints.some((point) => point.y === 3.2));
   assert.ok(searched.searchPoints.some((point) => point.y === 0));
+
+  await game.host.stop();
+});
+
+test("an ordinary non-canary BR bot now keeps XState investigate and search state", async () => {
+  const { game, now } = await activeBattleRoyale("ordinary-xstate-human");
+  const hunter = keepBot(game, "br-bot-2");
+  const movement = game.host.services.get("movement");
+  const brain = game.host.services.get("bot-brain");
+
+  movement.teleport(hunter.id, { x: 0, y: 0, z: 0, angle: 0 });
+  const sound = {
+    kind: "sound-interest",
+    sourceId: "ordinary-xstate-human",
+    key: "footstep.forest.2",
+    gait: "run",
+    priority: 1.35,
+    confidence: 3,
+    heardAt: now + 100,
+    expiresAt: now + 7_000,
+    x: 20,
+    y: 0,
+    z: 0,
+  };
+
+  const investigate = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: sound,
+  }, now + 150);
+  assert.equal(investigate.orchestration, "xstate");
+  assert.equal(investigate.goal, "investigate");
+
+  movement.teleport(hunter.id, { x: 20, y: 0, z: 0, angle: 0 });
+  const search = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: null,
+    investigationReached: true,
+  }, now + 450);
+
+  assert.equal(search.goal, "search");
+  assert.equal(brain.stateFor(hunter.id).orchestration, "xstate");
+  assert.equal(brain.stateFor(hunter.id).machineState, "search");
+  assert.ok(search.searchPoints.length >= 5);
 
   await game.host.stop();
 });
