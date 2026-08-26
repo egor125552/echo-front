@@ -1,4 +1,4 @@
-export const PARACHUTE_LAUNCH_ALTITUDE = 92;
+export const PARACHUTE_LAUNCH_ALTITUDE = 500;
 export const PARACHUTE_GRAVITY = 9.81;
 export const PARACHUTE_FREEFALL_TERMINAL_SPEED = 52;
 export const PARACHUTE_CANOPY_TERMINAL_SPEED = 5;
@@ -20,12 +20,15 @@ export const PARACHUTE_MAX_TURN_SINK = 1.35;
 export const PARACHUTE_BRAKE_SINK = 0.7;
 export const PARACHUTE_STEP_DISTANCE_SENTINEL = -1_000_000;
 const MOVEMENT_GRAVITY = 18;
-const GROUND_PROBE_DISTANCE = 400;
+const GROUND_PROBE_DISTANCE = 700;
 const GROUND_LOOKAHEAD_SECONDS = [0, 0.75, 1.5, 2.5, 3.5];
+const OBSTACLE_COLLISION_RATIO = 0.48;
+const OBSTACLE_GLIDE_RETAIN_MINIMUM = 0.18;
+const OBSTACLE_EVENT_DEBOUNCE_MS = 320;
 
 export const manifest = {
   id: "battle-royale-parachute",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["entities", "movement", "rapier-physics", "battle-royale", "health"],
   capabilities: [
     "services.consume", "services.provide",
@@ -61,18 +64,28 @@ function aerodynamicDownwardSpeed(currentSpeed, terminalSpeed, dt, maximumDecele
   return Math.max(terminal, candidate);
 }
 
-function impactDamage(speed) {
-  const excess = Math.max(0, Number(speed) - PARACHUTE_SAFE_IMPACT_SPEED);
-  if (excess <= 0) return 0;
-  return Math.round(2.1 * excess * excess);
+export function impactDamage(speed) {
+  const value = Math.max(0, Number(speed) || 0);
+  if (value <= PARACHUTE_SAFE_IMPACT_SPEED) return 0;
+
+  if (value <= 12) {
+    return Math.round((value - PARACHUTE_SAFE_IMPACT_SPEED) * 5);
+  }
+  if (value <= 18) {
+    return Math.round(25 + (value - 12) * 12);
+  }
+  if (value <= 22) {
+    return Math.round(97 + (value - 18) * 20);
+  }
+  return Math.round(177 + (value - 22) * 36);
 }
 
-function emergencyDeployDistance(speed) {
+export function emergencyDeployDistance(speed) {
   let downward = Math.max(0, Number(speed) || 0);
   let distance = 0;
   let elapsed = 0;
   const dt = 0.05;
-  for (let i = 0; i < 120; i += 1) {
+  for (let i = 0; i < 140; i += 1) {
     const inflation = clamp((elapsed * 1000) / PARACHUTE_INFLATION_MS, 0, 1);
     const curve = smoothstep(inflation);
     const terminal = PARACHUTE_FREEFALL_TERMINAL_SPEED
@@ -88,7 +101,7 @@ function emergencyDeployDistance(speed) {
     elapsed += dt;
     if (inflation >= 1 && downward <= PARACHUTE_CANOPY_TERMINAL_SPEED + 0.5) break;
   }
-  return Math.max(15, distance + 15);
+  return Math.max(18, distance + 18);
 }
 
 function publicState(state, transform = null) {
@@ -117,6 +130,8 @@ function publicState(state, transform = null) {
     brake: clamp(state.brake, 0, 1),
     airSpeed: Number(state.airSpeed) || 0,
     lastLandingDamage: Number(state.lastLandingDamage) || 0,
+    lastObstacleAt: state.lastObstacleAt || null,
+    lastObstacleSpeed: Number(state.lastObstacleSpeed) || 0,
   };
 }
 
@@ -124,6 +139,7 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const movement = ctx.services.get("movement");
   const physics = ctx.services.get("physics");
+  const battleRoyale = ctx.services.get("battle-royale");
   const health = ctx.services.get("health");
 
   ctx.components.register("Parachute");
@@ -150,7 +166,9 @@ export async function setup(ctx) {
       simulatedVerticalVelocity: 0,
       cutCooldownUntil: 0,
       manualCut: false,
+      beforeMovementX: null,
       beforeMovementY: null,
+      beforeMovementZ: null,
       savedControl: null,
       groundDistance: Infinity,
       timeToImpact: Infinity,
@@ -163,6 +181,8 @@ export async function setup(ctx) {
       glideSpeed: 0,
       brake: 0,
       airSpeed: 0,
+      lastObstacleAt: 0,
+      lastObstacleSpeed: 0,
     };
     ctx.components.add(entityId, "Parachute", state);
     return state;
@@ -261,7 +281,9 @@ export async function setup(ctx) {
       simulatedVerticalVelocity: -1.5,
       cutCooldownUntil: 0,
       manualCut: false,
+      beforeMovementX: null,
       beforeMovementY: null,
+      beforeMovementZ: null,
       savedControl: null,
       groundDistance: Infinity,
       timeToImpact: Infinity,
@@ -274,6 +296,8 @@ export async function setup(ctx) {
       glideSpeed: 0,
       brake: 0,
       airSpeed: 1.5,
+      lastObstacleAt: 0,
+      lastObstacleSpeed: 0,
     });
     transform.verticalVelocity = -1.5;
     transform.grounded = false;
@@ -286,6 +310,8 @@ export async function setup(ctx) {
       z: transform.z,
       altitude,
       groundDistance: state.groundDistance,
+      verticalVelocity: transform.verticalVelocity,
+      airSpeed: state.airSpeed,
       now,
     });
     return stateFor(entityId);
@@ -296,6 +322,7 @@ export async function setup(ctx) {
     const transform = ctx.components.get(entityId, "Transform");
     if (!isHuman(entityId) || !transform || !state.airborne || state.phase === "deployed") return false;
     probeGround(entityId, transform, state);
+    if (transform.grounded) return false;
     if (Number.isFinite(state.groundDistance) && state.groundDistance < PARACHUTE_MIN_DEPLOY_CLEARANCE) return false;
     if (now < Number(state.cutCooldownUntil || 0)) return false;
     state.phase = "deployed";
@@ -317,6 +344,7 @@ export async function setup(ctx) {
       z: transform.z,
       groundDistance: state.groundDistance,
       verticalVelocity: transform.verticalVelocity,
+      airSpeed: state.airSpeed,
       now,
     });
     return true;
@@ -344,6 +372,7 @@ export async function setup(ctx) {
       z: transform.z,
       groundDistance: state.groundDistance,
       verticalVelocity: transform.verticalVelocity,
+      airSpeed: state.airSpeed,
       now,
     });
     return true;
@@ -364,7 +393,9 @@ export async function setup(ctx) {
       const input = ctx.components.get(entity.id, "Input");
       if (!state?.airborne || !transform || !input) continue;
 
+      state.beforeMovementX = transform.x;
       state.beforeMovementY = transform.y;
+      state.beforeMovementZ = transform.z;
       transform.stepDistance = PARACHUTE_STEP_DISTANCE_SENTINEL;
       probeGround(entity.id, transform, state);
 
@@ -398,6 +429,7 @@ export async function setup(ctx) {
               predictedImpactDistance: state.predictedImpactDistance,
               predictedImpactKind: state.predictedImpactKind,
               timeToImpact: state.timeToImpact,
+              airSpeed: state.airSpeed,
               now,
             });
           }
@@ -506,7 +538,50 @@ export async function setup(ctx) {
           }
         }
       }
+
+      if (
+        state.phase === "deployed"
+        && Number.isFinite(state.beforeMovementX)
+        && Number.isFinite(state.beforeMovementZ)
+        && safeDt > 0
+      ) {
+        const expectedDistance = Math.max(0, Number(state.glideSpeed) || 0) * safeDt;
+        const movedDistance = Math.hypot(
+          transform.x - state.beforeMovementX,
+          transform.z - state.beforeMovementZ,
+        );
+        if (expectedDistance > 0.045 && movedDistance < expectedDistance * OBSTACLE_COLLISION_RATIO) {
+          const collisionSpeed = Number(state.glideSpeed) || 0;
+          const retained = clamp(
+            movedDistance / Math.max(expectedDistance, 0.0001),
+            OBSTACLE_GLIDE_RETAIN_MINIMUM,
+            1,
+          );
+          state.glideSpeed *= retained;
+          state.turnRate *= 0.45;
+          state.lastObstacleSpeed = collisionSpeed;
+          state.airSpeed = Math.hypot(
+            Math.max(0, -Number(state.simulatedVerticalVelocity || 0)),
+            state.glideSpeed,
+          );
+          if (now - Number(state.lastObstacleAt || 0) >= OBSTACLE_EVENT_DEBOUNCE_MS) {
+            state.lastObstacleAt = now;
+            ctx.events.emit("parachute:obstacle-hit", {
+              entityId: entity.id,
+              x: transform.x,
+              y: transform.y,
+              z: transform.z,
+              horizontalSpeed: collisionSpeed,
+              retainedGlideSpeed: state.glideSpeed,
+              now,
+            });
+          }
+        }
+      }
+
+      state.beforeMovementX = null;
       state.beforeMovementY = null;
+      state.beforeMovementZ = null;
       probeGround(entity.id, transform, state);
 
       const impactSpeed = Math.max(0, -state.simulatedVerticalVelocity);
@@ -541,6 +616,7 @@ export async function setup(ctx) {
           damage: damageResult.applied,
           killed: damageResult.killed,
           hard: impactSpeed > PARACHUTE_SAFE_IMPACT_SPEED,
+          surfaceKind: state.predictedImpactKind,
           now,
         });
         continue;
@@ -565,6 +641,9 @@ export async function setup(ctx) {
   ctx.events.on("entity:spawned", ({ entityId, spec }) => {
     if (spec?.bot) return;
     ensureState(entityId);
+    if (battleRoyale.isActive() && isHuman(entityId)) {
+      launch(entityId, {}, Date.now());
+    }
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
@@ -577,7 +656,9 @@ export async function setup(ctx) {
     state.phase = "grounded";
     state.airborne = false;
     state.savedControl = null;
+    state.beforeMovementX = null;
     state.beforeMovementY = null;
+    state.beforeMovementZ = null;
     state.landingApproach = false;
     state.turnRate = 0;
     state.glideSpeed = 0;
@@ -588,6 +669,8 @@ export async function setup(ctx) {
   ctx.events.on("battle-royale:started", ({ startedAt }) => {
     for (const entity of entities.all()) {
       if (!entity.alive || entity.bot || entity.kind !== "human") continue;
+      const state = ensureState(entity.id);
+      if (state.airborne) continue;
       launch(entity.id, {}, Number(startedAt) || Date.now());
     }
   });
@@ -612,6 +695,7 @@ export async function setup(ctx) {
       landingApproachSeconds: PARACHUTE_LANDING_APPROACH_SECONDS,
       safeImpactSpeed: PARACHUTE_SAFE_IMPACT_SPEED,
       maxGlideSpeed: PARACHUTE_MAX_GLIDE_SPEED,
+      groundProbeDistance: GROUND_PROBE_DISTANCE,
     },
   });
 }
