@@ -4,6 +4,7 @@ export const manifest = {
 };
 
 const SPEECH_START_FALLBACK_MS = 550;
+const PARACHUTE_ACTION_DEBOUNCE_MS = 350;
 
 export async function setup(ctx) {
   const input = ctx.services.get("input");
@@ -13,9 +14,19 @@ export async function setup(ctx) {
   let parachutePressed = false;
   let latestParachute = null;
   let announcementGeneration = 0;
+  let lastParachuteActionAt = -Infinity;
 
   function trigger(reason) {
     if (!network.connected) return;
+    const now = performance.now();
+    if (now - lastParachuteActionAt < PARACHUTE_ACTION_DEBOUNCE_MS) {
+      ctx.events.emit("parachute:input-suppressed", {
+        reason,
+        elapsedMs: now - lastParachuteActionAt,
+      });
+      return;
+    }
+    lastParachuteActionAt = now;
     parachutePressed = true;
     ctx.events.emit("input:changed", { reason });
   }
