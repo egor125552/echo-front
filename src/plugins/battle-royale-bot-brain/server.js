@@ -8,7 +8,7 @@ export const BOT_SOUND_SEARCH_REACHED = 1.8;
 
 export const manifest = {
   id: "bot-brain",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["bot-controller", "entities", "battle-royale", "map-test-arena", "bot-state-machine"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -412,20 +412,42 @@ export async function setup(ctx) {
     };
 
     let candidate;
+    const urgent = visibleThreat || underFire || freshSound;
 
     if (traversalActive) {
+      const carriedInvestigation = context.traversal.target?.kind === "sound-interest"
+        ? context.traversal.target
+        : (previousDecision?.resumeGoal === "investigate" ? previousDecision.resumeTarget : null);
       candidate = decorate(botId, {
         goal: "traverse",
         score: 1,
         target: context.traversal.target,
         route: context.traversal.route,
         targetEntityId: visibleEnemies[0]?.entityId ?? context.memory?.entityId ?? previousDecision?.targetEntityId ?? null,
+        resumeGoal: carriedInvestigation ? "investigate" : previousDecision?.resumeGoal ?? null,
+        resumeTarget: carriedInvestigation ?? previousDecision?.resumeTarget ?? null,
+        resumeHeardAt: carriedInvestigation?.heardAt ?? previousDecision?.resumeHeardAt ?? null,
         holdUntil: now + 450,
       }, profile, now);
       return stateMachine.resolve(botId, candidate, { ...meta, force: true });
     }
 
-    const urgent = visibleThreat || underFire || freshSound;
+    if (
+      machineState.machineState === "traverse"
+      && previousDecision?.resumeGoal === "investigate"
+      && previousDecision.resumeTarget
+      && !urgent
+    ) {
+      candidate = decorate(botId, {
+        goal: "investigate",
+        score: 1,
+        target: previousDecision.resumeTarget,
+        heardAt: previousDecision.resumeHeardAt ?? previousDecision.resumeTarget.heardAt ?? null,
+        holdUntil: now + 900,
+      }, profile, now);
+      return stateMachine.resolve(botId, candidate, { ...meta, force: true });
+    }
+
     const search = continueSearch(botId, machineState, transform, now, urgent);
     if (search?.decision) {
       candidate = decorate(botId, search.decision, profile, now);
