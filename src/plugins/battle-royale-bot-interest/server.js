@@ -8,10 +8,15 @@ export const BOT_WEAPON_INVESTIGATION_CAP = 6;
 export const BOT_HEARING_REPEAT_WINDOW_MS = 3_000;
 export const BOT_HEARING_MAX_CONFIDENCE = 4;
 export const BOT_INTEREST_REACHED_DISTANCE = 2.4;
+export const BOT_EXPLORATION_REACHED_DISTANCE = 3;
+export const BOT_EXPLORATION_MIN_DISTANCE = 20;
+export const BOT_EXPLORATION_DISTANCE_SPREAD = 26;
+export const BOT_EXPLORATION_MIN_MS = 8_000;
+export const BOT_EXPLORATION_TIME_SPREAD_MS = 6_000;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["bot-controller", "entities", "teams", "spatial-grid", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -35,6 +40,18 @@ function stableHash(value) {
     hash = Math.imul(hash, 16777619);
   }
   return hash >>> 0;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function insideBuilding(position, building) {
+  return Boolean(building)
+    && Number(position?.x) >= building.minX
+    && Number(position?.x) <= building.maxX
+    && Number(position?.z) >= building.minZ
+    && Number(position?.z) <= building.maxZ;
 }
 
 function buildWarehouseInterestPoints(map) {
@@ -85,6 +102,7 @@ export async function setup(ctx) {
   const assignments = new Map();
   const cooldowns = new Map();
   const heard = new Map();
+  const exploration = new Map();
 
   function activeAssignmentCount(group, now) {
     let count = 0;
@@ -102,6 +120,8 @@ export async function setup(ctx) {
     }
     const sound = heard.get(botId);
     if (sound && sound.expiresAt <= now) heard.delete(botId);
+    const roam = exploration.get(botId);
+    if (roam && roam.expiresAt <= now) exploration.delete(botId);
   }
 
   function nextPoint(assignment) {
@@ -138,7 +158,69 @@ export async function setup(ctx) {
       expiresAt: now + BOT_INTEREST_VISIT_MS,
     };
     assignments.set(botId, assignment);
+    exploration.delete(botId);
     return groupPoints[pointIndex];
+  }
+
+  function nextExplorationTarget(botId, transform, now) {
+    const previous = exploration.get(botId);
+    const sequence = (previous?.sequence ?? -1) + 1;
+    const halfSize = Math.max(40, Number(map?.halfSize) || 400);
+    const margin = 12;
+    const fromInside = insideBuilding(transform, map?.building);
+
+    let chosen = null;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const seed = stableHash(`${botId}:explore:${sequence}:${attempt}`);
+      const angle = ((seed % 65536) / 65536) * Math.PI * 2;
+      const distance = BOT_EXPLORATION_MIN_DISTANCE
+        + ((seed >>> 16) % (BOT_EXPLORATION_DISTANCE_SPREAD + 1));
+      const candidate = {
+        x: clamp((Number(transform?.x) || 0) + Math.cos(angle) * distance, -halfSize + margin, halfSize - margin),
+        y: Number(transform?.y) || 0,
+        z: clamp((Number(transform?.z) || 0) + Math.sin(angle) * distance, -halfSize + margin, halfSize - margin),
+      };
+      if (!fromInside && insideBuilding(candidate, map?.building)) continue;
+      if (distance3(transform, candidate) < BOT_EXPLORATION_MIN_DISTANCE * 0.65) continue;
+      chosen = candidate;
+      break;
+    }
+
+    if (!chosen) {
+      const fallbackSeed = stableHash(`${botId}:explore-fallback:${sequence}`);
+      const direction = fallbackSeed % 2 ? 1 : -1;
+      chosen = {
+        x: clamp((Number(transform?.x) || 0) + direction * BOT_EXPLORATION_MIN_DISTANCE, -halfSize + margin, halfSize - margin),
+        y: Number(transform?.y) || 0,
+        z: clamp((Number(transform?.z) || 0) + (direction * 0.5 * BOT_EXPLORATION_MIN_DISTANCE), -halfSize + margin, halfSize - margin),
+      };
+    }
+
+    const durationSeed = stableHash(`${botId}:explore-time:${sequence}`);
+    const target = {
+      kind: "explore-interest",
+      sequence,
+      x: chosen.x,
+      y: chosen.y,
+      z: chosen.z,
+      createdAt: now,
+      expiresAt: now + BOT_EXPLORATION_MIN_MS
+        + (durationSeed % (BOT_EXPLORATION_TIME_SPREAD_MS + 1)),
+    };
+    exploration.set(botId, target);
+    return target;
+  }
+
+  function explorationTargetFor(botId, transform, now) {
+    let target = exploration.get(botId);
+    if (
+      !target
+      || target.expiresAt <= now
+      || distance3(transform, target) <= BOT_EXPLORATION_REACHED_DISTANCE
+    ) {
+      target = nextExplorationTarget(botId, transform, now);
+    }
+    return target ? { ...target } : null;
   }
 
   function recordSound(sound, now = Date.now()) {
@@ -229,37 +311,40 @@ export async function setup(ctx) {
     }
 
     if (!assignment) point = startVisit(botId, transform, now);
-    if (!point) return null;
+    if (point) {
+      exploration.delete(botId);
+      return {
+        kind: "poi-interest",
+        group: point.group,
+        pointId: point.id,
+        x: point.x,
+        y: point.y,
+        z: point.z,
+        expiresAt: assignments.get(botId)?.expiresAt ?? now,
+      };
+    }
 
-    return {
-      kind: "poi-interest",
-      group: point.group,
-      pointId: point.id,
-      x: point.x,
-      y: point.y,
-      z: point.z,
-      expiresAt: assignments.get(botId)?.expiresAt ?? now,
-    };
+    return explorationTargetFor(botId, transform, now);
+  }
+
+  function clearBot(entityId) {
+    assignments.delete(entityId);
+    cooldowns.delete(entityId);
+    heard.delete(entityId);
+    exploration.delete(entityId);
   }
 
   ctx.events.on("sound:spatial", (sound) => {
     const eventNow = Number.isFinite(sound?.now) ? Number(sound.now) : Date.now();
     recordSound(sound, eventNow);
   });
-  ctx.events.on("entity:removed", ({ entityId }) => {
-    assignments.delete(entityId);
-    cooldowns.delete(entityId);
-    heard.delete(entityId);
-  });
+  ctx.events.on("entity:removed", ({ entityId }) => clearBot(entityId));
   ctx.events.on("entity:died", ({ entityId }) => {
     assignments.delete(entityId);
     heard.delete(entityId);
+    exploration.delete(entityId);
   });
-  ctx.events.on("entity:respawned", ({ entityId }) => {
-    assignments.delete(entityId);
-    cooldowns.delete(entityId);
-    heard.delete(entityId);
-  });
+  ctx.events.on("entity:respawned", ({ entityId }) => clearBot(entityId));
 
   ctx.services.provide("bot-interest", {
     points,
@@ -267,6 +352,7 @@ export async function setup(ctx) {
     targetFor,
     assignmentFor(botId) { return assignments.get(botId) ?? null; },
     heardFor(botId) { return heard.get(botId) ?? null; },
+    explorationFor(botId) { return exploration.get(botId) ?? null; },
     activeAssignmentCount(group, now = Date.now()) { return activeAssignmentCount(group, now); },
   });
 }
