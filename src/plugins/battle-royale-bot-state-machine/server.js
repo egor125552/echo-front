@@ -14,7 +14,7 @@ export const BOT_BEHAVIOR_STATES = Object.freeze([
 
 export const manifest = {
   id: "bot-state-machine",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["bot-controller", "bot-ai-rollout"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -79,6 +79,29 @@ function traversingToSoundInvestigation(decision) {
     && decision?.resumeTarget?.kind === "sound-interest";
 }
 
+function soundTargetForDecision(decision) {
+  if (soundInvestigation(decision)) return decision.target;
+  if (soundSearch(decision)) return decision.searchOrigin;
+  if (traversingToSoundInvestigation(decision)) return decision.resumeTarget;
+  return null;
+}
+
+function soundWorkExpiresAt(decision) {
+  if (soundInvestigation(decision)) return Number(decision.investigateUntil) || Number(decision.holdUntil) || 0;
+  if (soundSearch(decision)) return Number(decision.searchUntil) || Number(decision.holdUntil) || 0;
+  if (traversingToSoundInvestigation(decision)) {
+    return Number(decision.resumeInvestigateUntil) || Number(decision.holdUntil) || 0;
+  }
+  return 0;
+}
+
+function activeSoundWork(decision, now) {
+  const sound = soundTargetForDecision(decision);
+  if (!sound) return false;
+  const expiresAt = soundWorkExpiresAt(decision);
+  return !expiresAt || expiresAt > Number(now);
+}
+
 function sameSound(a, b) {
   if (a?.kind !== "sound-interest" || b?.kind !== "sound-interest") return false;
   if (a.sourceId && b.sourceId && a.sourceId !== b.sourceId) return false;
@@ -92,6 +115,21 @@ function sameSound(a, b) {
   ) < 0.25;
 }
 
+function sameSoundSource(a, b) {
+  if (a?.kind !== "sound-interest" || b?.kind !== "sound-interest") return false;
+  return Boolean(a.sourceId && b.sourceId && a.sourceId === b.sourceId);
+}
+
+export function shouldReplaceCommittedSound(currentDecision, candidateDecision) {
+  const current = soundTargetForDecision(currentDecision);
+  const candidate = soundTargetForDecision(candidateDecision);
+  if (!current || !candidate) return true;
+  if (sameSoundSource(current, candidate)) return true;
+  const currentPriority = Number(current.priority) || 0;
+  const candidatePriority = Number(candidate.priority) || 0;
+  return candidatePriority > currentPriority;
+}
+
 function traversalContinuesInvestigation(currentDecision, candidate) {
   return traversingToSoundInvestigation(candidate)
     && sameSound(currentDecision?.target, candidate.resumeTarget);
@@ -99,6 +137,18 @@ function traversalContinuesInvestigation(currentDecision, candidate) {
 
 export function preserveCommittedSoundWork(machineState, currentDecision, candidate, meta = {}, now = Date.now()) {
   if (!candidate) return candidate;
+
+  const currentSound = soundTargetForDecision(currentDecision);
+  const candidateSound = soundTargetForDecision(candidate);
+  if (
+    meta.freshSound
+    && currentSound
+    && candidateSound
+    && !shouldReplaceCommittedSound(currentDecision, candidate)
+  ) {
+    return { ...currentDecision };
+  }
+
   const urgent = Boolean(meta.underFire || meta.visibleThreat || meta.freshSound);
   if (urgent || candidate.goal !== "traverse") return candidate;
 
@@ -127,9 +177,18 @@ export function preserveCommittedSoundWork(machineState, currentDecision, candid
   return candidate;
 }
 
+function shouldResumeSuspendedSound(candidate) {
+  if (!candidate) return true;
+  if (candidate.goal === "roam") return true;
+  if (candidate.goal === "investigate" && candidate.target?.kind !== "sound-interest") return true;
+  if (candidate.goal === "traverse" && !traversingToSoundInvestigation(candidate)) return true;
+  return false;
+}
+
 export async function setup(ctx) {
   const rollout = ctx.services.get("bot-ai-rollout");
   const actors = new Map();
+  const suspendedSoundWork = new Map();
 
   function actorFor(botId) {
     let actor = actors.get(botId);
@@ -140,15 +199,32 @@ export async function setup(ctx) {
     return actor;
   }
 
+  function suspendedFor(botId, now) {
+    const saved = suspendedSoundWork.get(botId);
+    if (!saved) return null;
+    if (!activeSoundWork(saved, now)) {
+      suspendedSoundWork.delete(botId);
+      return null;
+    }
+    return saved;
+  }
+
+  function suspend(botId, decision, now) {
+    if (!activeSoundWork(decision, now)) return;
+    suspendedSoundWork.set(botId, { ...decision });
+  }
+
   function stopActor(botId) {
     const actor = actors.get(botId);
     actor?.stop?.();
     actors.delete(botId);
+    suspendedSoundWork.delete(botId);
   }
 
   function resetAll() {
     for (const actor of actors.values()) actor.stop?.();
     actors.clear();
+    suspendedSoundWork.clear();
   }
 
   function resolve(botId, candidate, meta = {}) {
@@ -160,23 +236,62 @@ export async function setup(ctx) {
     const actor = actorFor(botId);
     const before = actor.getSnapshot();
     const now = Number(meta.now) || Date.now();
+    const currentDecision = before.context.decision;
+    const currentSoundWork = activeSoundWork(currentDecision, now) ? currentDecision : null;
+    const suspended = suspendedFor(botId, now);
+    const combatInterrupt = Boolean(meta.underFire || meta.visibleThreat);
+    let effectiveCandidate = candidate;
+    let effectiveMeta = { ...meta };
+
+    if (combatInterrupt && currentSoundWork) {
+      suspend(botId, currentSoundWork, now);
+    }
+
+    const baselineSoundWork = currentSoundWork ?? suspended;
+    const incomingSound = soundTargetForDecision(candidate);
+    if (
+      effectiveMeta.freshSound
+      && baselineSoundWork
+      && incomingSound
+      && !shouldReplaceCommittedSound(baselineSoundWork, candidate)
+    ) {
+      effectiveMeta.freshSound = false;
+      if (!combatInterrupt) {
+        effectiveCandidate = { ...baselineSoundWork };
+        if (suspended) suspendedSoundWork.delete(botId);
+        effectiveMeta.force = true;
+      }
+    } else if (incomingSound && effectiveMeta.freshSound && suspended) {
+      suspendedSoundWork.delete(botId);
+    }
+
+    if (!combatInterrupt) {
+      const resumable = suspendedFor(botId, now);
+      if (resumable && shouldResumeSuspendedSound(effectiveCandidate)) {
+        effectiveCandidate = { ...resumable };
+        suspendedSoundWork.delete(botId);
+        effectiveMeta.force = true;
+        effectiveMeta.freshSound = false;
+      }
+    }
+
     const protectedCandidate = preserveCommittedSoundWork(
       String(before.value),
-      before.context.decision,
-      candidate,
-      meta,
+      currentDecision,
+      effectiveCandidate,
+      effectiveMeta,
       now,
     );
     const goal = BOT_BEHAVIOR_STATES.includes(protectedCandidate.goal)
       ? protectedCandidate.goal
       : "roam";
     const force = Boolean(
-      meta.force
-      || meta.underFire
-      || meta.visibleThreat
-      || meta.freshSound
-      || meta.traversalActive
-      || meta.investigationReached
+      effectiveMeta.force
+      || effectiveMeta.underFire
+      || effectiveMeta.visibleThreat
+      || effectiveMeta.freshSound
+      || effectiveMeta.traversalActive
+      || effectiveMeta.investigationReached
       || (before.value === "traverse" && goal !== "traverse"),
     );
 
@@ -221,8 +336,10 @@ export async function setup(ctx) {
         holdUntil: snapshot.context.holdUntil ?? 0,
         targetEntityId: snapshot.context.targetEntityId ?? null,
         heardAt: snapshot.context.heardAt ?? null,
+        suspendedSoundWork: suspendedFor(botId, Date.now()),
       };
     },
+    suspendedSoundFor(botId, now = Date.now()) { return suspendedFor(botId, now); },
     reset(botId) { stopActor(botId); },
     resetAll,
   });
