@@ -1,13 +1,19 @@
 export const manifest = {
   id: "battle-royale-parachute-integration",
-  version: "1.1.0",
-  requires: ["match-api", "battle-royale-parachute", "battle-royale", "movement"],
+  version: "1.2.0",
+  requires: [
+    "match-api", "battle-royale-parachute", "battle-royale", "movement",
+    "rapier-physics", "entities",
+  ],
   capabilities: [
     "services.consume",
     "components.read", "components.write",
     "events.on", "events.emit",
   ],
 };
+
+const PARACHUTE_SUPPORT_PROBE_DISTANCE = 800;
+const LANDING_SUPPORT_TOLERANCE = 0.08;
 
 function enrichSnapshot(snapshot, parachute) {
   if (!snapshot || !Array.isArray(snapshot.entities)) return snapshot;
@@ -25,6 +31,8 @@ export async function setup(ctx) {
   const parachute = ctx.services.get("parachute");
   const battleRoyale = ctx.services.get("battle-royale");
   const movement = ctx.services.get("movement");
+  const physics = ctx.services.get("physics");
+  const entities = ctx.services.get("entities");
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
   const originalStep = matchApi.step.bind(matchApi);
@@ -32,26 +40,80 @@ export async function setup(ctx) {
   const originalSnapshotFor = matchApi.snapshotFor.bind(matchApi);
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
 
+  function supportDistanceAt(transform) {
+    if (!transform || typeof physics.raycastSupportWorld !== "function") return Infinity;
+    const lift = 0.12;
+    const hit = physics.raycastSupportWorld(
+      { x: transform.x, y: transform.y + lift, z: transform.z },
+      { x: 0, y: -1, z: 0 },
+      PARACHUTE_SUPPORT_PROBE_DISTANCE,
+    );
+    return hit ? Math.max(0, Number(hit.distance) - lift) : Infinity;
+  }
+
+  function clearUnsupportedGrounding() {
+    for (const entity of entities.all()) {
+      if (!entity.alive || entity.bot || entity.kind !== "human") continue;
+      const state = ctx.components.get(entity.id, "Parachute");
+      const transform = ctx.components.get(entity.id, "Transform");
+      if (!state?.airborne || !transform?.grounded) continue;
+      if (supportDistanceAt(transform) > LANDING_SUPPORT_TOLERANCE) {
+        transform.grounded = false;
+      }
+    }
+  }
+
+  function withParachuteQueries(callback, { wrapMove = false } = {}) {
+    const originalRaycastWorld = physics.raycastWorld;
+    const originalMove = physics.move;
+
+    if (typeof physics.raycastSupportWorld === "function") {
+      physics.raycastWorld = (origin, direction, maxDistance) => physics.raycastSupportWorld(
+        origin,
+        direction,
+        Math.max(PARACHUTE_SUPPORT_PROBE_DISTANCE, Number(maxDistance) || 0),
+      );
+    }
+
+    if (wrapMove) {
+      physics.move = (entityId, dx, dz, dy = 0) => {
+        const moved = originalMove(entityId, dx, dz, dy);
+        if (!moved?.grounded) return moved;
+        const state = ctx.components.get(entityId, "Parachute");
+        if (!state?.airborne) return moved;
+        const position = physics.position(entityId);
+        if (supportDistanceAt(position) <= LANDING_SUPPORT_TOLERANCE) return moved;
+        return { ...moved, grounded: false };
+      };
+    }
+
+    try {
+      return callback();
+    } finally {
+      physics.raycastWorld = originalRaycastWorld;
+      physics.move = originalMove;
+    }
+  }
+
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     if (input.parachutePressed) parachute.toggle(playerId, now);
     return originalHandleInput(playerId, input, now);
   };
 
   matchApi.step = (dt, now = Date.now()) => {
-    parachute.prepareMovement(dt, now);
+    withParachuteQueries(() => parachute.prepareMovement(dt, now));
 
     const deploymentActive = Boolean(battleRoyale.status(now)?.deployment?.active);
     let result = null;
     if (deploymentActive) {
-      // During deployment only the human movement/Rapier path advances. Bots,
-      // weapons and combat stay frozen until the last living human lands.
       battleRoyale.tick(now);
       movement.tick(dt, now);
     } else {
       result = originalStep(dt, now);
     }
 
-    parachute.finishMovement(dt, now);
+    clearUnsupportedGrounding();
+    withParachuteQueries(() => parachute.finishMovement(dt, now), { wrapMove: true });
     return result;
   };
 
