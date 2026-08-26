@@ -3,6 +3,8 @@ export const manifest = {
   requires: ["keyboard-input", "cloudflare-session", "speech-settings"],
 };
 
+const SPEECH_START_FALLBACK_MS = 550;
+
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const network = ctx.services.get("network");
@@ -10,6 +12,7 @@ export async function setup(ctx) {
   const originalSample = input.sample.bind(input);
   let parachutePressed = false;
   let latestParachute = null;
+  let announcementGeneration = 0;
 
   function trigger(reason) {
     if (!network.connected) return;
@@ -17,15 +20,50 @@ export async function setup(ctx) {
     ctx.events.emit("input:changed", { reason });
   }
 
-  function announce(text) {
-    if (!text) return;
-    speech.say(text, { interrupt: true });
-    const live = document.getElementById("announcer");
-    if (!live || speech.enabled) return;
+  function statusLiveRegion() {
+    let live = document.getElementById("parachute-status-live");
+    if (live) return live;
+    live = document.createElement("p");
+    live.id = "parachute-status-live";
+    live.className = "sr-only";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "assertive");
+    live.setAttribute("aria-atomic", "true");
+    document.body.appendChild(live);
+    return live;
+  }
+
+  function announceWithVoiceOver(text) {
+    const live = statusLiveRegion();
     live.textContent = "";
     requestAnimationFrame(() => {
       live.textContent = text;
     });
+  }
+
+  function announce(text) {
+    if (!text) return;
+    const generation = ++announcementGeneration;
+    let started = false;
+    const utterance = speech.say(text, { interrupt: true });
+
+    if (!utterance) {
+      announceWithVoiceOver(text);
+      return;
+    }
+
+    utterance.addEventListener?.("start", () => {
+      started = true;
+    }, { once: true });
+    utterance.addEventListener?.("error", () => {
+      if (generation !== announcementGeneration || started) return;
+      announceWithVoiceOver(text);
+    }, { once: true });
+
+    setTimeout(() => {
+      if (generation !== announcementGeneration || started) return;
+      announceWithVoiceOver(text);
+    }, SPEECH_START_FALLBACK_MS);
   }
 
   function flightStatusText() {
