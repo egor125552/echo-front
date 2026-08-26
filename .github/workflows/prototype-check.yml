@@ -17,6 +17,8 @@ jobs:
           node-version: 22
       - run: npm install
       - run: npm test
+      - name: Profile BR opening
+        run: node scripts/profile-br-opening.mjs
       - run: npx wrangler deploy --dry-run
       - name: Start local Worker
         run: |
