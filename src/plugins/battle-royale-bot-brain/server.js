@@ -3,7 +3,7 @@ export const BOT_DECISION_HOLD_SPREAD_MS = 650;
 
 export const manifest = {
   id: "bot-brain",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["bot-controller", "entities", "battle-royale"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -85,25 +85,33 @@ export function chooseUtilityDecision({
   const closePressure = Number.isFinite(nearestDistance)
     ? clamp01((8 - nearestDistance) / 8)
     : 0;
+  const rangeAdvantage = target && nearestDistance <= safeProfile.preferredRange + 2 ? 1 : 0;
   const ringPressure = zonePressure(zoneTarget);
 
+  // A BR encounter is a choice, not a compulsory deathmatch. Strong/aggressive bots
+  // still press wounded or favorable targets, while cautious bots can break an equal
+  // long-range contact before every meeting turns into a guaranteed elimination.
   const engageScore = target ? clamp01(
-    0.22
+    0.12
     + safeProfile.aggression * 0.48
-    + durability * 0.3
-    + targetWeakness * 0.18
-    - safeProfile.caution * surrounded * 0.34
-    - (1 - durability) * 0.34
-    - ringPressure * safeProfile.caution * 0.18
+    + durability * 0.16
+    + targetWeakness * 0.28
+    + rangeAdvantage * 0.08
+    - safeProfile.caution * 0.18
+    - surrounded * safeProfile.caution * 0.3
+    - (1 - durability) * 0.24
+    - ringPressure * safeProfile.caution * 0.16
   ) : 0;
 
   const evadeScore = target ? clamp01(
-    0.06
-    + safeProfile.caution * 0.28
-    + (1 - durability) * 0.62
-    + surrounded * 0.38
-    + closePressure * safeProfile.caution * 0.18
-    - safeProfile.aggression * 0.14
+    0.12
+    + safeProfile.caution * 0.34
+    + (1 - safeProfile.aggression) * 0.22
+    + (1 - durability) * 0.58
+    + surrounded * 0.36
+    + closePressure * safeProfile.caution * 0.1
+    - targetWeakness * 0.16
+    - rangeAdvantage * safeProfile.aggression * 0.08
   ) : 0;
 
   const zoneScore = zoneTarget ? clamp01(
@@ -125,7 +133,7 @@ export function chooseUtilityDecision({
       return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
     }
 
-    if (evadeScore > engageScore + 0.06) {
+    if (evadeScore > engageScore + 0.03) {
       return {
         goal: "evade",
         score: evadeScore,
