@@ -8,13 +8,14 @@ export const BOT_BEHAVIOR_STATES = Object.freeze([
   "hunt",
   "zone",
   "engage",
+  "defend",
   "evade",
   "traverse",
 ]);
 
 export const manifest = {
   id: "bot-state-machine",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["bot-controller"],
   capabilities: ["services.provide", "events.on"],
 };
