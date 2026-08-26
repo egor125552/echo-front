@@ -1,16 +1,73 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 3,
+  id: 4,
   mode: "battle-royale",
   room: "engine-lab",
-  command: "service.call",
+  command: "engine.batch",
   args: {
-    service: "physics",
-    method: "raycastWorld",
-    arguments: [
-      { x: 0, y: 10, z: 0 },
-      { x: 0, y: -1, z: 0 },
-      50
+    commands: [
+      {
+        command: "service.call",
+        args: {
+          service: "match-api",
+          method: "connectHuman",
+          arguments: ["engine-xstate-human"]
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "movement",
+          method: "teleport",
+          arguments: ["br-bot-94", { "x": 0, "y": 0, "z": 0, "angle": 0 }]
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "movement",
+          method: "teleport",
+          arguments: ["engine-xstate-human", { "x": 0, "y": 0, "z": -9, "angle": 3.141592653589793 }]
+        }
+      },
+      {
+        command: "game.step",
+        args: { "dt": 0.05, "steps": 140 }
+      },
+      {
+        command: "component.get",
+        args: { "entityId": "engine-xstate-human", "component": "Health" }
+      },
+      {
+        command: "event.emit",
+        args: {
+          "event": "combat:damage",
+          "payload": {
+            "targetId": "br-bot-94",
+            "attackerId": "engine-xstate-human"
+          }
+        }
+      },
+      {
+        command: "game.step",
+        args: { "dt": 0.05, "steps": 24 }
+      },
+      {
+        command: "service.call",
+        args: {
+          "service": "bot-brain",
+          "method": "stateFor",
+          "arguments": ["br-bot-94"]
+        }
+      },
+      {
+        command: "component.get",
+        args: { "entityId": "br-bot-94", "component": "Input" }
+      },
+      {
+        command: "component.get",
+        args: { "entityId": "engine-xstate-human", "component": "Health" }
+      }
     ]
   },
-  requestedAt: "2026-08-25T20:14:00Z",
+  requestedAt: "2026-08-26T07:08:00Z"
 });
