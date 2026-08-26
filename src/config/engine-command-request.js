@@ -1,13 +1,13 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 7,
+  id: 8,
   mode: "battle-royale",
-  room: "engine-lab-xstate-ordinary",
+  room: "engine-lab-xstate-empty-warehouse",
   command: "engine.batch",
   args: {
     commands: [
       {
         command: "service.call",
-        args: { "service": "match-api", "method": "connectHuman", "arguments": ["engine-ordinary-human"] }
+        args: { "service": "match-api", "method": "connectHuman", "arguments": ["engine-search-source"] }
       },
       {
         command: "service.call",
@@ -15,17 +15,17 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
-        args: { "service": "movement", "method": "teleport", "arguments": ["engine-ordinary-human", { "x": 60, "y": 3.2, "z": 0, "angle": 1.5707963267948966 }] }
+        args: { "service": "movement", "method": "teleport", "arguments": ["engine-search-source", { "x": 60, "y": 3.2, "z": 0, "angle": 1.5707963267948966 }] }
       },
       { "command": "component.patch", "args": { "entityId": "br-bot-2", "component": "Health", "patch": { "current": 10000, "maximum": 10000 } } },
-      { "command": "component.patch", "args": { "entityId": "engine-ordinary-human", "component": "Health", "patch": { "current": 10000, "maximum": 10000 } } },
+      { "command": "component.patch", "args": { "entityId": "engine-search-source", "component": "Health", "patch": { "current": 10000, "maximum": 10000 } } },
       { "command": "game.step", "args": { "dt": 0.05, "steps": 140 } },
       {
         command: "event.emit",
         args: {
           "event": "sound:spatial",
           "payload": {
-            "entityId": "engine-ordinary-human",
+            "entityId": "engine-search-source",
             "key": "weapon.pistol.fire",
             "radius": 110,
             "x": 60,
@@ -34,18 +34,23 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
           }
         }
       },
+      {
+        command: "service.call",
+        args: { "service": "movement", "method": "teleport", "arguments": ["engine-search-source", { "x": -300, "y": 0, "z": -300, "angle": 0 }] }
+      },
       { "command": "game.step", "args": { "dt": 0.05, "steps": 8 } },
       { "command": "service.call", "args": { "service": "bot-brain", "method": "stateFor", "arguments": ["br-bot-2"] } },
-      { "command": "service.call", "args": { "service": "bot-interest", "method": "heardFor", "arguments": ["br-bot-2"] } },
       { "command": "component.get", "args": { "entityId": "br-bot-2", "component": "Transform" } },
       { "command": "game.step", "args": { "dt": 0.05, "steps": 220 } },
       { "command": "service.call", "args": { "service": "bot-brain", "method": "stateFor", "arguments": ["br-bot-2"] } },
       { "command": "component.get", "args": { "entityId": "br-bot-2", "component": "Transform" } },
-      { "command": "game.step", "args": { "dt": 0.05, "steps": 220 } },
+      { "command": "game.step", "args": { "dt": 0.05, "steps": 120 } },
       { "command": "service.call", "args": { "service": "bot-brain", "method": "stateFor", "arguments": ["br-bot-2"] } },
       { "command": "component.get", "args": { "entityId": "br-bot-2", "component": "Transform" } },
-      { "command": "service.call", "args": { "service": "map", "method": "locationAt", "arguments": [{ "x": 60, "y": 3.2, "z": 0 }] } }
+      { "command": "game.step", "args": { "dt": 0.05, "steps": 120 } },
+      { "command": "service.call", "args": { "service": "bot-brain", "method": "stateFor", "arguments": ["br-bot-2"] } },
+      { "command": "component.get", "args": { "entityId": "br-bot-2", "component": "Transform" } }
     ]
   },
-  requestedAt: "2026-08-26T08:24:00Z"
+  requestedAt: "2026-08-26T08:31:00Z"
 });
