@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-parachute-canopy",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "entities", "match-api", "battle-royale-parachute", "rapier-physics", "map-test-arena",
   ],
@@ -50,8 +50,6 @@ export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const map = ctx.services.get("map");
 
-  // Capture the real world raycast once. The parachute integration temporarily swaps
-  // physics.raycastWorld for support-only queries while resolving vertical movement.
   const worldRaycast = physics.raycastWorld.bind(physics);
 
   const originalPrepareMovement = parachute.prepareMovement.bind(parachute);
@@ -146,6 +144,8 @@ export async function setup(ctx) {
     const acousticZone = typeof map.acousticZoneAt === "function"
       ? map.acousticZoneAt(transform)
       : null;
+    const coveredByGeometry = Number.isFinite(overheadDistance);
+    const laterallyConfined = sideHits.length >= 2;
 
     return {
       compression,
@@ -158,7 +158,8 @@ export async function setup(ctx) {
       obstacleKind: kindOf(primaryHit) || null,
       obstacleName: objectLabel(primaryHit),
       acousticZone,
-      indoor: Boolean(acousticZone && acousticZone !== "outdoor"),
+      indoor: coveredByGeometry,
+      confined: coveredByGeometry || laterallyConfined,
     };
   }
 
@@ -186,7 +187,9 @@ export async function setup(ctx) {
     const compression = previous + (target - previous) * blend;
 
     state.canopyCompression = compression;
-    state.canopyEnvironment = sampled.indoor ? "indoor" : (compression > 0.08 ? "obstructed" : "clear");
+    state.canopyEnvironment = sampled.indoor
+      ? "indoor"
+      : (sampled.confined || compression > 0.08 ? "obstructed" : "clear");
     state.canopyObstacleKind = sampled.obstacleKind;
     state.canopyObstacleName = sampled.obstacleName;
     state.canopyOverheadDistance = sampled.overheadDistance;
@@ -220,6 +223,7 @@ export async function setup(ctx) {
         sideHitCount: sampled.sideHitCount,
         forwardDistance: sampled.forwardDistance,
         indoor: sampled.indoor,
+        confined: sampled.confined,
         acousticZone: sampled.acousticZone,
         now,
       });
@@ -290,6 +294,7 @@ export async function setup(ctx) {
             sideHitCount: sampled.sideHitCount,
             forwardDistance: sampled.forwardDistance,
             indoor: sampled.indoor,
+            confined: sampled.confined,
             acousticZone: sampled.acousticZone,
             now,
           });
@@ -362,5 +367,11 @@ export async function setup(ctx) {
     state.canopyCompression = 0;
     state.canopyEnvironment = "clear";
     state.canopyCollapsePending = null;
+    state.canopyObstacleKind = null;
+    state.canopyObstacleName = null;
+    state.canopyOverheadDistance = null;
+    state.canopySideDistance = null;
+    state.canopySideHitCount = 0;
+    state.canopyForwardDistance = null;
   });
 }
