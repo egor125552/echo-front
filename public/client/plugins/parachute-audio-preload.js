@@ -10,7 +10,7 @@ export const PARACHUTE_AUDIO_URLS = [
   `${ROOT}/wind/turbulent-wind.mp3`,
   `${ROOT}/wind/wind-rush.mp3`,
   `${ROOT}/open-air/cut-sweep.mp3`,
-  `${ROOT}/open-air/deris-whoosh.mp3`,
+  `${ROOT}/open-air/debris-whoosh.mp3`,
   `${ROOT}/open-air/deploy-swish.mp3`,
   `${ROOT}/cloth/canvas-flap.mp3`,
   `${ROOT}/cloth/page-flutter.mp3`,
