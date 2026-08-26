@@ -23,9 +23,13 @@ jobs:
         run: |
           ID=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.id)))')
           COMMAND=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.command)))')
+          REPEAT=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.repeat ?? 1)))')
+          FRAME_EVERY=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.frameEvery ?? 1)))')
           echo "id=$ID" >> "$GITHUB_OUTPUT"
           echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
-          echo "Request $ID: $COMMAND"
+          echo "repeat=$REPEAT" >> "$GITHUB_OUTPUT"
+          echo "frame_every=$FRAME_EVERY" >> "$GITHUB_OUTPUT"
+          echo "Request $ID: $COMMAND repeat=$REPEAT frameEvery=$FRAME_EVERY"
 
       - name: No request yet
         if: steps.request.outputs.id == '0'
@@ -37,72 +41,66 @@ jobs:
           REQUEST_ID: ${{ steps.request.outputs.id }}
           HEALTH_URL: https://echo-front.k69ysrndm7.workers.dev/api/health
         run: |
-          LAST_ENABLED="unknown"
-          LAST_ID="unknown"
           for i in {1..60}; do
             BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
             ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // false')
             LIVE_ID=$(printf '%s' "$BODY" | jq -r '.engineCommandRequestId // 0')
-            LAST_ENABLED="$ENABLED"
-            LAST_ID="$LIVE_ID"
-            if [ $i -eq 1 ] || [ $((i % 10)) -eq 0 ]; then
-              echo "Live engine state: enabled=$ENABLED requestId=$LIVE_ID; wanted requestId=$REQUEST_ID"
-            fi
             if [ "$ENABLED" = "true" ] && [ "$LIVE_ID" = "$REQUEST_ID" ]; then
               echo "Live Worker has engine request $LIVE_ID and control is enabled."
               exit 0
             fi
             sleep 3
           done
-          echo "Live Worker never exposed request $REQUEST_ID. Final state: enabled=$LAST_ENABLED requestId=$LAST_ID"
+          echo "Live Worker never exposed request $REQUEST_ID"
           exit 1
 
       - name: Invoke compiled engine command
         if: steps.request.outputs.id != '0'
         env:
           REQUEST_ID: ${{ steps.request.outputs.id }}
+          REPEAT: ${{ steps.request.outputs.repeat }}
+          FRAME_EVERY: ${{ steps.request.outputs.frame_every }}
         run: |
-          : > engine-command-result.json
-          LAST_STATUS="000"
-          for i in {1..30}; do
+          : > engine-command-results.jsonl
+          : > engine-command-frames.jsonl
+          LIMIT=$(( REPEAT > 0 ? REPEAT : 1 ))
+          FRAME=$(( FRAME_EVERY > 0 ? FRAME_EVERY : 1 ))
+          for iteration in $(seq 1 "$LIMIT"); do
+            TMP=$(mktemp)
             STATUS=$(curl --max-time 15 --silent --show-error \
               -X POST \
               -H 'Content-Type: application/json' \
-              --data "{\"requestId\":${REQUEST_ID}}" \
-              --output engine-command-result.json \
+              --data "{\"requestId\":${REQUEST_ID},\"iteration\":${iteration}}" \
+              --output "$TMP" \
               --write-out '%{http_code}' \
               https://echo-front.k69ysrndm7.workers.dev/api/engine-command || true)
-            LAST_STATUS="${STATUS:-000}"
-            echo "Engine command HTTP $LAST_STATUS (attempt $i)"
-            if [ -s engine-command-result.json ]; then
-              jq . engine-command-result.json || cat engine-command-result.json
-            else
-              echo '{"ok":false,"error":"empty engine command response"}' > engine-command-result.json
+            echo "Engine command iteration $iteration HTTP ${STATUS:-000}"
+            if [ "${STATUS:-000}" -lt 200 ] || [ "${STATUS:-000}" -ge 300 ]; then
+              cat "$TMP" || true
+              rm -f "$TMP"
+              exit 1
             fi
-
-            case "$LAST_STATUS" in
-              2??)
-                exit 0
-                ;;
-              409)
-                echo "Compiled Worker is fresh but the Durable Object may still be on the previous isolate; retrying."
-                sleep 2
-                ;;
-              *)
-                echo "Engine command failed with HTTP $LAST_STATUS"
-                exit 1
-                ;;
-            esac
+            jq -c . "$TMP" >> engine-command-results.jsonl
+            if [ $((iteration % FRAME)) -eq 0 ]; then
+              jq -c . "$TMP" >> engine-command-frames.jsonl
+              echo "Recorded observation frame at iteration $iteration"
+            fi
+            PHASE=$(jq -r '[.response.result[]?.result?.battleRoyale?.phase // empty] | last // empty' "$TMP")
+            rm -f "$TMP"
+            if [ "$PHASE" = "ended" ]; then
+              echo "Battle royale ended at iteration $iteration"
+              break
+            fi
           done
-          echo "Engine command never became executable; final HTTP status $LAST_STATUS"
-          exit 1
 
       - uses: actions/upload-artifact@v4
         if: always() && steps.request.outputs.id != '0'
         with:
           name: engine-command-${{ steps.request.outputs.id }}
-          path: engine-command-result.json
-          if-no-files-found: error
+          path: |
+            engine-command-results.jsonl
+            engine-command-frames.jsonl
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Summary
@@ -111,8 +109,8 @@ jobs:
           echo "### Engine command" >> "$GITHUB_STEP_SUMMARY"
           echo "Request: ${{ steps.request.outputs.id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Command: ${{ steps.request.outputs.command }}" >> "$GITHUB_STEP_SUMMARY"
-          if [ -s engine-command-result.json ]; then
-            cat engine-command-result.json >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No response body was captured." >> "$GITHUB_STEP_SUMMARY"
+          echo "Repeat: ${{ steps.request.outputs.repeat }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Frame every: ${{ steps.request.outputs.frame_every }} iterations" >> "$GITHUB_STEP_SUMMARY"
+          if [ -s engine-command-frames.jsonl ]; then
+            echo "Frames captured: $(wc -l < engine-command-frames.jsonl)" >> "$GITHUB_STEP_SUMMARY"
           fi
