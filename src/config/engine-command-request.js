@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 47,
+  id: 48,
   mode: "battle-royale",
-  room: "engine-lab-parachute-47",
+  room: "engine-lab-parachute-48",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -11,9 +11,9 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         command: "entity.spawn",
         args: {
           spec: {
-            id: "engine-parachute-47",
+            id: "engine-parachute-48",
             kind: "human",
-            name: "Warehouse Air Entry Pilot",
+            name: "Air Door Pilot",
             bot: false,
             team: 999999,
             health: 200,
@@ -24,32 +24,14 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [2000000300000] }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 1, now: 2000000300050 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
-      { command: "game.step", args: { dt: 0.05, steps: 100, now: 2000000300100 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
-      {
-        command: "service.call",
-        args: {
-          service: "match-api",
-          method: "handleInput",
-          arguments: ["engine-parachute-47", { parachutePressed: true, forward: 1 }, 2000000305100]
-        }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 50, now: 2000000305150 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
-      {
-        command: "service.call",
-        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-47", {}, 2000000307650] }
+        args: { service: "battle-royale", method: "arm", arguments: [2000000400000] }
       },
       {
         command: "service.call",
         args: {
           service: "parachute",
           method: "launch",
-          arguments: ["engine-parachute-47", { "altitude": 20, "x": 87, "z": 0, "angle": -1.57079632679 }, 2000000307700]
+          arguments: ["engine-parachute-48", { "altitude": 20, "x": 83.5, "z": 0, "angle": -1.57079632679 }, 2000000400050]
         }
       },
       {
@@ -57,43 +39,41 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["engine-parachute-47", { parachutePressed: true, forward: 1 }, 2000000307750]
+          arguments: ["engine-parachute-48", { parachutePressed: true, forward: 1 }, 2000000400100]
         }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 50, now: 2000000307800 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
-      { command: "game.step", args: { dt: 0.05, steps: 20, now: 2000000310300 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
-      { command: "game.step", args: { dt: 0.05, steps: 12, now: 2000000311300 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
+      { command: "game.step", args: { dt: 0.05, steps: 50, now: 2000000400150 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-48" } },
+      { command: "game.step", args: { dt: 0.05, steps: 8, now: 2000000402650 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-48" } },
+      { command: "game.step", args: { dt: 0.05, steps: 6, now: 2000000403050 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-48" } },
       {
         command: "service.call",
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["engine-parachute-47", { forward: 1, interactPressed: true }, 2000000311900]
+          arguments: ["engine-parachute-48", { forward: 1, interactPressed: true }, 2000000403350]
         }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 2, now: 2000000311950 } },
+      { command: "game.step", args: { dt: 0.05, steps: 1, now: 2000000403400 } },
       {
         command: "service.call",
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["engine-parachute-47", { forward: 1 }, 2000000312050]
+          arguments: ["engine-parachute-48", { forward: 1 }, 2000000403450]
         }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 16, now: 2000000312100 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-47" } },
+      { command: "game.step", args: { dt: 0.05, steps: 8, now: 2000000403500 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-48" } },
+      { command: "game.step", args: { dt: 0.05, steps: 8, now: 2000000403900 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-48" } },
       {
         command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-47"] }
-      },
-      {
-        command: "service.call",
-        args: { service: "battle-royale", method: "status", arguments: [2000000312900] }
+        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-48"] }
       }
     ]
   },
-  requestedAt: "2026-08-26T19:50:00Z"
+  requestedAt: "2026-08-26T19:55:00Z"
 });
