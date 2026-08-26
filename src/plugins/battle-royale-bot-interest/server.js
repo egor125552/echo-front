@@ -2,14 +2,16 @@ export const BOT_INTEREST_CAPACITY = 5;
 export const BOT_INTEREST_ACTIVATION_RADIUS = 180;
 export const BOT_INTEREST_VISIT_MS = 45_000;
 export const BOT_INTEREST_COOLDOWN_MS = 25_000;
-export const BOT_HEARING_FOOTSTEP_TTL_MS = 5_500;
+export const BOT_HEARING_FOOTSTEP_TTL_MS = 7_000;
 export const BOT_HEARING_WEAPON_TTL_MS = 8_000;
 export const BOT_WEAPON_INVESTIGATION_CAP = 6;
+export const BOT_HEARING_REPEAT_WINDOW_MS = 3_000;
+export const BOT_HEARING_MAX_CONFIDENCE = 4;
 export const BOT_INTEREST_REACHED_DISTANCE = 2.4;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["bot-controller", "entities", "teams", "spatial-grid", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -62,12 +64,13 @@ function isInvestigatableSound(key) {
   return value.startsWith("weapon.") || value.startsWith("footstep.");
 }
 
-function soundPriority(key) {
-  return String(key ?? "").startsWith("weapon.") ? 2 : 1;
+function soundPriority(sound) {
+  if (String(sound?.key ?? "").startsWith("weapon.")) return 3;
+  return sound?.gait === "run" ? 1.35 : 1;
 }
 
-function soundTtl(key) {
-  return String(key ?? "").startsWith("weapon.")
+function soundTtl(sound) {
+  return String(sound?.key ?? "").startsWith("weapon.")
     ? BOT_HEARING_WEAPON_TTL_MS
     : BOT_HEARING_FOOTSTEP_TTL_MS;
 }
@@ -151,7 +154,7 @@ export async function setup(ctx) {
       z: Number(sound.z) || 0,
     };
     const sourceTeam = teams.teamOf(sound.entityId);
-    const priority = soundPriority(sound.key);
+    const priority = soundPriority(sound);
     const candidates = [];
 
     for (const nearby of grid.query(sourcePosition, radius, now)) {
@@ -163,13 +166,13 @@ export async function setup(ctx) {
       const occlusion = typeof map.acousticOcclusionBetween === "function"
         ? Math.max(0, Math.min(1, Number(map.acousticOcclusionBetween(nearby.transform, sourcePosition)) || 0))
         : 0;
-      const effectiveRadius = radius * Math.max(0.22, 1 - occlusion * 0.7);
+      const effectiveRadius = radius * Math.max(0.35, 1 - occlusion * 0.55);
       if (distance > effectiveRadius) continue;
       candidates.push({ bot, distance });
     }
 
     candidates.sort((a, b) => a.distance - b.distance || String(a.bot.id).localeCompare(String(b.bot.id)));
-    const selected = priority === 2
+    const selected = priority >= 3
       ? candidates.slice(0, BOT_WEAPON_INVESTIGATION_CAP)
       : candidates;
 
@@ -177,15 +180,24 @@ export async function setup(ctx) {
     for (const { bot } of selected) {
       const previous = heard.get(bot.id);
       if (previous && previous.expiresAt > now && previous.priority > priority) continue;
+      const repeated = previous
+        && previous.sourceId === sound.entityId
+        && now - (previous.heardAt ?? -Infinity) <= BOT_HEARING_REPEAT_WINDOW_MS;
+      const confidence = repeated
+        ? Math.min(BOT_HEARING_MAX_CONFIDENCE, (previous.confidence ?? 1) + 1)
+        : 1;
       heard.set(bot.id, {
         kind: "sound-interest",
         sourceId: sound.entityId,
         key: sound.key,
+        gait: sound.gait ?? null,
         priority,
+        confidence,
+        heardAt: now,
         x: sourcePosition.x,
         y: sourcePosition.y,
         z: sourcePosition.z,
-        expiresAt: now + soundTtl(sound.key),
+        expiresAt: now + soundTtl(sound),
       });
       listeners += 1;
     }
@@ -230,7 +242,10 @@ export async function setup(ctx) {
     };
   }
 
-  ctx.events.on("sound:spatial", (sound) => recordSound(sound, Date.now()));
+  ctx.events.on("sound:spatial", (sound) => {
+    const eventNow = Number.isFinite(sound?.now) ? Number(sound.now) : Date.now();
+    recordSound(sound, eventNow);
+  });
   ctx.events.on("entity:removed", ({ entityId }) => {
     assignments.delete(entityId);
     cooldowns.delete(entityId);
