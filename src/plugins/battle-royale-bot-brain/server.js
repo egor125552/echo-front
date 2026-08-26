@@ -6,10 +6,11 @@ export const BOT_DEFENSIVE_RESPONSE_COOLDOWN_MS = 2_500;
 export const BOT_SOUND_INVESTIGATION_MS = 30_000;
 export const BOT_SOUND_SEARCH_MS = 12_000;
 export const BOT_SOUND_SEARCH_REACHED = 1.8;
+export const BOT_SOUND_INVESTIGATION_REACHED = 2.2;
 
 export const manifest = {
   id: "bot-brain",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: ["bot-controller", "entities", "battle-royale", "map-test-arena", "bot-state-machine"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -416,6 +417,14 @@ export async function setup(ctx) {
       && Number(context.interestTarget.heardAt) > Number(previousDecision?.heardAt ?? -Infinity);
     const visibleThreat = visibleEnemies.length > 0;
     const traversalActive = Boolean(context.traversal?.active && context.traversal?.route);
+    const reachedInvestigation = Boolean(
+      context.investigationReached
+      || (
+        machineState.machineState === "investigate"
+        && previousDecision?.target?.kind === "sound-interest"
+        && distance3(transform, previousDecision.target) <= BOT_SOUND_INVESTIGATION_REACHED
+      )
+    );
 
     const meta = {
       now,
@@ -423,7 +432,7 @@ export async function setup(ctx) {
       visibleThreat,
       freshSound,
       traversalActive,
-      investigationReached: Boolean(context.investigationReached),
+      investigationReached: reachedInvestigation,
       force: false,
     };
 
@@ -481,7 +490,7 @@ export async function setup(ctx) {
 
     if (
       machineState.machineState === "investigate"
-      && context.investigationReached
+      && reachedInvestigation
       && previousDecision?.target?.kind === "sound-interest"
       && !urgent
     ) {
