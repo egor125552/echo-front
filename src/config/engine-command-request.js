@@ -1,12 +1,34 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 37,
+  id: 38,
   mode: "battle-royale",
-  room: "engine-lab-decoy-search-36",
+  room: "engine-lab-isolated-warehouse-38",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: {
     commands: [
+      { command: "entity.remove", args: { entityId: "br-bot-1" } },
+      { command: "entity.remove", args: { entityId: "br-bot-3" } },
+      { command: "entity.remove", args: { entityId: "br-bot-4" } },
+      { command: "entity.remove", args: { entityId: "br-bot-5" } },
+      { command: "entity.remove", args: { entityId: "br-bot-6" } },
+      { command: "entity.remove", args: { entityId: "br-bot-7" } },
+      { command: "entity.remove", args: { entityId: "br-bot-8" } },
+      { command: "entity.remove", args: { entityId: "br-bot-9" } },
+      { command: "entity.remove", args: { entityId: "br-bot-10" } },
+      { command: "entity.remove", args: { entityId: "br-bot-11" } },
+      { command: "entity.remove", args: { entityId: "br-bot-12" } },
+      { command: "entity.remove", args: { entityId: "br-bot-13" } },
+      { command: "entity.remove", args: { entityId: "br-bot-14" } },
+      { command: "entity.remove", args: { entityId: "br-bot-15" } },
+      { command: "entity.remove", args: { entityId: "br-bot-16" } },
+      { command: "entity.spawn", args: { spec: { id: "engine-player-38", kind: "human", name: "Engine Provoker", bot: false, team: 100001, health: 200, weapons: ["pistol"], position: { x: 50, y: 3.2, z: 0, angle: 1.5707963267948966 } } } },
+      { command: "service.call", args: { service: "physics", method: "teleport", arguments: ["br-bot-2", { x: 82, y: 0, z: 0 }] } },
+      { command: "component.patch", args: { entityId: "br-bot-2", component: "Transform", patch: { x: 82, y: 0, z: 0, angle: -1.5707963267948966 } } },
+      { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [] } },
+      { command: "game.step", args: { dt: 0.05, steps: 140 } },
+      { command: "event.emit", args: { event: "sound:spatial", payload: { entityId: "engine-player-38", key: "weapon.pistol", x: 50, y: 3.2, z: 0, radius: 90 } } },
+      { command: "game.step", args: { dt: 0.05, steps: 100 } },
       { command: "bot.inspect", args: { entityId: "br-bot-2" } },
       { command: "service.call", args: { service: "bot-brain", method: "stateFor", arguments: ["br-bot-2"] } },
       { command: "game.step", args: { dt: 0.05, steps: 200 } },
@@ -15,8 +37,9 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "game.step", args: { dt: 0.05, steps: 200 } },
       { command: "bot.inspect", args: { entityId: "br-bot-2" } },
       { command: "service.call", args: { service: "bot-brain", method: "stateFor", arguments: ["br-bot-2"] } },
-      { command: "service.call", args: { service: "br-observer", method: "snapshot", arguments: [{ resetInterval: true, sampleLimit: 64 }] } }
+      { command: "game.step", args: { dt: 0.05, steps: 200 } },
+      { command: "bot.inspect", args: { entityId: "br-bot-2" } }
     ]
   },
-  requestedAt: "2026-08-26T13:49:00Z"
+  requestedAt: "2026-08-26T13:56:00Z"
 });
