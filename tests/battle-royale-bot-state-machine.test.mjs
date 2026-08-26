@@ -24,6 +24,8 @@ const heardGunshot = Object.freeze({
   kind: "sound-interest",
   sourceId: "enemy",
   key: "weapon.pistol.fire",
+  priority: 3,
+  confidence: 1,
   heardAt: 1000,
   x: 60,
   y: 3.2,
@@ -164,6 +166,121 @@ test("real danger still interrupts protected sound work", () => {
     preserveCommittedSoundWork("search", current, urgentTraversal, { visibleThreat: true }, 6000),
     urgentTraversal,
   );
+});
+
+test("equal-priority gunfire from another source cannot steal committed sound work", async () => {
+  const { shouldReplaceCommittedSound } = await import("../src/plugins/battle-royale-bot-state-machine/server.js");
+  const current = {
+    goal: "investigate",
+    target: heardGunshot,
+    heardAt: heardGunshot.heardAt,
+    investigateUntil: 30_000,
+    holdUntil: 30_000,
+  };
+  const otherGunshot = {
+    kind: "sound-interest",
+    sourceId: "other-enemy",
+    key: "weapon.rifle.fire",
+    priority: 3,
+    confidence: 1,
+    heardAt: 2000,
+    x: 90,
+    y: 0,
+    z: 20,
+  };
+  const candidate = {
+    goal: "investigate",
+    target: otherGunshot,
+    heardAt: otherGunshot.heardAt,
+    investigateUntil: 31_000,
+    holdUntil: 31_000,
+  };
+
+  assert.equal(shouldReplaceCommittedSound(current, candidate), false);
+  assert.deepEqual(
+    preserveCommittedSoundWork("investigate", current, candidate, { freshSound: true }, 2100),
+    current,
+  );
+});
+
+test("new sound from the same moving source refreshes its investigation", async () => {
+  const { shouldReplaceCommittedSound } = await import("../src/plugins/battle-royale-bot-state-machine/server.js");
+  const current = {
+    goal: "investigate",
+    target: heardGunshot,
+    heardAt: heardGunshot.heardAt,
+    investigateUntil: 30_000,
+    holdUntil: 30_000,
+  };
+  const moved = {
+    ...heardGunshot,
+    heardAt: 2500,
+    x: 64,
+    z: 2,
+  };
+  const candidate = {
+    goal: "investigate",
+    target: moved,
+    heardAt: moved.heardAt,
+    investigateUntil: 32_000,
+    holdUntil: 32_000,
+  };
+
+  assert.equal(shouldReplaceCommittedSound(current, candidate), true);
+  assert.deepEqual(
+    preserveCommittedSoundWork("investigate", current, candidate, { freshSound: true }, 2600),
+    candidate,
+  );
+});
+
+test("combat interruption suspends a gunshot investigation and resumes it after danger", async () => {
+  const [{ PluginHost }, entitiesPlugin, botControllerPlugin, rolloutPlugin, stateMachinePlugin] = await Promise.all([
+    import("../src/core/plugin-host.js"),
+    import("../src/plugins/entities/server.js"),
+    import("../src/plugins/bot-controller/server.js"),
+    import("../src/plugins/battle-royale-bot-rollout/server.js"),
+    import("../src/plugins/battle-royale-bot-state-machine/server.js"),
+  ]);
+  const host = await new PluginHost({
+    plugins: [entitiesPlugin, botControllerPlugin, rolloutPlugin, stateMachinePlugin],
+  }).start();
+  const machine = host.services.get("bot-state-machine");
+  const botId = "br-bot-resume-test";
+
+  const investigation = machine.resolve(botId, {
+    goal: "investigate",
+    target: heardGunshot,
+    heardAt: heardGunshot.heardAt,
+    investigateUntil: 30_000,
+    holdUntil: 30_000,
+  }, { now: 1500, force: true, freshSound: true });
+  assert.equal(investigation.goal, "investigate");
+
+  const combat = machine.resolve(botId, {
+    goal: "engage",
+    targetEntityId: "attacker",
+    holdUntil: 4000,
+  }, { now: 2000, visibleThreat: true });
+  assert.equal(combat.goal, "engage");
+  assert.equal(machine.suspendedSoundFor(botId, 2100)?.target?.sourceId, "enemy");
+
+  const resumed = machine.resolve(botId, {
+    goal: "investigate",
+    target: {
+      kind: "poi-interest",
+      group: "warehouse",
+      x: 66,
+      y: 0,
+      z: 6,
+    },
+    holdUntil: 5000,
+  }, { now: 2600 });
+
+  assert.equal(resumed.goal, "investigate");
+  assert.equal(resumed.target?.kind, "sound-interest");
+  assert.equal(resumed.target?.sourceId, "enemy");
+  assert.equal(machine.suspendedSoundFor(botId, 2700), null);
+  await host.stop();
 });
 
 test("XState orchestration is enabled for every BR bot", () => {
