@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "4.2.0",
+  version: "4.3.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -209,8 +209,12 @@ export async function setup(ctx) {
   }
 
   function setRouteInput(bot, transform, state, route, input, now) {
-    if (route?.kind === "stair") {
-      movement.setInput(bot.id, { ...input, strafe: 0, sprint: false });
+    if (route?.kind === "stair" || route?.kind === "door") {
+      movement.setInput(bot.id, {
+        ...input,
+        strafe: 0,
+        sprint: route.kind === "door" ? Boolean(input.sprint) : false,
+      });
       return;
     }
     setNavigatedInput(bot, transform, state, input, now);
@@ -238,6 +242,8 @@ export async function setup(ctx) {
         : headingError > 0.14
           ? 0.3
           : (preciseRoute.stairStage === "align" ? 0.55 : 0.82);
+    } else if (preciseRoute.kind === "door") {
+      forward = headingError > 0.55 ? 0 : (headingError > 0.2 ? 0.42 : 1);
     } else {
       forward = headingError > 1.35 ? 0.28 : 1;
     }
