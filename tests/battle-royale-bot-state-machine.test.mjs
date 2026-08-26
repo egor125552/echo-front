@@ -52,9 +52,10 @@ test("traversal is a first-class state instead of a navigation monkey patch", ()
   actor.stop();
 });
 
-test("rollout starts with exactly one XState canary bot", () => {
-  assert.equal(BOT_AI_ROLLOUT.mode, "canary");
+test("XState orchestration is enabled for every BR bot", () => {
+  assert.equal(BOT_AI_ROLLOUT.mode, "all");
   assert.equal(usesXStateBotBrain(BOT_AI_ROLLOUT.canaryBotId), true);
-  assert.equal(usesXStateBotBrain("br-bot-94"), BOT_AI_ROLLOUT.canaryBotId === "br-bot-94");
-  assert.equal(usesXStateBotBrain("br-bot-2"), BOT_AI_ROLLOUT.canaryBotId === "br-bot-2");
+  assert.equal(usesXStateBotBrain("br-bot-94"), true);
+  assert.equal(usesXStateBotBrain("br-bot-2"), true);
+  assert.equal(usesXStateBotBrain("br-bot-57"), true);
 });
