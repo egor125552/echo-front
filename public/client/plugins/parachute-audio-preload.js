@@ -1,6 +1,6 @@
 export const manifest = {
   id: "parachute-audio-preload",
-  requires: ["spatial-audio-web"],
+  requires: ["cloudflare-session", "spatial-audio-web"],
 };
 
 const ROOT = "/assets/audio/core/parachute";
@@ -10,7 +10,7 @@ export const PARACHUTE_AUDIO_URLS = [
   `${ROOT}/wind/turbulent-wind.mp3`,
   `${ROOT}/wind/wind-rush.mp3`,
   `${ROOT}/open-air/cut-sweep.mp3`,
-  `${ROOT}/open-air/debris-whoosh.mp3`,
+  `${ROOT}/open-air/deris-whoosh.mp3`,
   `${ROOT}/open-air/deploy-swish.mp3`,
   `${ROOT}/cloth/canvas-flap.mp3`,
   `${ROOT}/cloth/page-flutter.mp3`,
@@ -31,9 +31,23 @@ export const PARACHUTE_AUDIO_URLS = [
 
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
-  const preload = Promise.allSettled(PARACHUTE_AUDIO_URLS.map((url) => audio.load(url)));
+  let started = false;
+  let ready = Promise.resolve([]);
+
+  function start(mode) {
+    if (started || mode !== "battle-royale") return ready;
+    started = true;
+    ready = Promise.allSettled(PARACHUTE_AUDIO_URLS.map((url) => audio.load(url)));
+    return ready;
+  }
+
+  ctx.events.on("network:welcome", (data) => start(data?.mode));
+  ctx.events.on("game:snapshot", (snapshot) => start(snapshot?.mode));
+
   ctx.services.provide("parachute-audio-preload", {
     urls: PARACHUTE_AUDIO_URLS,
-    ready: preload,
+    start,
+    get started() { return started; },
+    get ready() { return ready; },
   });
 }
