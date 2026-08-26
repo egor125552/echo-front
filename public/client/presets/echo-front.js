@@ -13,6 +13,7 @@ import * as environmentAudio from "../plugins/environment-audio.js";
 import * as buildingAcoustics from "../plugins/building-acoustics.js";
 import * as battleRoyaleAudio from "../plugins/battle-royale-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
+import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
@@ -33,6 +34,7 @@ export const echoFrontClientPreset = [
   buildingAcoustics,
   battleRoyaleAudio,
   parachuteAudio,
+  parachuteDynamicsAudio,
   lowHealthAudio,
   hud,
   announcer,
