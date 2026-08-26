@@ -3,12 +3,13 @@ export const BOT_DECISION_HOLD_SPREAD_MS = 650;
 export const BOT_THREAT_MEMORY_MS = 3_500;
 export const BOT_DEFENSIVE_RESPONSE_MS = 900;
 export const BOT_DEFENSIVE_RESPONSE_COOLDOWN_MS = 2_500;
+export const BOT_SOUND_INVESTIGATION_MS = 30_000;
 export const BOT_SOUND_SEARCH_MS = 12_000;
 export const BOT_SOUND_SEARCH_REACHED = 1.8;
 
 export const manifest = {
   id: "bot-brain",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: ["bot-controller", "entities", "battle-royale", "map-test-arena", "bot-state-machine"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -242,6 +243,14 @@ function insideBuilding(position, building) {
     && Number(position?.z) <= building.maxZ;
 }
 
+function soundInvestigationDeadline(target, now, existing = null) {
+  const preserved = Number(existing);
+  if (Number.isFinite(preserved) && preserved > now) return preserved;
+  const heardAt = Number(target?.heardAt);
+  const base = Number.isFinite(heardAt) ? heardAt : now;
+  return Math.max(now + BOT_DECISION_HOLD_MIN_MS, base + BOT_SOUND_INVESTIGATION_MS);
+}
+
 function buildSearchWaypoints(sound, map) {
   const building = map?.building;
   if (insideBuilding(sound, building)) {
@@ -328,6 +337,13 @@ export async function setup(ctx) {
       heardAt: raw.heardAt ?? raw.target?.heardAt ?? null,
       holdUntil: Number(raw.holdUntil) || defaultHold(botId, now),
     };
+    if (decision.goal === "investigate" && decision.target?.kind === "sound-interest") {
+      decision.investigateUntil = soundInvestigationDeadline(
+        decision.target,
+        now,
+        raw.investigateUntil,
+      );
+    }
     if (decision.goal === "evade" && decision.target && !decision.moveTarget) {
       const transform = ctx.components.get(botId, "Transform");
       if (transform) decision.moveTarget = retreatPoint(transform, decision.target, profile);
@@ -418,6 +434,13 @@ export async function setup(ctx) {
       const carriedInvestigation = context.traversal.target?.kind === "sound-interest"
         ? context.traversal.target
         : (previousDecision?.resumeGoal === "investigate" ? previousDecision.resumeTarget : null);
+      const carriedInvestigationUntil = carriedInvestigation
+        ? soundInvestigationDeadline(
+            carriedInvestigation,
+            now,
+            previousDecision?.investigateUntil ?? previousDecision?.resumeInvestigateUntil,
+          )
+        : null;
       candidate = decorate(botId, {
         goal: "traverse",
         score: 1,
@@ -427,6 +450,7 @@ export async function setup(ctx) {
         resumeGoal: carriedInvestigation ? "investigate" : previousDecision?.resumeGoal ?? null,
         resumeTarget: carriedInvestigation ?? previousDecision?.resumeTarget ?? null,
         resumeHeardAt: carriedInvestigation?.heardAt ?? previousDecision?.resumeHeardAt ?? null,
+        resumeInvestigateUntil: carriedInvestigationUntil ?? previousDecision?.resumeInvestigateUntil ?? null,
         holdUntil: now + 450,
       }, profile, now);
       return stateMachine.resolve(botId, candidate, { ...meta, force: true });
@@ -443,6 +467,7 @@ export async function setup(ctx) {
         score: 1,
         target: previousDecision.resumeTarget,
         heardAt: previousDecision.resumeHeardAt ?? previousDecision.resumeTarget.heardAt ?? null,
+        investigateUntil: previousDecision.resumeInvestigateUntil ?? null,
         holdUntil: now + 900,
       }, profile, now);
       return stateMachine.resolve(botId, candidate, { ...meta, force: true });
@@ -475,6 +500,22 @@ export async function setup(ctx) {
         }, profile, now);
         return stateMachine.resolve(botId, candidate, { ...meta, force: true });
       }
+    }
+
+    if (
+      machineState.machineState === "investigate"
+      && previousDecision?.target?.kind === "sound-interest"
+      && now < Number(previousDecision.investigateUntil || 0)
+      && !urgent
+      && !context.zoneTarget
+    ) {
+      candidate = decorate(botId, {
+        ...previousDecision,
+        goal: "investigate",
+        investigateUntil: previousDecision.investigateUntil,
+        holdUntil: Math.min(Number(previousDecision.investigateUntil), now + 900),
+      }, profile, now);
+      return stateMachine.resolve(botId, candidate, meta);
     }
 
     if (attacker && now < threat.forceUntil) {
