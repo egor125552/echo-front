@@ -24,9 +24,11 @@ export async function handleEngineControlRequest(room, request) {
   if (!Number.isInteger(requestId) || requestId !== ENGINE_COMMAND_REQUEST.id) {
     return Response.json({ ok: false, error: "Unknown engine request" }, { status: 409, headers });
   }
+  const iteration = Math.max(0, Math.floor(Number(body?.iteration) || 0));
+  const resultKey = `${LAST_RESULT_KEY}:${requestId}:${iteration}`;
 
-  const previous = await room.ctx.storage.get(LAST_RESULT_KEY);
-  if (previous?.requestId === requestId) {
+  const previous = await room.ctx.storage.get(resultKey);
+  if (previous?.requestId === requestId && previous?.iteration === iteration) {
     return Response.json({ ...previous, replayed: true }, { headers });
   }
 
@@ -40,11 +42,12 @@ export async function handleEngineControlRequest(room, request) {
   const result = {
     ok: Boolean(response?.ok),
     requestId,
+    iteration,
     mode,
     command: ENGINE_COMMAND_REQUEST.command,
     executedAt: Date.now(),
     response,
   };
-  await room.ctx.storage.put(LAST_RESULT_KEY, result);
+  await room.ctx.storage.put(resultKey, result);
   return Response.json(result, { headers });
 }
