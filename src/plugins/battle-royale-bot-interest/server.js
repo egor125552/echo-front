@@ -16,7 +16,7 @@ export const BOT_EXPLORATION_TIME_SPREAD_MS = 6_000;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
-  version: "1.3.0",
+  version: "1.3.1",
   requires: ["bot-controller", "entities", "teams", "spatial-grid", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -290,14 +290,7 @@ export async function setup(ctx) {
     clearExpired(botId, now);
 
     const sound = heard.get(botId);
-    if (sound) {
-      const source = entities.get(sound.sourceId);
-      if (!source?.alive || distance3(transform, sound) <= BOT_INTEREST_REACHED_DISTANCE) {
-        heard.delete(botId);
-      } else {
-        return { ...sound };
-      }
-    }
+    if (sound) return { ...sound };
 
     let assignment = assignments.get(botId);
     let point = pointForAssignment(assignment);
