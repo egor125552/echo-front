@@ -3,7 +3,7 @@ export const BOT_DECISION_HOLD_SPREAD_MS = 650;
 
 export const manifest = {
   id: "bot-brain",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["bot-controller", "entities", "battle-royale"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -55,6 +55,19 @@ function zonePressure(zoneTarget) {
   return clamp01((distance - radius * 0.72) / (radius * 0.28));
 }
 
+function soundInterestScore(profile, ownDurability, interestTarget) {
+  if (interestTarget?.kind !== "sound-interest") return null;
+  const confidence = clamp01((Number(interestTarget.confidence) || 1) / 4);
+  const priority = clamp01((Number(interestTarget.priority) || 1) / 3);
+  return clamp01(
+    0.48
+    + profile.curiosity * 0.24
+    + ownDurability * 0.05
+    + confidence * 0.16
+    + priority * 0.12
+  );
+}
+
 export function chooseUtilityDecision({
   profile,
   ownDurability = 1,
@@ -88,9 +101,6 @@ export function chooseUtilityDecision({
   const rangeAdvantage = target && nearestDistance <= safeProfile.preferredRange + 2 ? 1 : 0;
   const ringPressure = zonePressure(zoneTarget);
 
-  // A BR encounter is a choice, not a compulsory deathmatch. Strong/aggressive bots
-  // still press wounded or favorable targets, while cautious bots can break an equal
-  // long-range contact before every meeting turns into a guaranteed elimination.
   const engageScore = target ? clamp01(
     0.12
     + safeProfile.aggression * 0.48
@@ -120,12 +130,16 @@ export function chooseUtilityDecision({
   const huntScore = !target && memory ? clamp01(
     0.3 + safeProfile.persistence * 0.52 + durability * 0.12
   ) : 0;
-  const interestScore = !target && interestTarget ? clamp01(
-    0.22 + safeProfile.curiosity * 0.58 + durability * 0.08
-  ) : 0;
+  const heardScore = !target ? soundInterestScore(safeProfile, durability, interestTarget) : null;
+  const interestScore = !target && interestTarget
+    ? (heardScore ?? clamp01(0.22 + safeProfile.curiosity * 0.58 + durability * 0.08))
+    : 0;
 
   if (zoneTarget && !target) {
-    return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
+    const urgentZoneScore = zoneScore + (ringPressure > 0.65 ? 0.16 : 0);
+    if (urgentZoneScore >= huntScore && urgentZoneScore >= interestScore) {
+      return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
+    }
   }
 
   if (target) {
@@ -155,11 +169,14 @@ export function chooseUtilityDecision({
     };
   }
 
-  if (zoneTarget && zoneScore >= huntScore && zoneScore >= interestScore) {
-    return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount: 0 };
+  if (interestTarget && interestScore > huntScore) {
+    return { goal: "investigate", score: interestScore, target: interestTarget, threatCount: 0 };
   }
-  if (memory && huntScore >= interestScore) {
+  if (memory) {
     return { goal: "hunt", score: huntScore, target: memory.transform ?? memory, memory, threatCount: 0 };
+  }
+  if (zoneTarget) {
+    return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount: 0 };
   }
   if (interestTarget) {
     return { goal: "investigate", score: interestScore, target: interestTarget, threatCount: 0 };
@@ -233,7 +250,9 @@ export async function setup(ctx) {
       : null;
 
     const peacefulCommitment = previous && ["roam", "investigate", "hunt", "zone"].includes(previous.goal);
-    const mayKeepPeacefulPlan = peacefulCommitment && !hasVisibleThreat && !urgentZone;
+    const freshSound = context.interestTarget?.kind === "sound-interest"
+      && Number(context.interestTarget.heardAt) > Number(previous?.heardAt ?? -Infinity);
+    const mayKeepPeacefulPlan = peacefulCommitment && !hasVisibleThreat && !urgentZone && !freshSound;
     const mayKeepCombatPlan = Boolean(currentPreviousTarget)
       && (previous?.goal === "engage" || previous?.goal === "evade");
 
@@ -262,6 +281,7 @@ export async function setup(ctx) {
     const decision = {
       ...raw,
       targetEntityId: raw.target?.entityId ?? raw.memory?.entityId ?? null,
+      heardAt: raw.target?.heardAt ?? null,
       holdUntil,
       profile,
     };
