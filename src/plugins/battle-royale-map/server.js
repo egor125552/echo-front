@@ -46,7 +46,7 @@ const FIRST_RING_SKIPS = new Set([1, 9, 11, 19]);
 
 export const manifest = {
   id: "map-test-arena",
-  version: "4.2.2",
+  version: "4.2.3",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -213,6 +213,13 @@ function descendingStairCaptured(from) {
     && Number(from?.y ?? UPPER_FLOOR_Y) < UPPER_FLOOR_Y - 0.08;
 }
 
+function midStairTraversal(from) {
+  const y = Number(from?.y ?? 0);
+  return insideRect(from, STAIR, 0.05)
+    && y > 0.15
+    && y < UPPER_FLOOR_Y - 0.15;
+}
+
 function stairWaypoint(from, goingUp) {
   if (goingUp) {
     const bottom = { x: STAIR.maxX - 0.5, y: 0, z: BUILDING_CENTER_Z };
@@ -249,7 +256,7 @@ export function navigationWaypoint(from, target) {
   }
 
   if (fromInside && targetInside) {
-    if (insideRect(from, STAIR, 0.45)) return stairWaypoint(from, targetUpper);
+    if (midStairTraversal(from)) return stairWaypoint(from, targetUpper);
     if (fromUpper !== targetUpper) return stairWaypoint(from, targetUpper);
     if (fromUpper && targetUpper) return upperDoorWaypoint(from, target);
   }
