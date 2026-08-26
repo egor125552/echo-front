@@ -18,7 +18,6 @@ import * as spatialGrid from "../plugins/battle-royale-spatial-grid/server.js";
 import * as botPerception from "../plugins/battle-royale-bot-perception/server.js";
 import * as battleRoyale from "../plugins/battle-royale/server.js";
 import * as parachute from "../plugins/battle-royale-parachute/server.js";
-import * as highDrop from "../plugins/battle-royale-high-drop/server.js";
 import * as botInterest from "../plugins/battle-royale-bot-interest/server.js";
 import * as warehousePriority from "../plugins/battle-royale-bot-warehouse-priority/server.js";
 import * as botAiRollout from "../plugins/battle-royale-bot-rollout/server.js";
@@ -52,7 +51,6 @@ export const battleRoyalePreset = [
   botPerception,
   battleRoyale,
   parachute,
-  highDrop,
   botInterest,
   warehousePriority,
   botAiRollout,
