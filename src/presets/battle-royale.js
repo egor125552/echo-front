@@ -21,6 +21,7 @@ import * as botAiRollout from "../plugins/battle-royale-bot-rollout/server.js";
 import * as botStateMachine from "../plugins/battle-royale-bot-state-machine/server.js";
 import * as botBrain from "../plugins/battle-royale-bot-brain/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
+import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 
@@ -48,6 +49,7 @@ export const battleRoyalePreset = [
   botStateMachine,
   botBrain,
   botCombat,
+  botObserver,
   botFill,
   matchApi,
 ];
