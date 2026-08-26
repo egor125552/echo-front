@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 39,
+  id: 40,
   mode: "battle-royale",
-  room: "engine-lab-door-approach-39",
+  room: "engine-lab-door-approach-40",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -22,11 +22,11 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "entity.remove", args: { entityId: "br-bot-14" } },
       { command: "entity.remove", args: { entityId: "br-bot-15" } },
       { command: "entity.remove", args: { entityId: "br-bot-16" } },
-      { command: "entity.spawn", args: { spec: { id: "engine-player-39", kind: "human", name: "Door Target", bot: false, team: 100001, health: 200, weapons: ["pistol"], position: { x: 68, y: 0, z: 0, angle: 1.5707963267948966 } } } },
+      { command: "entity.spawn", args: { spec: { id: "engine-player-40", kind: "human", name: "Door Target", bot: false, team: 100001, health: 200, weapons: ["pistol"], position: { x: 68, y: 0, z: 0, angle: 1.5707963267948966 } } } },
       { command: "service.call", args: { service: "physics", method: "teleport", arguments: ["br-bot-2", { x: 84, y: 0, z: 0 }] } },
       { command: "component.patch", args: { entityId: "br-bot-2", component: "Transform", patch: { x: 84, y: 0, z: 0, angle: -1.5707963267948966 } } },
       { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [] } },
-      { command: "event.emit", args: { event: "sound:spatial", payload: { entityId: "engine-player-39", key: "weapon.pistol", x: 68, y: 0, z: 0, radius: 90 } } },
+      { command: "event.emit", args: { event: "sound:spatial", payload: { entityId: "engine-player-40", key: "weapon.pistol", x: 68, y: 0, z: 0, radius: 90 } } },
       { command: "game.step", args: { dt: 0.05, steps: 20 } },
       { command: "bot.inspect", args: { entityId: "br-bot-2" } },
       { command: "game.step", args: { dt: 0.05, steps: 20 } },
@@ -46,5 +46,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "service.call", args: { service: "bot-brain", method: "stateFor", arguments: ["br-bot-2"] } }
     ]
   },
-  requestedAt: "2026-08-26T18:10:00Z"
+  requestedAt: "2026-08-26T16:27:00Z"
 });
