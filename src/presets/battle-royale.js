@@ -28,6 +28,7 @@ import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
+import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -60,4 +61,5 @@ export const battleRoyalePreset = [
   botObserver,
   botFill,
   matchApi,
+  parachuteIntegration,
 ];
