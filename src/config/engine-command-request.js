@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 44,
+  id: 45,
   mode: "battle-royale",
-  room: "engine-lab-parachute-44",
+  room: "engine-lab-parachute-45",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -11,9 +11,9 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         command: "entity.spawn",
         args: {
           spec: {
-            id: "engine-parachute-44",
+            id: "engine-parachute-45",
             kind: "human",
-            name: "Parachute Physics Pilot",
+            name: "Parachute Safety Pilot",
             bot: false,
             team: 999999,
             health: 200,
@@ -24,110 +24,85 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [2000000000000] }
+        args: { service: "battle-royale", method: "arm", arguments: [2000000100000] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 1, now: 2000000006501 } },
+      { command: "game.step", args: { dt: 0.05, steps: 1, now: 2000000106501 } },
 
-      { command: "game.step", args: { dt: 0.05, steps: 30, now: 2000000006551 } },
+      { command: "game.step", args: { dt: 0.05, steps: 30, now: 2000000106551 } },
       {
         command: "service.call",
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["engine-parachute-44", { parachutePressed: true, forward: 1 }, 2000000008051]
+          arguments: ["engine-parachute-45", { parachutePressed: true }, 2000000108051]
         }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000000008101 } },
-      {
-        command: "service.call",
-        args: {
-          service: "match-api",
-          method: "handleInput",
-          arguments: ["engine-parachute-44", { forward: 1, strafe: 1 }, 2000000009901]
-        }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000000009951 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
-      {
-        command: "service.call",
-        args: {
-          service: "match-api",
-          method: "handleInput",
-          arguments: ["engine-parachute-44", {}, 2000000011951]
-        }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 130, now: 2000000012001 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
-      { command: "game.step", args: { dt: 0.05, steps: 180, now: 2000000018501 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-44"] }
-      },
+      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000000108101 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
+      { command: "game.step", args: { dt: 0.05, steps: 80, now: 2000000109901 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
+      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000000113901 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
+      { command: "game.step", args: { dt: 0.05, steps: 160, now: 2000000115901 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
 
       {
         command: "service.call",
-        args: {
-          service: "parachute",
-          method: "launch",
-          arguments: ["engine-parachute-44", { "altitude": 35, "x": 56, "z": 0, "angle": 0 }, 2000000027501]
-        }
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "match-api",
-          method: "handleInput",
-          arguments: ["engine-parachute-44", { parachutePressed: true, forward: -1 }, 2000000027551]
-        }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 170, now: 2000000027601 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-44"] }
-      },
-
-      {
-        command: "service.call",
-        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-44", {}, 2000000036101] }
+        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-45", {}, 2000000123901] }
       },
       {
         command: "service.call",
         args: {
           service: "parachute",
           method: "launch",
-          arguments: ["engine-parachute-44", { "altitude": 92, "x": -200, "z": -200, "angle": 0 }, 2000000036151]
+          arguments: ["engine-parachute-45", { "altitude": 92, "x": -200, "z": -200, "angle": 0 }, 2000000123951]
         }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 75, now: 2000000036201 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
-      { command: "game.step", args: { dt: 0.05, steps: 240, now: 2000000039951 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
+      { command: "game.step", args: { dt: 0.05, steps: 55, now: 2000000124001 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
+      { command: "game.step", args: { dt: 0.05, steps: 30, now: 2000000126751 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
+      { command: "game.step", args: { dt: 0.05, steps: 240, now: 2000000128251 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
 
       {
         command: "service.call",
         args: {
           service: "parachute",
           method: "launch",
-          arguments: ["engine-parachute-44", { "altitude": 60, "x": 200, "z": 200, "angle": 0 }, 2000000051951]
+          arguments: ["engine-parachute-45", { "altitude": 8, "x": 180, "z": 180, "angle": 0 }, 2000000140251]
         }
       },
       {
         command: "service.call",
-        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-44", { parachutePressed: true }, 2000000052001] }
+        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-45", { parachutePressed: true }, 2000000140301] }
       },
       {
         command: "service.call",
-        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-44", { parachutePressed: true }, 2000000052051] }
+        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-45", { parachutePressed: true }, 2000000140351] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 140, now: 2000000052101 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-44" } },
+      { command: "game.step", args: { dt: 0.05, steps: 50, now: 2000000140401 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } },
+
       {
         command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-44"] }
-      }
+        args: {
+          service: "parachute",
+          method: "launch",
+          arguments: ["engine-parachute-45", { "altitude": 60, "x": 200, "z": 200, "angle": 0 }, 2000000142901]
+        }
+      },
+      {
+        command: "service.call",
+        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-45", { parachutePressed: true }, 2000000142951] }
+      },
+      {
+        command: "service.call",
+        args: { service: "match-api", method: "handleInput", arguments: ["engine-parachute-45", { parachutePressed: true }, 2000000143001] }
+      },
+      { command: "game.step", args: { dt: 0.05, steps: 140, now: 2000000143051 } },
+      { command: "entity.inspect", args: { entityId: "engine-parachute-45" } }
     ]
   },
-  requestedAt: "2026-08-26T19:28:00Z"
+  requestedAt: "2026-08-26T19:31:00Z"
 });
