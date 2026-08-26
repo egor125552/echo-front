@@ -54,10 +54,11 @@ export default {
       const rawRoom = String(ENGINE_COMMAND_REQUEST.room || "public").slice(0, 64);
       const mode = normalizeGameMode(ENGINE_COMMAND_REQUEST.mode);
       const room = env.MATCH_ROOM.getByName(`${mode}:${rawRoom}`);
+      const iteration = Math.max(0, Math.floor(Number(body?.iteration) || 0));
       const forwarded = new Request(request.url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId: ENGINE_COMMAND_REQUEST.id }),
+        body: JSON.stringify({ requestId: ENGINE_COMMAND_REQUEST.id, iteration }),
       });
       return room.fetch(forwarded);
     }
