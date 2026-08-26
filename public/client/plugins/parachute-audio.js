@@ -75,6 +75,7 @@ export async function setup(ctx) {
   let lastCloth = null;
   let lastRig = null;
   let lastObstacleSoundAt = -Infinity;
+  let lastCanopyStrainAt = -Infinity;
 
   async function playOne(url, gain, fadeIn = 0) {
     try {
@@ -138,12 +139,24 @@ export async function setup(ctx) {
     const turnEnergy = clamp01(Math.abs(Number(state.turnRate) || 0) / 1.05);
     const brake = clamp01(state.brake);
     const landing = state.landingApproach ? 1 : 0;
+    const compression = clamp01(state.canopyCompression);
+    const indoor = state.canopyEnvironment === "indoor" ? 1 : 0;
 
-    return [
-      (0.48 * (1 - inflation) + 0.12 + 0.08 * air) * (1 - 0.18 * landing),
-      0.035 + 0.12 * inflation + 0.22 * turnEnergy + 0.06 * brake,
-      0.03 + 0.34 * inflation * glideEnergy + 0.10 * inflation,
-    ];
+    const broadWind = (
+      (0.48 * (1 - inflation) + 0.12 + 0.08 * air)
+      * (1 - 0.18 * landing)
+      * (1 - 0.24 * indoor)
+      * (1 - 0.20 * compression)
+    );
+    const turbulence = (
+      0.035 + 0.12 * inflation + 0.22 * turnEnergy + 0.06 * brake
+      + 0.27 * compression
+    );
+    const canopyFlow = (
+      0.03 + 0.34 * inflation * glideEnergy + 0.10 * inflation
+    ) * (1 - 0.72 * compression);
+
+    return [broadWind, turbulence, canopyFlow];
   }
 
   async function updateWind(state = {}, transition = 0.24) {
@@ -258,6 +271,50 @@ export async function setup(ctx) {
     }
   }
 
+  function playCanopyStrain(payload = {}) {
+    const now = performance.now();
+    if (now - lastCanopyStrainAt < 420) return;
+    lastCanopyStrainAt = now;
+    const compression = clamp01(payload.compression);
+    lastCloth = playRandom(
+      CLOTH,
+      0.05 + 0.17 * compression,
+      0.09 + 0.24 * compression,
+      lastCloth,
+      0.12,
+    );
+    if (compression > 0.42) {
+      later(() => {
+        lastRig = playRandom(
+          RIG,
+          0.045 + 0.08 * compression,
+          0.075 + 0.12 * compression,
+          lastRig,
+          0.07,
+        );
+      }, 90, 180);
+    }
+  }
+
+  function playDeployBlocked() {
+    openingGeneration += 1;
+    lastCloth = playRandom(CLOTH, 0.12, 0.23, lastCloth, 0.12);
+    later(() => {
+      lastRig = playRandom(RIG, 0.055, 0.12, lastRig, 0.06);
+    }, 90, 180);
+  }
+
+  function playCanopyCollapse(payload = {}) {
+    const compression = Math.max(0.7, clamp01(payload.compression));
+    lastCloth = playRandom(CLOTH, 0.28, 0.46, lastCloth, 0.035);
+    later(() => {
+      lastRig = playRandom(RIG, 0.14, 0.26, lastRig, 0.03);
+    }, 35, 85);
+    later(() => {
+      playRandom(CLOSE, 0.16 + 0.10 * compression, 0.27 + 0.12 * compression, null, 0.04);
+    }, 80, 150);
+  }
+
   function maybeFlightFoley(state) {
     if (state?.phase !== "deployed" || clamp01(state.inflation) < 0.92) return;
     const now = performance.now();
@@ -265,7 +322,8 @@ export async function setup(ctx) {
 
     const turn = clamp01(Math.abs(Number(state.turnRate) || 0) / 1.05);
     const brake = clamp01(state.brake);
-    const activity = Math.max(turn, brake * 0.75);
+    const compression = clamp01(state.canopyCompression);
+    const activity = Math.max(turn, brake * 0.75, compression * 0.9);
     const baseGain = 0.035 + activity * 0.08;
 
     if (Math.random() < 0.62) {
@@ -273,7 +331,7 @@ export async function setup(ctx) {
     } else {
       lastRig = playRandom(RIG, baseGain * 0.70, baseGain, lastRig, 0.04);
     }
-    nextFlightFoleyAt = now + randomBetween(1700, activity > 0.45 ? 2800 : 4400);
+    nextFlightFoleyAt = now + randomBetween(1500, activity > 0.45 ? 2400 : 4200);
   }
 
   function updateFromState(state) {
@@ -325,6 +383,21 @@ export async function setup(ctx) {
 
     if (packet.event === "parachute:obstacle-hit" || packet.event === "parachute:obstacle-impact") {
       playObstacleContact(payload);
+      return;
+    }
+
+    if (packet.event === "parachute:canopy-compressed") {
+      playCanopyStrain(payload);
+      return;
+    }
+
+    if (packet.event === "parachute:deploy-blocked") {
+      playDeployBlocked();
+      return;
+    }
+
+    if (packet.event === "parachute:canopy-collapse") {
+      playCanopyCollapse(payload);
       return;
     }
 
