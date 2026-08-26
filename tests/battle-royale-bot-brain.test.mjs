@@ -112,6 +112,34 @@ test("memory competes with curiosity and a persistent bot hunts its last known t
   assert.equal(decision.memory.entityId, "lost-enemy");
 });
 
+test("repeated fresh footsteps can pull attention away from stale visual memory", () => {
+  const decision = chooseUtilityDecision({
+    profile: {
+      aggression: 0.5,
+      caution: 0.6,
+      curiosity: 0.5,
+      persistence: 0.7,
+      preferredRange: 8,
+      flankBias: 0.5,
+    },
+    ownDurability: 1,
+    memory: { entityId: "old-target", transform: { x: 45, y: 0, z: 20 } },
+    interestTarget: {
+      kind: "sound-interest",
+      sourceId: "walking-player",
+      x: 9,
+      y: 0,
+      z: 2,
+      priority: 1,
+      confidence: 4,
+      heardAt: 50_000,
+    },
+  });
+
+  assert.equal(decision.goal, "investigate");
+  assert.equal(decision.target.sourceId, "walking-player");
+});
+
 test("curious bot investigates world information when there is no immediate threat", () => {
   const decision = chooseUtilityDecision({
     profile: {
