@@ -4,6 +4,7 @@ import { createEchoFrontGame } from "../src/server/game.js";
 import {
   BOT_REACTION_MIN_MS,
   BOT_REACTION_SPREAD_MS,
+  stairRouteMatchesTargetFloor,
 } from "../src/plugins/battle-royale-bot-combat/server.js";
 import { BOT_MAX_START_RADIUS } from "../src/plugins/battle-royale-bot-fill/server.js";
 import {
@@ -89,6 +90,19 @@ test("taking damage during a firefight cannot cancel the mandatory pause between
   assert.equal(input.fireHeld, false, "bot fired during its mandatory burst pause after taking damage");
 
   await game.host.stop();
+});
+
+test("a stair entry waypoint is discarded as soon as the bot has begun climbing toward the upper floor", () => {
+  const staleBottomRoute = { x: STAIR.maxX - 0.5, y: 0, z: BUILDING_CENTER_Z, kind: "stair" };
+  const upperTarget = { x: BUILDING_CENTER_X - 5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 4 };
+  const topExitRoute = { x: STAIR.minX - 0.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, kind: "stair" };
+
+  assert.equal(
+    stairRouteMatchesTargetFloor(staleBottomRoute, upperTarget, UPPER_FLOOR_Y),
+    false,
+    "old lower-entry route would pull a climbing bot back down the ramp",
+  );
+  assert.equal(stairRouteMatchesTargetFloor(topExitRoute, upperTarget, UPPER_FLOOR_Y), true);
 });
 
 test("an off-center bot aligns before entering the warehouse stair and reaches the upper floor without repeated ramp resets", async () => {
