@@ -228,3 +228,50 @@ test("an ordinary non-canary BR bot now keeps XState investigate and search stat
 
   await game.host.stop();
 });
+
+test("an ordinary BR bot physically enters the warehouse and searches after the gunshot source leaves", async () => {
+  const { game, now } = await activeBattleRoyale("warehouse-search-runtime-human");
+  const hunter = keepBot(game, "br-bot-2");
+  const movement = game.host.services.get("movement");
+  const grid = game.host.services.get("spatial-grid");
+  const brain = game.host.services.get("bot-brain");
+
+  movement.teleport(hunter.id, { x: 80, y: 0, z: 0, angle: -Math.PI / 2 });
+  movement.teleport("warehouse-search-runtime-human", { x: 60, y: 3.2, z: 0, angle: Math.PI / 2 });
+  grid.rebuild(now + 100);
+  game.host.events.emit("sound:spatial", {
+    entityId: "warehouse-search-runtime-human",
+    key: "weapon.pistol.fire",
+    radius: 110,
+    x: 60,
+    y: 3.2,
+    z: 0,
+    now: now + 100,
+  });
+  movement.teleport("warehouse-search-runtime-human", { x: -300, y: 0, z: -300, angle: 0 });
+
+  let sawTraverse = false;
+  let sawInvestigate = false;
+  let sawSearch = false;
+  let reachedUpper = false;
+  for (let step = 1; step <= 320; step += 1) {
+    const simulationNow = now + 100 + step * 50;
+    game.api.step(0.05, simulationNow);
+    const machineState = brain.stateFor(hunter.id).machineState;
+    sawTraverse ||= machineState === "traverse";
+    sawInvestigate ||= machineState === "investigate";
+    sawSearch ||= machineState === "search";
+    const transform = game.host.components.get(hunter.id, "Transform");
+    reachedUpper ||= Number(transform?.y) > 2.8;
+    if (sawSearch && reachedUpper) break;
+  }
+
+  const finalState = brain.stateFor(hunter.id);
+  const transform = game.host.components.get(hunter.id, "Transform");
+  assert.equal(sawTraverse, true, "bot never committed to entering the warehouse");
+  assert.equal(reachedUpper, true, `bot never physically reached the upper floor: ${JSON.stringify(transform)}`);
+  assert.equal(sawInvestigate, true, "bot never resumed the heard gunshot investigation after traversal");
+  assert.equal(sawSearch, true, `bot abandoned the empty warehouse instead of searching: ${JSON.stringify(finalState)}`);
+
+  await game.host.stop();
+});
