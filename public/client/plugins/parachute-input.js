@@ -8,11 +8,56 @@ export async function setup(ctx) {
   const network = ctx.services.get("network");
   const originalSample = input.sample.bind(input);
   let parachutePressed = false;
+  let latestParachute = null;
 
   function trigger(reason) {
     if (!network.connected) return;
     parachutePressed = true;
     ctx.events.emit("input:changed", { reason });
+  }
+
+  function announce(text) {
+    const live = document.getElementById("announcer");
+    if (!live) return;
+    live.textContent = "";
+    requestAnimationFrame(() => {
+      live.textContent = text;
+    });
+  }
+
+  function flightStatusText() {
+    const state = latestParachute;
+    if (!state?.airborne) return "Парашют сейчас не используется.";
+
+    const altitude = Math.max(0, Number(state.altitude) || 0);
+    const downward = Math.max(0, -(Number(state.verticalVelocity) || 0));
+    const glide = Math.max(0, Number(state.glideSpeed) || 0);
+    const wind = Math.max(0, Number(state.windSpeed) || 0);
+    const ground = Number.isFinite(Number(state.groundDistance))
+      ? Math.max(0, Number(state.groundDistance))
+      : null;
+    const phase = state.phase === "deployed"
+      ? `Купол раскрыт на ${Math.round((Number(state.inflation) || 0) * 100)} процентов.`
+      : "Свободное падение.";
+    const stall = Number(state.stall) >= 0.35
+      ? `Купол близок к сваливанию, ${Math.round(Number(state.stall) * 100)} процентов.`
+      : "";
+    const environment = state.canopyEnvironment === "indoor"
+      ? "Купол под перекрытием."
+      : state.canopyEnvironment === "obstructed"
+        ? "Рядом препятствие для купола."
+        : "";
+
+    return [
+      `Высота ${altitude.toFixed(1)} метра.`,
+      `Скорость вниз ${downward.toFixed(1)} метра в секунду.`,
+      `Планирование ${glide.toFixed(1)} метра в секунду.`,
+      `Ветер ${wind.toFixed(1)} метра в секунду.`,
+      ground == null ? "" : `До поверхности ${ground.toFixed(1)} метра.`,
+      phase,
+      stall,
+      environment,
+    ].filter(Boolean).join(" ");
   }
 
   input.sample = () => {
@@ -21,6 +66,11 @@ export async function setup(ctx) {
     parachutePressed = false;
     return { ...sampled, parachutePressed: pressed };
   };
+
+  ctx.events.on("game:snapshot", (snapshot) => {
+    const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
+    latestParachute = self?.parachute ?? null;
+  });
 
   window.addEventListener("keydown", (event) => {
     if (event.code !== "Space" || event.repeat || !network.connected) return;
@@ -32,5 +82,11 @@ export async function setup(ctx) {
   button?.addEventListener("click", (event) => {
     event.preventDefault();
     trigger("touch:parachute");
+  });
+
+  const statusButton = document.querySelector('[data-touch-action="parachute-status"]');
+  statusButton?.addEventListener("click", (event) => {
+    event.preventDefault();
+    announce(flightStatusText());
   });
 }
