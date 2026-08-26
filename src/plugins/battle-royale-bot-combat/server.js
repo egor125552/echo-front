@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "4.0.0",
+  version: "4.1.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -147,6 +147,14 @@ function stagedStairRoute(transform, route) {
   const centered = Math.abs(transform.z - route.z) <= 0.22;
   if (!centered || distance2(transform, approach) > BOT_STAIR_ENTRY_TOLERANCE) return approach;
   return route;
+}
+
+function sameResolvedFloor(transform, target, upperY) {
+  if (!target) return false;
+  const fromUpper = Number(transform?.y) > upperY / 2;
+  const targetUpper = Number(target?.y) > upperY / 2;
+  const landed = Number(transform?.y) <= 0.15 || Number(transform?.y) >= upperY - 0.15;
+  return landed && fromUpper === targetUpper;
 }
 
 export async function setup(ctx) {
@@ -372,13 +380,22 @@ export async function setup(ctx) {
       };
     }
 
+    const carriedBehaviorTarget = ["investigate", "search"].includes(previousDecision?.goal)
+      ? previousDecision.target
+      : (previousDecision?.goal === "traverse" && previousDecision?.resumeTarget
+        ? previousDecision.resumeTarget
+        : null);
     const target = visibleEnemies[0]?.transform
       ?? memory?.transform
       ?? interestTarget
+      ?? carriedBehaviorTarget
       ?? zoneTarget
       ?? null;
     if (!target || typeof map.navigationWaypoint !== "function") return null;
-    const route = map.navigationWaypoint(transform, target);
+    let route = map.navigationWaypoint(transform, target);
+    if (route?.kind === "stair" && sameResolvedFloor(transform, target, upperY)) {
+      route = null;
+    }
     if (!route || (route.kind !== "stair" && route.kind !== "door")) return null;
     return { active: true, route, target, committed: false };
   }
