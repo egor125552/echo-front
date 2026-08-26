@@ -17,6 +17,7 @@ import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js"
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
+import * as parachuteAnnouncer from "../plugins/parachute-announcer.js";
 
 export const echoFrontClientPreset = [
   input,
@@ -38,4 +39,5 @@ export const echoFrontClientPreset = [
   lowHealthAudio,
   hud,
   announcer,
+  parachuteAnnouncer,
 ];
