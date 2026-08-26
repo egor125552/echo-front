@@ -11,14 +11,16 @@ export const BOT_HEARING_REPEAT_WINDOW_MS = 3_000;
 export const BOT_HEARING_MAX_CONFIDENCE = 4;
 export const BOT_INTEREST_REACHED_DISTANCE = 2.4;
 export const BOT_EXPLORATION_REACHED_DISTANCE = 2.5;
-export const BOT_EXPLORATION_MIN_DISTANCE = 10;
-export const BOT_EXPLORATION_DISTANCE_SPREAD = 12;
+export const BOT_EXPLORATION_MIN_DISTANCE = 8;
+export const BOT_EXPLORATION_DISTANCE_SPREAD = 8;
 export const BOT_EXPLORATION_MIN_MS = 14_000;
 export const BOT_EXPLORATION_TIME_SPREAD_MS = 8_000;
+export const BOT_EXPLORATION_PAUSE_MIN_MS = 3_000;
+export const BOT_EXPLORATION_PAUSE_SPREAD_MS = 3_000;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
-  version: "1.4.0",
+  version: "1.4.1",
   requires: ["bot-controller", "entities", "teams", "spatial-grid", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -213,6 +215,7 @@ export async function setup(ctx) {
       y: chosen.y,
       z: chosen.z,
       createdAt: now,
+      arrivedAt: null,
       expiresAt: now + BOT_EXPLORATION_MIN_MS
         + (durationSeed % (BOT_EXPLORATION_TIME_SPREAD_MS + 1)),
     };
@@ -222,12 +225,17 @@ export async function setup(ctx) {
 
   function explorationTargetFor(botId, transform, now) {
     let target = exploration.get(botId);
-    if (
-      !target
-      || target.expiresAt <= now
-      || distance3(transform, target) <= BOT_EXPLORATION_REACHED_DISTANCE
-    ) {
+    if (!target || target.expiresAt <= now) {
       target = nextExplorationTarget(botId, transform, now);
+    } else if (distance3(transform, target) <= BOT_EXPLORATION_REACHED_DISTANCE && !target.arrivedAt) {
+      const pauseSeed = stableHash(`${botId}:explore-pause:${target.sequence}`);
+      target = {
+        ...target,
+        arrivedAt: now,
+        expiresAt: now + BOT_EXPLORATION_PAUSE_MIN_MS
+          + (pauseSeed % (BOT_EXPLORATION_PAUSE_SPREAD_MS + 1)),
+      };
+      exploration.set(botId, target);
     }
     return target ? { ...target } : null;
   }
