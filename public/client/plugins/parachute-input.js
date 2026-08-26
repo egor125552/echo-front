@@ -17,9 +17,9 @@ export async function setup(ctx) {
   };
 
   window.addEventListener("keydown", (event) => {
-    if (event.code !== "KeyP" || event.repeat || !network.connected) return;
+    if (event.code !== "Space" || event.repeat || !network.connected) return;
     event.preventDefault();
     parachutePressed = true;
-    ctx.events.emit("input:changed", { reason: "key:KeyP:down" });
+    ctx.events.emit("input:changed", { reason: "key:Space:down" });
   }, { capture: true, passive: false });
 }
