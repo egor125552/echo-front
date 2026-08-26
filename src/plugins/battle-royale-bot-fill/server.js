@@ -7,12 +7,12 @@ const SAFE_REPLACEMENT_ATTEMPTS = 512;
 const SOURCE_START_RADII = Object.freeze([125, 190, 255, 320, 385]);
 const COMPACT_START_RADII = Object.freeze([125, 175, 225, 275, 325]);
 const BOT_INITIAL_HEADING_OFFSETS = Object.freeze([
-  1.05, -1.2, 1.35, -1.5, 1.7, -1.9, 2.1, -2.3,
+  1.35, 1.45, 1.55, 1.65, 1.75, 1.85,
 ]);
 
 export const manifest = {
   id: "bot-fill",
-  version: "2.3.0",
+  version: "2.4.0",
   requires: [
     "bot-controller", "bot-loadouts", "entities", "teams", "rapier-physics", "map-test-arena",
   ],
