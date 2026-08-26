@@ -36,6 +36,24 @@ test("healthy aggressive bot accepts a favorable single fight", () => {
   assert.ok(["flank", "press", "space"].includes(decision.tactic));
 });
 
+test("healthy cautious bot may disengage from an equal distant contact", () => {
+  const decision = chooseUtilityDecision({
+    profile: {
+      aggression: 0.3,
+      caution: 0.9,
+      curiosity: 0.5,
+      persistence: 0.45,
+      preferredRange: 7,
+      flankBias: 0.55,
+    },
+    ownDurability: 1,
+    visibleEnemies: [enemy("equal", 19, 200, 100)],
+  });
+
+  assert.equal(decision.goal, "evade");
+  assert.equal(decision.target.entityId, "equal");
+});
+
 test("hurt cautious bot refuses an outnumbered fight instead of suiciding", () => {
   const decision = chooseUtilityDecision({
     profile: {
