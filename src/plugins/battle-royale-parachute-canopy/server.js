@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-parachute-canopy",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "entities", "match-api", "battle-royale-parachute", "rapier-physics", "map-test-arena",
   ],
@@ -23,6 +23,7 @@ const CANOPY_HARD_FORWARD_DISTANCE = 0.9;
 const CANOPY_COLLAPSE_INFLATION = 0.35;
 const MOVEMENT_GRAVITY = 18;
 const COMPRESSION_EVENT_DEBOUNCE_MS = 380;
+const SNAGGABLE_KINDS = new Set(["building-wall", "building-door"]);
 
 function clamp(value, minimum = 0, maximum = 1) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -121,16 +122,38 @@ export async function setup(ctx) {
       CANOPY_HARD_FORWARD_DISTANCE,
     );
 
-    const compression = Math.max(overheadPressure, sidePressure, forwardPressure);
+    const acousticZone = typeof map.acousticZoneAt === "function"
+      ? map.acousticZoneAt(transform)
+      : null;
+    const insideMappedBuilding = Boolean(acousticZone && acousticZone !== "outdoor");
+    const snagHit = sideHits.find((hit) => SNAGGABLE_KINDS.has(kindOf(hit))) ?? null;
+    const snagDistance = snagHit ? Number(snagHit.distance) : Infinity;
+    const boundarySnag = Boolean(
+      insideMappedBuilding
+      && snagHit
+      && snagDistance <= CANOPY_RADIUS
+    );
+
+    const compression = Math.max(
+      overheadPressure,
+      sidePressure,
+      forwardPressure,
+      boundarySnag ? Math.max(0.88, 1 - snagDistance / Math.max(CANOPY_RADIUS, 0.01)) : 0,
+    );
+
     const hard = (
       overheadDistance <= CANOPY_HARD_OVERHEAD_CLEARANCE
       || (sideHits.length >= 2 && minSideDistance <= CANOPY_HARD_SIDE_CLEARANCE)
       || (forwardDistance <= CANOPY_HARD_FORWARD_DISTANCE && sideHits.length >= 1)
+      || boundarySnag
     );
 
     let reason = null;
     let primaryHit = null;
-    if (overheadPressure >= sidePressure && overheadPressure >= forwardPressure && overhead) {
+    if (boundarySnag) {
+      reason = "canopy-snag";
+      primaryHit = snagHit;
+    } else if (overheadPressure >= sidePressure && overheadPressure >= forwardPressure && overhead) {
       reason = "overhead";
       primaryHit = overhead;
     } else if (sidePressure >= forwardPressure && minSideHit) {
@@ -141,15 +164,14 @@ export async function setup(ctx) {
       primaryHit = forwardHit;
     }
 
-    const acousticZone = typeof map.acousticZoneAt === "function"
-      ? map.acousticZoneAt(transform)
-      : null;
     const coveredByGeometry = Number.isFinite(overheadDistance);
     const laterallyConfined = sideHits.length >= 2;
+    const geometryIndoor = coveredByGeometry || (insideMappedBuilding && sideHits.length >= 1);
 
     return {
       compression,
       hard,
+      boundarySnag,
       reason,
       overheadDistance: Number.isFinite(overheadDistance) ? overheadDistance : null,
       minSideDistance: Number.isFinite(minSideDistance) ? minSideDistance : null,
@@ -158,8 +180,8 @@ export async function setup(ctx) {
       obstacleKind: kindOf(primaryHit) || null,
       obstacleName: objectLabel(primaryHit),
       acousticZone,
-      indoor: coveredByGeometry,
-      confined: coveredByGeometry || laterallyConfined,
+      indoor: geometryIndoor,
+      confined: geometryIndoor || laterallyConfined,
     };
   }
 
@@ -182,14 +204,16 @@ export async function setup(ctx) {
 
     const previous = clamp(state.canopyCompression);
     const target = clamp(sampled.compression);
-    const responseRate = target > previous ? 10 : 2.7;
+    const responseRate = target > previous ? 12 : 2.7;
     const blend = clamp(Math.max(0, Number(dt) || 0) * responseRate);
     const compression = previous + (target - previous) * blend;
 
     state.canopyCompression = compression;
-    state.canopyEnvironment = sampled.indoor
-      ? "indoor"
-      : (sampled.confined || compression > 0.08 ? "obstructed" : "clear");
+    state.canopyEnvironment = sampled.boundarySnag
+      ? "snagged"
+      : sampled.indoor
+        ? "indoor"
+        : (sampled.confined || compression > 0.08 ? "obstructed" : "clear");
     state.canopyObstacleKind = sampled.obstacleKind;
     state.canopyObstacleName = sampled.obstacleName;
     state.canopyOverheadDistance = sampled.overheadDistance;
@@ -205,7 +229,7 @@ export async function setup(ctx) {
     ].join(":");
 
     if (
-      compression >= 0.22
+      (compression >= 0.22 || sampled.boundarySnag)
       && (eventKey !== state.lastCanopyEnvironmentKey
         || now - Number(state.lastCanopyEnvironmentAt || 0) >= COMPRESSION_EVENT_DEBOUNCE_MS)
     ) {
@@ -215,6 +239,7 @@ export async function setup(ctx) {
         entityId,
         compression,
         hard: sampled.hard,
+        snagged: sampled.boundarySnag,
         reason: sampled.reason,
         obstacleKind: sampled.obstacleKind,
         obstacleName: sampled.obstacleName,
@@ -234,7 +259,7 @@ export async function setup(ctx) {
         reason: sampled.reason ?? "obstruction",
         obstacleKind: sampled.obstacleKind,
         obstacleName: sampled.obstacleName,
-        compression: Math.max(compression, 0.85),
+        compression: Math.max(compression, 0.9),
       };
     }
 
@@ -256,12 +281,12 @@ export async function setup(ctx) {
       const compression = clamp(state.canopyCompression);
       if (compression <= 0.01) continue;
 
-      const retainedGlide = Math.max(0.12, 1 - compression * 0.78);
+      const retainedGlide = Math.max(0.08, 1 - compression * 0.84);
       state.glideSpeed = Math.max(0, Number(state.glideSpeed) || 0) * retainedGlide;
-      state.turnRate = (Number(state.turnRate) || 0) * Math.max(0.18, 1 - compression * 0.72);
+      state.turnRate = (Number(state.turnRate) || 0) * Math.max(0.12, 1 - compression * 0.78);
 
       const currentDownward = Math.max(0, -(Number(state.simulatedVerticalVelocity) || 0));
-      const constrainedDownward = Math.min(52, Math.max(currentDownward, 5 + compression * 9));
+      const constrainedDownward = Math.min(52, Math.max(currentDownward, 5 + compression * 10));
       state.simulatedVerticalVelocity = -constrainedDownward;
       state.airSpeed = Math.hypot(constrainedDownward, state.glideSpeed);
       transform.verticalVelocity = state.simulatedVerticalVelocity + MOVEMENT_GRAVITY * safeDt;
