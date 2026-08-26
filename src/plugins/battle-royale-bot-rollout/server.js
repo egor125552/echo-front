@@ -1,11 +1,11 @@
 export const BOT_AI_ROLLOUT = Object.freeze({
-  mode: "canary",
+  mode: "all",
   canaryBotId: "br-bot-94",
 });
 
 export const manifest = {
   id: "bot-ai-rollout",
-  version: "1.0.0",
+  version: "1.1.0",
   capabilities: ["services.provide"],
 };
 
