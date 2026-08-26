@@ -1,6 +1,6 @@
 export const BOT_AI_ROLLOUT = Object.freeze({
   mode: "canary",
-  canaryBotId: "br-bot-1",
+  canaryBotId: "br-bot-94",
 });
 
 export function usesXStateBotBrain(botId) {
