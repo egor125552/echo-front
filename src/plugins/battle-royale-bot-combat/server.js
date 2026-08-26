@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "3.0.0",
+  version: "3.1.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -381,6 +381,16 @@ export async function setup(ctx) {
     const interestTarget = !visibleEnemies.length && !memory
       ? interest.targetFor(bot.id, transform, now)
       : null;
+
+    const traversalTarget = visibleEnemies[0]?.transform ?? memory?.transform ?? interestTarget;
+    if (traversalTarget && typeof map.navigationWaypoint === "function") {
+      const route = map.navigationWaypoint(transform, traversalTarget);
+      const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
+      const midStair = route?.kind === "stair"
+        && Number(transform.y) > 0.2
+        && Number(transform.y) < upperY - 0.15;
+      if (midStair && routeToward(bot, transform, state, route, now, 95)) return;
+    }
 
     const decision = brain.decide(bot.id, {
       visibleEnemies,
