@@ -178,3 +178,64 @@ test("a BR bot with a known upper-floor target opens the closed warehouse and ph
   assert.ok(transform.x < STAIR.maxX, `bot did not traverse the stair run: x=${transform.x}`);
   await game.host.stop();
 });
+
+test("a heard shot in the upper west room makes the bot pass the inner door instead of orbiting the stair top", async () => {
+  const playerId = "br-upper-search-human";
+  const { game, now: start } = await activeBattleRoyale(playerId);
+  const hunter = keepOneBot(game);
+  const movement = game.host.services.get("movement");
+  const map = game.host.services.get("map");
+  const brain = game.host.services.get("bot-brain");
+
+  movement.teleport(hunter.id, {
+    x: WAREHOUSE_FRONT_DOOR.x + 5,
+    y: 0,
+    z: WAREHOUSE_FRONT_DOOR.z,
+    angle: -Math.PI / 2,
+  });
+  movement.teleport(playerId, {
+    x: BUILDING_CENTER_X - 6,
+    y: UPPER_FLOOR_Y,
+    z: BUILDING_CENTER_Z + 5,
+    angle: 0,
+  });
+
+  const state = game.host.components.get(hunter.id, "Bot");
+  state.nextThinkAt = 0;
+  game.api.step(0.05, start + 50);
+  game.host.events.emit("sound:spatial", {
+    entityId: playerId,
+    key: "weapon.pistol.fire",
+    radius: 110,
+    x: BUILDING_CENTER_X - 6,
+    y: UPPER_FLOOR_Y,
+    z: BUILDING_CENTER_Z + 5,
+    now: start + 50,
+  });
+  movement.teleport(playerId, { x: -300, y: 0, z: -300, angle: 0 });
+
+  let crossedInnerDoor = false;
+  let sawInvestigate = false;
+  let sawSearch = false;
+  for (let step = 2; step <= 320; step += 1) {
+    game.api.step(0.05, start + step * 50);
+    const transform = game.host.components.get(hunter.id, "Transform");
+    const brainState = brain.stateFor(hunter.id);
+    sawInvestigate ||= brainState?.machineState === "investigate";
+    sawSearch ||= brainState?.machineState === "search";
+    if ((transform?.y ?? 0) >= UPPER_FLOOR_Y - 0.2 && (transform?.x ?? Infinity) < BUILDING_CENTER_X - 0.5) {
+      crossedInnerDoor = true;
+      if (sawSearch) break;
+    }
+  }
+
+  const transform = game.host.components.get(hunter.id, "Transform");
+  const frontDoor = map.doors.find((door) => door.id === "warehouse-front-door");
+  const upperDoor = map.doors.find((door) => door.id === "warehouse-upper-room-door");
+  assert.equal(frontDoor?.open, true, "bot should enter the warehouse");
+  assert.equal(upperDoor?.open, true, "bot should open the inner upper-room door");
+  assert.equal(sawInvestigate, true, "bot should enter investigate state after hearing the shot");
+  assert.equal(crossedInnerDoor, true, `bot never crossed the inner door: x=${transform?.x}, y=${transform?.y}, z=${transform?.z}`);
+  assert.equal(sawSearch, true, "bot should continue into bounded search after reaching the heard area");
+  await game.host.stop();
+});
