@@ -1,10 +1,15 @@
 export const BOT_DECISION_HOLD_MIN_MS = 550;
 export const BOT_DECISION_HOLD_SPREAD_MS = 650;
+export const BOT_THREAT_MEMORY_MS = 3_500;
+export const BOT_DEFENSIVE_RESPONSE_MS = 900;
+export const BOT_DEFENSIVE_RESPONSE_COOLDOWN_MS = 2_500;
+export const BOT_SOUND_SEARCH_MS = 12_000;
+export const BOT_SOUND_SEARCH_REACHED = 1.8;
 
 export const manifest = {
   id: "bot-brain",
-  version: "1.5.0",
-  requires: ["bot-controller", "entities", "battle-royale"],
+  version: "2.0.0",
+  requires: ["bot-controller", "entities", "battle-royale", "map-test-arena", "bot-state-machine"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
 
@@ -185,8 +190,6 @@ export function chooseUtilityDecision({
     };
   }
 
-  // Fresh actionable sound may replace stale knowledge. A generic POI may not:
-  // remembering an actual enemy must outrank casual curiosity about a building.
   if (isSoundInterest && interestScore > huntScore) {
     return { goal: "investigate", score: interestScore, target: interestTarget, threatCount: 0 };
   }
@@ -219,10 +222,70 @@ function retreatPoint(transform, enemy, profile) {
   };
 }
 
+function distance3(a, b) {
+  return Math.hypot(
+    (Number(a?.x) || 0) - (Number(b?.x) || 0),
+    (Number(a?.y) || 0) - (Number(b?.y) || 0),
+    (Number(a?.z) || 0) - (Number(b?.z) || 0),
+  );
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function insideBuilding(position, building) {
+  return Boolean(building)
+    && Number(position?.x) >= building.minX
+    && Number(position?.x) <= building.maxX
+    && Number(position?.z) >= building.minZ
+    && Number(position?.z) <= building.maxZ;
+}
+
+function buildSearchWaypoints(sound, map) {
+  const building = map?.building;
+  if (insideBuilding(sound, building)) {
+    const upperY = Number(building.upperY) || 3.2;
+    const sameY = Number(sound.y) > upperY / 2 ? upperY : 0;
+    const otherY = sameY > 0 ? 0 : upperY;
+    const cx = (building.minX + building.maxX) / 2;
+    const cz = (building.minZ + building.maxZ) / 2;
+    const x0 = clamp(Number(sound.x) || cx, building.minX + 2, building.maxX - 2);
+    const z0 = clamp(Number(sound.z) || cz, building.minZ + 2, building.maxZ - 2);
+    const points = [
+      { x: x0, y: sameY, z: clamp(z0 + 5, building.minZ + 2, building.maxZ - 2) },
+      { x: clamp(x0 - 6, building.minX + 2, building.maxX - 2), y: sameY, z: z0 },
+      { x: cx, y: sameY, z: cz },
+      { x: clamp(x0 + 6, building.minX + 2, building.maxX - 2), y: sameY, z: clamp(z0 - 5, building.minZ + 2, building.maxZ - 2) },
+    ];
+    if ((Number(sound.priority) || 0) >= 3 || (Number(sound.confidence) || 0) >= 3) {
+      points.push(
+        { x: cx + 5, y: otherY, z: cz - 5 },
+        { x: cx - 5, y: otherY, z: cz + 5 },
+      );
+    }
+    return points;
+  }
+
+  const x = Number(sound.x) || 0;
+  const y = Number(sound.y) || 0;
+  const z = Number(sound.z) || 0;
+  return [
+    { x: x + 5, y, z },
+    { x, y, z: z + 5 },
+    { x: x - 5, y, z },
+    { x, y, z: z - 5 },
+    { x: x + 7, y, z: z + 7 },
+  ];
+}
+
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const battleRoyale = ctx.services.get("battle-royale");
-  const commitments = new Map();
+  const map = ctx.services.get("map");
+  const stateMachine = ctx.services.get("bot-state-machine");
+  const legacyCommitments = new Map();
+  const threats = new Map();
 
   function ownDurability(botId) {
     const health = ctx.components.get(botId, "Health");
@@ -252,6 +315,72 @@ export async function setup(ctx) {
     });
   }
 
+  function defaultHold(botId, now) {
+    const cycle = stableHash(`${botId}:${Math.floor(now / 250)}`);
+    return now + BOT_DECISION_HOLD_MIN_MS + (cycle % (BOT_DECISION_HOLD_SPREAD_MS + 1));
+  }
+
+  function decorate(botId, raw, profile, now) {
+    const decision = {
+      ...raw,
+      profile,
+      targetEntityId: raw.targetEntityId ?? raw.target?.entityId ?? raw.memory?.entityId ?? null,
+      heardAt: raw.heardAt ?? raw.target?.heardAt ?? null,
+      holdUntil: Number(raw.holdUntil) || defaultHold(botId, now),
+    };
+    if (decision.goal === "evade" && decision.target && !decision.moveTarget) {
+      const transform = ctx.components.get(botId, "Transform");
+      if (transform) decision.moveTarget = retreatPoint(transform, decision.target, profile);
+    }
+    return decision;
+  }
+
+  function legacyResolve(botId, candidate, meta) {
+    const previous = legacyCommitments.get(botId);
+    const sameTarget = previous?.targetEntityId && previous.targetEntityId === candidate.targetEntityId;
+    const peaceful = previous && ["roam", "investigate", "hunt", "zone"].includes(previous.goal);
+    const keep = previous
+      && meta.now < Number(previous.holdUntil || 0)
+      && !meta.force
+      && ((peaceful && !meta.visibleThreat && !meta.freshSound) || sameTarget);
+    if (keep) return { ...previous, profile: candidate.profile };
+    legacyCommitments.set(botId, candidate);
+    return candidate;
+  }
+
+  function activeThreatFor(botId, now) {
+    const threat = threats.get(botId);
+    if (!threat) return null;
+    if (threat.expiresAt <= now) {
+      threats.delete(botId);
+      return null;
+    }
+    return threat;
+  }
+
+  function continueSearch(botId, machineState, transform, now, urgent) {
+    if (machineState?.machineState !== "search" || urgent) return null;
+    const previous = machineState.decision;
+    if (!previous?.searchPoints?.length || now >= Number(previous.searchUntil || 0)) {
+      return { finished: true };
+    }
+    let index = Number(previous.searchIndex) || 0;
+    while (
+      index < previous.searchPoints.length
+      && distance3(transform, previous.searchPoints[index]) <= BOT_SOUND_SEARCH_REACHED
+    ) index += 1;
+    if (index >= previous.searchPoints.length) return { finished: true };
+    return {
+      decision: {
+        ...previous,
+        goal: "search",
+        searchIndex: index,
+        target: previous.searchPoints[index],
+        holdUntil: previous.searchUntil,
+      },
+    };
+  }
+
   function decide(botId, context = {}, now = Date.now()) {
     const entity = entities.get(botId);
     if (!entity?.alive || !battleRoyale.isActive()) return null;
@@ -260,71 +389,163 @@ export async function setup(ctx) {
 
     const profile = botPersonality(botId, weaponId(botId));
     const visibleEnemies = enrichEnemies(context.visibleEnemies);
-    const hasVisibleThreat = visibleEnemies.length > 0;
-    const urgentZone = Boolean(context.zoneTarget) && !hasVisibleThreat;
-    const previous = commitments.get(botId);
-    const currentPreviousTarget = previous?.targetEntityId
-      ? visibleEnemies.find((enemy) => enemy.entityId === previous.targetEntityId)
+    const machineState = stateMachine.stateFor(botId);
+    const previousDecision = machineState.decision ?? legacyCommitments.get(botId) ?? null;
+    const threat = activeThreatFor(botId, now);
+    const attacker = threat
+      ? visibleEnemies.find((enemy) => enemy.entityId === threat.attackerId)
       : null;
-
-    const peacefulCommitment = previous && ["roam", "investigate", "hunt", "zone"].includes(previous.goal);
+    const underFire = Boolean(threat);
     const freshSound = context.interestTarget?.kind === "sound-interest"
-      && Number(context.interestTarget.heardAt) > Number(previous?.heardAt ?? -Infinity);
-    const mayKeepPeacefulPlan = peacefulCommitment && !hasVisibleThreat && !urgentZone && !freshSound;
-    const mayKeepCombatPlan = Boolean(currentPreviousTarget)
-      && (previous?.goal === "engage" || previous?.goal === "evade")
-      && !context.underFire;
+      && Number(context.interestTarget.heardAt) > Number(previousDecision?.heardAt ?? -Infinity);
+    const visibleThreat = visibleEnemies.length > 0;
+    const traversalActive = Boolean(context.traversal?.active && context.traversal?.route);
 
-    if (previous && now < previous.holdUntil && (mayKeepPeacefulPlan || mayKeepCombatPlan)) {
-      if (currentPreviousTarget) {
-        const refreshed = { ...previous, target: currentPreviousTarget, profile };
-        if (refreshed.goal === "evade") {
-          refreshed.moveTarget = retreatPoint(transform, currentPreviousTarget, profile);
-        }
-        return refreshed;
-      }
-      return { ...previous, profile };
-    }
-
-    const raw = chooseUtilityDecision({
-      profile,
-      ownDurability: ownDurability(botId),
-      visibleEnemies,
-      memory: context.memory,
-      zoneTarget: context.zoneTarget,
-      interestTarget: context.interestTarget,
-      underFire: Boolean(context.underFire),
-      threatTargetId: context.threatTargetId ?? null,
-    });
-
-    const cycle = stableHash(`${botId}:${Math.floor(now / 250)}`);
-    const holdUntil = now + BOT_DECISION_HOLD_MIN_MS + (cycle % (BOT_DECISION_HOLD_SPREAD_MS + 1));
-    const decision = {
-      ...raw,
-      targetEntityId: raw.target?.entityId ?? raw.memory?.entityId ?? null,
-      heardAt: raw.target?.heardAt ?? null,
-      holdUntil,
-      profile,
+    const meta = {
+      now,
+      underFire,
+      visibleThreat,
+      freshSound,
+      traversalActive,
+      investigationReached: Boolean(context.investigationReached),
+      force: false,
     };
-    if (decision.goal === "evade" && decision.target) {
-      decision.moveTarget = retreatPoint(transform, decision.target, profile);
+
+    let candidate;
+
+    if (traversalActive) {
+      candidate = decorate(botId, {
+        goal: "traverse",
+        score: 1,
+        target: context.traversal.target,
+        route: context.traversal.route,
+        targetEntityId: visibleEnemies[0]?.entityId ?? context.memory?.entityId ?? previousDecision?.targetEntityId ?? null,
+        holdUntil: now + 450,
+      }, profile, now);
+      return stateMachine.resolve(botId, candidate, { ...meta, force: true });
     }
-    commitments.set(botId, decision);
-    return decision;
+
+    const urgent = visibleThreat || underFire || freshSound;
+    const search = continueSearch(botId, machineState, transform, now, urgent);
+    if (search?.decision) {
+      candidate = decorate(botId, search.decision, profile, now);
+      return stateMachine.resolve(botId, candidate, meta);
+    }
+
+    if (
+      machineState.machineState === "investigate"
+      && context.investigationReached
+      && previousDecision?.target?.kind === "sound-interest"
+      && !urgent
+    ) {
+      const searchPoints = buildSearchWaypoints(previousDecision.target, map);
+      if (searchPoints.length) {
+        candidate = decorate(botId, {
+          goal: "search",
+          score: 1,
+          searchOrigin: previousDecision.target,
+          searchPoints,
+          searchIndex: 0,
+          searchUntil: now + BOT_SOUND_SEARCH_MS,
+          target: searchPoints[0],
+          heardAt: previousDecision.heardAt,
+          holdUntil: now + BOT_SOUND_SEARCH_MS,
+        }, profile, now);
+        return stateMachine.resolve(botId, candidate, { ...meta, force: true });
+      }
+    }
+
+    if (attacker && now < threat.forceUntil) {
+      const desiredRange = Math.max(8, Number(profile.preferredRange) || 8);
+      candidate = decorate(botId, {
+        goal: "defend",
+        score: 1,
+        target: attacker,
+        targetEntityId: attacker.entityId,
+        threatCount: visibleEnemies.length,
+        desiredRange,
+        tactic: Number(attacker.distance) < desiredRange - 1 ? "space" : "press",
+        returnFire: true,
+        defensive: true,
+        holdUntil: Math.min(threat.forceUntil, now + 350),
+      }, profile, now);
+    } else if (search?.finished && !urgent) {
+      candidate = decorate(botId, { goal: "roam", score: 0.3, target: null, holdUntil: now + 650 }, profile, now);
+      meta.force = true;
+    } else {
+      candidate = decorate(botId, chooseUtilityDecision({
+        profile,
+        ownDurability: ownDurability(botId),
+        visibleEnemies,
+        memory: context.memory,
+        zoneTarget: context.zoneTarget,
+        interestTarget: context.interestTarget,
+        underFire,
+        threatTargetId: threat?.attackerId ?? null,
+      }), profile, now);
+    }
+
+    if (machineState.orchestration === "legacy") {
+      candidate = legacyResolve(botId, candidate, {
+        ...meta,
+        force: meta.force || underFire || visibleThreat || freshSound,
+      });
+    }
+
+    return stateMachine.resolve(botId, candidate, meta);
   }
 
-  ctx.events.on("combat:damage", ({ targetId }) => {
-    const entity = entities.get(targetId);
-    if (entity?.bot) commitments.delete(targetId);
+  ctx.events.on("combat:damage", ({ targetId, attackerId, now = Date.now() }) => {
+    if (!targetId || !attackerId) return;
+    const target = entities.get(targetId);
+    const attacker = entities.get(attackerId);
+    if (!target?.bot || !target.alive || !attacker?.alive) return;
+    const previous = threats.get(targetId);
+    const continuing = previous
+      && previous.attackerId === attackerId
+      && previous.expiresAt > now;
+    let forceUntil = now + BOT_DEFENSIVE_RESPONSE_MS;
+    let nextForceAt = now + BOT_DEFENSIVE_RESPONSE_COOLDOWN_MS;
+    if (continuing && now < previous.nextForceAt) {
+      forceUntil = previous.forceUntil;
+      nextForceAt = previous.nextForceAt;
+    }
+    threats.set(targetId, {
+      attackerId,
+      forceUntil,
+      nextForceAt,
+      expiresAt: now + BOT_THREAT_MEMORY_MS,
+    });
+    legacyCommitments.delete(targetId);
   });
-  ctx.events.on("entity:died", ({ entityId }) => commitments.delete(entityId));
-  ctx.events.on("entity:removed", ({ entityId }) => commitments.delete(entityId));
-  ctx.events.on("entity:respawned", ({ entityId }) => commitments.delete(entityId));
-  ctx.events.on("battle-royale:started", () => commitments.clear());
+
+  function clearBot(entityId) {
+    legacyCommitments.delete(entityId);
+    threats.delete(entityId);
+  }
+  ctx.events.on("entity:died", ({ entityId }) => clearBot(entityId));
+  ctx.events.on("entity:removed", ({ entityId }) => clearBot(entityId));
+  ctx.events.on("entity:respawned", ({ entityId }) => clearBot(entityId));
+  ctx.events.on("battle-royale:started", () => {
+    legacyCommitments.clear();
+    threats.clear();
+  });
 
   ctx.services.provide("bot-brain", {
     decide,
     profile(botId) { return botPersonality(botId, weaponId(botId)); },
-    commitmentFor(botId) { return commitments.get(botId) ?? null; },
+    commitmentFor(botId) {
+      const state = stateMachine.stateFor(botId);
+      return state.decision ?? legacyCommitments.get(botId) ?? null;
+    },
+    stateFor(botId) {
+      const state = stateMachine.stateFor(botId);
+      return {
+        ...state,
+        profile: botPersonality(botId, weaponId(botId)),
+        threat: activeThreatFor(botId, Date.now()),
+      };
+    },
+    threatFor(botId, now = Date.now()) { return activeThreatFor(botId, now); },
   });
 }
