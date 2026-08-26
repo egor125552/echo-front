@@ -1,5 +1,7 @@
 export const BOT_INTEREST_CAPACITY = 5;
-export const BOT_INTEREST_ACTIVATION_RADIUS = 180;
+export const BOT_INTEREST_ACTIVATION_RADIUS = 95;
+export const BOT_INTEREST_NEAR_RADIUS = 35;
+export const BOT_INTEREST_MID_RADIUS = 70;
 export const BOT_INTEREST_VISIT_MS = 45_000;
 export const BOT_INTEREST_COOLDOWN_MS = 25_000;
 export const BOT_HEARING_FOOTSTEP_TTL_MS = 7_000;
@@ -8,15 +10,15 @@ export const BOT_WEAPON_INVESTIGATION_CAP = 6;
 export const BOT_HEARING_REPEAT_WINDOW_MS = 3_000;
 export const BOT_HEARING_MAX_CONFIDENCE = 4;
 export const BOT_INTEREST_REACHED_DISTANCE = 2.4;
-export const BOT_EXPLORATION_REACHED_DISTANCE = 3;
-export const BOT_EXPLORATION_MIN_DISTANCE = 20;
-export const BOT_EXPLORATION_DISTANCE_SPREAD = 26;
-export const BOT_EXPLORATION_MIN_MS = 8_000;
-export const BOT_EXPLORATION_TIME_SPREAD_MS = 6_000;
+export const BOT_EXPLORATION_REACHED_DISTANCE = 2.5;
+export const BOT_EXPLORATION_MIN_DISTANCE = 10;
+export const BOT_EXPLORATION_DISTANCE_SPREAD = 12;
+export const BOT_EXPLORATION_MIN_MS = 14_000;
+export const BOT_EXPLORATION_TIME_SPREAD_MS = 8_000;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
-  version: "1.3.1",
+  version: "1.4.0",
   requires: ["bot-controller", "entities", "teams", "spatial-grid", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -92,6 +94,12 @@ function soundTtl(sound) {
     : BOT_HEARING_FOOTSTEP_TTL_MS;
 }
 
+function warehouseVisitChance(distance) {
+  if (distance <= BOT_INTEREST_NEAR_RADIUS) return 100;
+  if (distance <= BOT_INTEREST_MID_RADIUS) return 70;
+  return 35;
+}
+
 export async function setup(ctx) {
   const bots = ctx.services.get("bots");
   const entities = ctx.services.get("entities");
@@ -147,7 +155,8 @@ export async function setup(ctx) {
     if (closestDistance > BOT_INTEREST_ACTIVATION_RADIUS) return null;
 
     const cycle = Math.floor(now / 30_000);
-    if ((stableHash(`${botId}:${cycle}`) % 100) >= 48) return null;
+    const chance = warehouseVisitChance(closestDistance);
+    if ((stableHash(`${botId}:${cycle}`) % 100) >= chance) return null;
 
     const groupPoints = points.filter((point) => point.group === group);
     const pointIndex = stableHash(`${botId}:poi`) % groupPoints.length;
