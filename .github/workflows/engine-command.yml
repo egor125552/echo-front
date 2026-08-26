@@ -17,6 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - run: npm install
 
       - name: Read compiled request
         id: request
@@ -35,23 +36,25 @@ jobs:
         if: steps.request.outputs.id == '0'
         run: echo "No engine command request has been created yet."
 
-      - name: Wait for compiled request on live Worker
+      - name: Start focused Worker for Engine Control
         if: steps.request.outputs.id != '0'
         env:
           REQUEST_ID: ${{ steps.request.outputs.id }}
-          HEALTH_URL: https://echo-front.k69ysrndm7.workers.dev/api/health
         run: |
-          for i in {1..60}; do
-            BODY=$(curl --max-time 5 --silent --show-error "$HEALTH_URL" || true)
+          timeout 120s npx wrangler dev --port 8787 > /tmp/echo-front-engine-control.log 2>&1 &
+          echo $! > /tmp/echo-front-engine-control.pid
+          for i in {1..40}; do
+            BODY=$(curl --max-time 3 --silent --show-error http://127.0.0.1:8787/api/health || true)
             ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // false')
-            LIVE_ID=$(printf '%s' "$BODY" | jq -r '.engineCommandRequestId // 0')
-            if [ "$ENABLED" = "true" ] && [ "$LIVE_ID" = "$REQUEST_ID" ]; then
-              echo "Live Worker has engine request $LIVE_ID and control is enabled."
+            LOCAL_ID=$(printf '%s' "$BODY" | jq -r '.engineCommandRequestId // 0')
+            if [ "$ENABLED" = "true" ] && [ "$LOCAL_ID" = "$REQUEST_ID" ]; then
+              echo "Focused Worker has Engine Control request $LOCAL_ID."
               exit 0
             fi
-            sleep 3
+            sleep 1
           done
-          echo "Live Worker never exposed request $REQUEST_ID"
+          cat /tmp/echo-front-engine-control.log || true
+          echo "Focused Worker never exposed request $REQUEST_ID"
           exit 1
 
       - name: Invoke compiled engine command
@@ -67,16 +70,17 @@ jobs:
           FRAME=$(( FRAME_EVERY > 0 ? FRAME_EVERY : 1 ))
           for iteration in $(seq 1 "$LIMIT"); do
             TMP=$(mktemp)
-            STATUS=$(curl --max-time 15 --silent --show-error \
+            STATUS=$(curl --max-time 60 --silent --show-error \
               -X POST \
               -H 'Content-Type: application/json' \
               --data "{\"requestId\":${REQUEST_ID},\"iteration\":${iteration}}" \
               --output "$TMP" \
               --write-out '%{http_code}' \
-              https://echo-front.k69ysrndm7.workers.dev/api/engine-command || true)
+              http://127.0.0.1:8787/api/engine-command || true)
             echo "Engine command iteration $iteration HTTP ${STATUS:-000}"
             if [ "${STATUS:-000}" -lt 200 ] || [ "${STATUS:-000}" -ge 300 ]; then
               cat "$TMP" || true
+              cat /tmp/echo-front-engine-control.log || true
               rm -f "$TMP"
               exit 1
             fi
@@ -85,12 +89,7 @@ jobs:
               jq -c . "$TMP" >> engine-command-frames.jsonl
               echo "Recorded observation frame at iteration $iteration"
             fi
-            PHASE=$(jq -r '[.response.result[]?.result?.battleRoyale?.phase // empty] | last // empty' "$TMP")
             rm -f "$TMP"
-            if [ "$PHASE" = "ended" ]; then
-              echo "Battle royale ended at iteration $iteration"
-              break
-            fi
           done
 
       - uses: actions/upload-artifact@v4
@@ -103,10 +102,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+      - name: Show focused Worker log on failure
+        if: failure() && steps.request.outputs.id != '0'
+        run: cat /tmp/echo-front-engine-control.log || true
+
       - name: Summary
         if: always() && steps.request.outputs.id != '0'
         run: |
-          echo "### Engine command" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Focused Engine Control" >> "$GITHUB_STEP_SUMMARY"
           echo "Request: ${{ steps.request.outputs.id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Command: ${{ steps.request.outputs.command }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Repeat: ${{ steps.request.outputs.repeat }}" >> "$GITHUB_STEP_SUMMARY"
