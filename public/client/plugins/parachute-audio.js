@@ -74,6 +74,7 @@ export async function setup(ctx) {
   let nextFlightFoleyAt = 0;
   let lastCloth = null;
   let lastRig = null;
+  let lastObstacleSoundAt = -Infinity;
 
   async function playOne(url, gain, fadeIn = 0) {
     try {
@@ -223,6 +224,40 @@ export async function setup(ctx) {
     }
   }
 
+  function playObstacleContact(payload = {}) {
+    const now = performance.now();
+    if (now - lastObstacleSoundAt < 170) return;
+    lastObstacleSoundAt = now;
+
+    const speed = Math.max(
+      Number(payload.horizontalSpeed) || 0,
+      Number(payload.speedBefore) || 0,
+      Number(payload.speedAfter) || 0,
+    );
+    const intensity = clamp01(speed / 5.4);
+    const unstable = Boolean(payload.unstableTop);
+
+    lastRig = playRandom(
+      RIG,
+      0.055 + intensity * 0.08,
+      0.095 + intensity * 0.13,
+      lastRig,
+      0.025,
+    );
+
+    if (unstable || Math.random() < 0.68) {
+      later(() => {
+        lastCloth = playRandom(
+          CLOTH,
+          0.045 + intensity * 0.05,
+          0.08 + intensity * 0.09,
+          lastCloth,
+          0.05,
+        );
+      }, 35, 95);
+    }
+  }
+
   function maybeFlightFoley(state) {
     if (state?.phase !== "deployed" || clamp01(state.inflation) < 0.92) return;
     const now = performance.now();
@@ -285,6 +320,11 @@ export async function setup(ctx) {
     if (packet.event === "parachute:landing-approach") {
       if (!landingApproachActive) playLandingApproach();
       landingApproachActive = true;
+      return;
+    }
+
+    if (packet.event === "parachute:obstacle-hit" || packet.event === "parachute:obstacle-impact") {
+      playObstacleContact(payload);
       return;
     }
 
