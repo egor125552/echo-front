@@ -6,10 +6,13 @@ const SAFE_REPLACEMENT_RADIUS = BOT_MAX_START_RADIUS;
 const SAFE_REPLACEMENT_ATTEMPTS = 512;
 const SOURCE_START_RADII = Object.freeze([125, 190, 255, 320, 385]);
 const COMPACT_START_RADII = Object.freeze([125, 175, 225, 275, 325]);
+const BOT_INITIAL_HEADING_OFFSETS = Object.freeze([
+  1.05, -1.2, 1.35, -1.5, 1.7, -1.9, 2.1, -2.3,
+]);
 
 export const manifest = {
   id: "bot-fill",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: [
     "bot-controller", "bot-loadouts", "entities", "teams", "rapier-physics", "map-test-arena",
   ],
@@ -44,6 +47,16 @@ function compactInitialSpawn(spawn) {
   };
 }
 
+function diversifyInitialHeading(spawn, serial) {
+  if (!spawn) return spawn;
+  const baseAngle = Number(spawn.angle) || 0;
+  const index = Math.max(0, Number(serial) - 1) % BOT_INITIAL_HEADING_OFFSETS.length;
+  return {
+    ...spawn,
+    angle: baseAngle + BOT_INITIAL_HEADING_OFFSETS[index],
+  };
+}
+
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const bots = ctx.services.get("bots");
@@ -57,7 +70,8 @@ export async function setup(ctx) {
     serial += 1;
     const team = serial;
     const spec = loadouts.create(serial, team);
-    const spawn = position ?? compactInitialSpawn(map.nextSpawn());
+    const baseSpawn = position ?? compactInitialSpawn(map.nextSpawn());
+    const spawn = diversifyInitialHeading(baseSpawn, serial);
     entities.spawn({ ...spec, position: spawn });
     return spec.id;
   }
