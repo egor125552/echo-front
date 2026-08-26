@@ -5,7 +5,10 @@ import {
   BOT_BEHAVIOR_STATES,
   botBehaviorMachine,
 } from "../src/plugins/battle-royale-bot-state-machine/server.js";
-import { BOT_AI_ROLLOUT, usesXStateBotBrain } from "../src/config/bot-ai-rollout.js";
+import {
+  BOT_AI_ROLLOUT,
+  usesXStateBotBrain,
+} from "../src/plugins/battle-royale-bot-rollout/server.js";
 
 function send(actor, goal, now, holdUntil = now + 1000, force = false) {
   actor.send({
@@ -53,4 +56,5 @@ test("rollout starts with exactly one XState canary bot", () => {
   assert.equal(BOT_AI_ROLLOUT.mode, "canary");
   assert.equal(usesXStateBotBrain(BOT_AI_ROLLOUT.canaryBotId), true);
   assert.equal(usesXStateBotBrain("br-bot-94"), BOT_AI_ROLLOUT.canaryBotId === "br-bot-94");
+  assert.equal(usesXStateBotBrain("br-bot-2"), BOT_AI_ROLLOUT.canaryBotId === "br-bot-2");
 });
