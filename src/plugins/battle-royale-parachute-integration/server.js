@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-parachute-integration",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "match-api", "battle-royale-parachute", "battle-royale", "movement",
     "rapier-physics", "entities",
@@ -14,6 +14,10 @@ export const manifest = {
 
 const PARACHUTE_SUPPORT_PROBE_DISTANCE = 800;
 const LANDING_SUPPORT_TOLERANCE = 0.08;
+const UNSTABLE_CONTACT_PROBE_DISTANCE = 0.28;
+const UNSTABLE_SIDE_SLIP_PER_TICK = 0.085;
+const STABLE_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
+const UNSTABLE_TOP_KINDS = new Set(["building-wall", "building-door"]);
 
 function enrichSnapshot(snapshot, parachute) {
   if (!snapshot || !Array.isArray(snapshot.entities)) return snapshot;
@@ -51,6 +55,20 @@ export async function setup(ctx) {
     return hit ? Math.max(0, Number(hit.distance) - lift) : Infinity;
   }
 
+  function worldSurfaceAtFeet(transform) {
+    if (!transform || typeof physics.raycastWorld !== "function") return null;
+    const lift = 0.12;
+    const hit = physics.raycastWorld(
+      { x: transform.x, y: transform.y + lift, z: transform.z },
+      { x: 0, y: -1, z: 0 },
+      UNSTABLE_CONTACT_PROBE_DISTANCE,
+    );
+    if (!hit) return null;
+    const distance = Math.max(0, Number(hit.distance) - lift);
+    if (distance > LANDING_SUPPORT_TOLERANCE) return null;
+    return { ...hit, distance };
+  }
+
   function clearUnsupportedGrounding() {
     for (const entity of entities.all()) {
       if (!entity.alive || entity.bot || entity.kind !== "human") continue;
@@ -59,6 +77,71 @@ export async function setup(ctx) {
       if (!state?.airborne || !transform?.grounded) continue;
       if (supportDistanceAt(transform) > LANDING_SUPPORT_TOLERANCE) {
         transform.grounded = false;
+      }
+    }
+  }
+
+  function resolveUnstableTopContacts(now = Date.now()) {
+    for (const entity of entities.all()) {
+      if (!entity.alive || entity.bot || entity.kind !== "human") continue;
+      const state = ctx.components.get(entity.id, "Parachute");
+      const transform = ctx.components.get(entity.id, "Transform");
+      if (!state?.airborne || state.phase !== "deployed" || !transform) continue;
+      if (supportDistanceAt(transform) <= LANDING_SUPPORT_TOLERANCE) {
+        state.unstableContactKey = null;
+        continue;
+      }
+
+      const hit = worldSurfaceAtFeet(transform);
+      const object = hit?.worldObject ?? null;
+      const kind = String(object?.kind ?? "");
+      if (!hit || !UNSTABLE_TOP_KINDS.has(kind)) {
+        state.unstableContactKey = null;
+        continue;
+      }
+
+      const hx = Math.max(0.01, Math.abs(Number(object.hx) || 0.01));
+      const hz = Math.max(0.01, Math.abs(Number(object.hz) || 0.01));
+      let slipX = 0;
+      let slipZ = 0;
+
+      if (hx <= hz) {
+        let side = Math.sign((Number(transform.x) || 0) - (Number(object.x) || 0));
+        if (!side) side = Math.cos(Number(transform.angle) || 0) >= 0 ? 1 : -1;
+        slipX = side * UNSTABLE_SIDE_SLIP_PER_TICK;
+      } else {
+        let side = Math.sign((Number(transform.z) || 0) - (Number(object.z) || 0));
+        if (!side) side = Math.sin(Number(transform.angle) || 0) >= 0 ? 1 : -1;
+        slipZ = side * UNSTABLE_SIDE_SLIP_PER_TICK;
+      }
+
+      physics.move(entity.id, slipX, slipZ, 0);
+      const position = physics.position(entity.id);
+      if (position) {
+        transform.x = position.x;
+        transform.y = position.y;
+        transform.z = position.z;
+      }
+      transform.grounded = false;
+      state.glideSpeed = Math.max(0.55, (Number(state.glideSpeed) || 0) * 0.86);
+      state.turnRate = (Number(state.turnRate) || 0) * 0.55;
+      state.airSpeed = Math.hypot(
+        Math.max(0, -(Number(state.simulatedVerticalVelocity) || 0)),
+        state.glideSpeed,
+      );
+
+      const key = `${kind}:${hit.colliderHandle ?? object.id ?? "surface"}`;
+      if (state.unstableContactKey !== key) {
+        state.unstableContactKey = key;
+        ctx.events.emit("parachute:obstacle-impact", {
+          entityId: entity.id,
+          kind,
+          objectId: object.doorId ?? object.id ?? null,
+          objectName: object.accessibleName ?? null,
+          unstableTop: true,
+          speedAfter: state.glideSpeed,
+          now,
+        });
       }
     }
   }
@@ -112,6 +195,7 @@ export async function setup(ctx) {
       result = originalStep(dt, now);
     }
 
+    resolveUnstableTopContacts(now);
     clearUnsupportedGrounding();
     withParachuteQueries(() => parachute.finishMovement(dt, now), { wrapMove: true });
     return result;
@@ -138,6 +222,7 @@ export async function setup(ctx) {
       kind,
       objectId: objectId ?? null,
       objectName: objectName ?? null,
+      unstableTop: false,
       speedBefore: before,
       speedAfter: state.glideSpeed,
       now: Number(now) || Date.now(),
