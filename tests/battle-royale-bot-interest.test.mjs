@@ -10,9 +10,11 @@ import * as botControllerPlugin from "../src/plugins/bot-controller/server.js";
 import * as spatialGridPlugin from "../src/plugins/battle-royale-spatial-grid/server.js";
 import * as botInterestPlugin from "../src/plugins/battle-royale-bot-interest/server.js";
 import {
-  BOT_INTEREST_CAPACITY,
+  BOT_EXPLORATION_DISTANCE_SPREAD,
+  BOT_EXPLORATION_MIN_DISTANCE,
   BOT_HEARING_FOOTSTEP_TTL_MS,
   BOT_HEARING_WEAPON_TTL_MS,
+  BOT_INTEREST_CAPACITY,
   BOT_WEAPON_INVESTIGATION_CAP,
 } from "../src/plugins/battle-royale-bot-interest/server.js";
 import { UPPER_FLOOR_Y } from "../src/plugins/battle-royale-map/server.js";
@@ -194,6 +196,51 @@ test("warehouse curiosity has a hard visitor cap instead of pulling every nearby
   assert.ok(targets.length <= BOT_INTEREST_CAPACITY, `warehouse visitor cap exceeded: ${targets.length}`);
   assert.equal(interest.activeAssignmentCount("warehouse", now), targets.length);
   assert.ok(targets.some(({ target }) => target.y === 0 || target.y === UPPER_FLOOR_Y));
+
+  await host.stop();
+});
+
+test("a bot beside the warehouse checks the building instead of wandering away", async () => {
+  const host = await interestHost();
+  const entities = host.services.get("entities");
+  const interest = host.services.get("bot-interest");
+  const now = 210_000;
+
+  entities.spawn({
+    id: "warehouse-neighbor",
+    bot: true,
+    team: 2,
+    position: { x: 80, y: 0, z: 0, angle: -Math.PI / 2 },
+  });
+  const transform = host.components.get("warehouse-neighbor", "Transform");
+  const target = interest.targetFor("warehouse-neighbor", transform, now);
+
+  assert.equal(target?.kind, "poi-interest");
+  assert.equal(target?.group, "warehouse");
+  assert.ok(interest.assignmentFor("warehouse-neighbor"));
+  assert.equal(interest.explorationFor("warehouse-neighbor"), null);
+
+  await host.stop();
+});
+
+test("generic exploration stays local instead of sending idle bots across the map", async () => {
+  const host = await interestHost();
+  const entities = host.services.get("entities");
+  const interest = host.services.get("bot-interest");
+  const now = 240_000;
+  const origin = { x: -220, y: 0, z: -220, angle: 0 };
+
+  entities.spawn({ id: "local-explorer", bot: true, team: 2, position: origin });
+  const transform = host.components.get("local-explorer", "Transform");
+  const target = interest.targetFor("local-explorer", transform, now);
+
+  assert.equal(target?.kind, "explore-interest");
+  const distance = Math.hypot(target.x - origin.x, target.z - origin.z);
+  assert.ok(distance >= BOT_EXPLORATION_MIN_DISTANCE * 0.65, `patrol too short: ${distance}`);
+  assert.ok(
+    distance <= BOT_EXPLORATION_MIN_DISTANCE + BOT_EXPLORATION_DISTANCE_SPREAD + 0.01,
+    `patrol too long: ${distance}`,
+  );
 
   await host.stop();
 });
