@@ -18,6 +18,7 @@ jobs:
       - run: npm install
       - run: npm test
       - name: Profile BR opening
+        if: always()
         run: node scripts/profile-br-opening.mjs
       - run: npx wrangler deploy --dry-run
       - name: Start local Worker
