@@ -3,7 +3,7 @@ export const BOT_DECISION_HOLD_SPREAD_MS = 650;
 
 export const manifest = {
   id: "bot-brain",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["bot-controller", "entities", "battle-royale"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
@@ -75,6 +75,8 @@ export function chooseUtilityDecision({
   memory = null,
   zoneTarget = null,
   interestTarget = null,
+  underFire = false,
+  threatTargetId = null,
 } = {}) {
   const safeProfile = profile ?? botPersonality("bot");
   const durability = clamp01(ownDurability);
@@ -86,7 +88,8 @@ export function chooseUtilityDecision({
   for (const enemy of visible) {
     const distance = Math.max(0.1, Number(enemy.distance) || 999);
     const weakness = 1 - enemyDurability(enemy);
-    const score = distance * (1 - weakness * 0.22);
+    const attackerPriority = underFire && threatTargetId && enemy.entityId === threatTargetId ? 0.42 : 1;
+    const score = distance * (1 - weakness * 0.22) * attackerPriority;
     if (score >= targetScore) continue;
     target = enemy;
     targetScore = score;
@@ -96,10 +99,13 @@ export function chooseUtilityDecision({
   const targetWeakness = target ? 1 - enemyDurability(target) : 0;
   const surrounded = clamp01((threatCount - 1) / 2);
   const closePressure = Number.isFinite(nearestDistance)
-    ? clamp01((8 - nearestDistance) / 8)
+    ? clamp01((10 - nearestDistance) / 10)
     : 0;
   const rangeAdvantage = target && nearestDistance <= safeProfile.preferredRange + 2 ? 1 : 0;
   const ringPressure = zonePressure(zoneTarget);
+  const defendingAgainstAttacker = Boolean(
+    underFire && target && (!threatTargetId || target.entityId === threatTargetId),
+  );
 
   const engageScore = target ? clamp01(
     0.12
@@ -107,6 +113,8 @@ export function chooseUtilityDecision({
     + durability * 0.16
     + targetWeakness * 0.28
     + rangeAdvantage * 0.08
+    + closePressure * 0.1
+    + (defendingAgainstAttacker ? 0.3 : 0)
     - safeProfile.caution * 0.18
     - surrounded * safeProfile.caution * 0.3
     - (1 - durability) * 0.24
@@ -119,9 +127,9 @@ export function chooseUtilityDecision({
     + (1 - safeProfile.aggression) * 0.22
     + (1 - durability) * 0.58
     + surrounded * 0.36
-    + closePressure * safeProfile.caution * 0.1
     - targetWeakness * 0.16
     - rangeAdvantage * safeProfile.aggression * 0.08
+    - (defendingAgainstAttacker ? 0.12 : 0)
   ) : 0;
 
   const zoneScore = zoneTarget ? clamp01(
@@ -131,6 +139,7 @@ export function chooseUtilityDecision({
     0.3 + safeProfile.persistence * 0.52 + durability * 0.12
   ) : 0;
   const heardScore = !target ? soundInterestScore(safeProfile, durability, interestTarget) : null;
+  const isSoundInterest = interestTarget?.kind === "sound-interest";
   const interestScore = !target && interestTarget
     ? (heardScore ?? clamp01(0.22 + safeProfile.curiosity * 0.58 + durability * 0.08))
     : 0;
@@ -143,7 +152,13 @@ export function chooseUtilityDecision({
   }
 
   if (target) {
-    if (zoneTarget && nearestDistance > 8 && zoneScore > engageScore + 0.04 && zoneScore > evadeScore) {
+    if (
+      zoneTarget
+      && !defendingAgainstAttacker
+      && nearestDistance > 8
+      && zoneScore > engageScore + 0.04
+      && zoneScore > evadeScore
+    ) {
       return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
     }
 
@@ -155,6 +170,7 @@ export function chooseUtilityDecision({
         threatCount,
         desiredRange: safeProfile.preferredRange + 5,
         tactic: safeProfile.flankBias > 0.62 ? "break-angle" : "withdraw",
+        returnFire: defendingAgainstAttacker || nearestDistance <= 10,
       };
     }
     return {
@@ -169,7 +185,9 @@ export function chooseUtilityDecision({
     };
   }
 
-  if (interestTarget && interestScore > huntScore) {
+  // Fresh actionable sound may replace stale knowledge. A generic POI may not:
+  // remembering an actual enemy must outrank casual curiosity about a building.
+  if (isSoundInterest && interestScore > huntScore) {
     return { goal: "investigate", score: interestScore, target: interestTarget, threatCount: 0 };
   }
   if (memory) {
@@ -254,7 +272,8 @@ export async function setup(ctx) {
       && Number(context.interestTarget.heardAt) > Number(previous?.heardAt ?? -Infinity);
     const mayKeepPeacefulPlan = peacefulCommitment && !hasVisibleThreat && !urgentZone && !freshSound;
     const mayKeepCombatPlan = Boolean(currentPreviousTarget)
-      && (previous?.goal === "engage" || previous?.goal === "evade");
+      && (previous?.goal === "engage" || previous?.goal === "evade")
+      && !context.underFire;
 
     if (previous && now < previous.holdUntil && (mayKeepPeacefulPlan || mayKeepCombatPlan)) {
       if (currentPreviousTarget) {
@@ -274,6 +293,8 @@ export async function setup(ctx) {
       memory: context.memory,
       zoneTarget: context.zoneTarget,
       interestTarget: context.interestTarget,
+      underFire: Boolean(context.underFire),
+      threatTargetId: context.threatTargetId ?? null,
     });
 
     const cycle = stableHash(`${botId}:${Math.floor(now / 250)}`);
