@@ -1,11 +1,13 @@
 export const BOT_THREAT_MEMORY_MS = 3_500;
+export const BOT_DEFENSIVE_RESPONSE_MS = 700;
+export const BOT_DEFENSIVE_RESPONSE_COOLDOWN_MS = 2_500;
 export const BOT_SOUND_SEARCH_MS = 12_000;
 export const BOT_SOUND_SEARCH_REACHED = 1.8;
 export const BOT_STAIR_COMMIT_MIN_Y = 0.02;
 
 export const manifest = {
   id: "battle-royale-bot-tactics",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["bot-brain", "battle-royale-bot-interest", "entities", "map-test-arena"],
   capabilities: ["services.consume", "components.read", "events.on"],
 };
@@ -82,8 +84,22 @@ export async function setup(ctx) {
     const target = entities.get(targetId);
     const attacker = entities.get(attackerId);
     if (!target?.bot || !target.alive || !attacker?.alive) return;
+
+    const previous = threats.get(targetId);
+    const continuing = previous
+      && previous.attackerId === attackerId
+      && previous.expiresAt > now;
+    let forceUntil = now + BOT_DEFENSIVE_RESPONSE_MS;
+    let nextForceAt = now + BOT_DEFENSIVE_RESPONSE_COOLDOWN_MS;
+    if (continuing && now < previous.nextForceAt) {
+      forceUntil = previous.forceUntil;
+      nextForceAt = previous.nextForceAt;
+    }
+
     threats.set(targetId, {
       attackerId,
+      forceUntil,
+      nextForceAt,
       expiresAt: now + BOT_THREAT_MEMORY_MS,
     });
   });
@@ -181,10 +197,10 @@ export async function setup(ctx) {
       ? visible.find((enemy) => enemy.entityId === activeThreat.attackerId)
       : null;
 
-    // Being shot is an immediate tactical fact. A bot may reposition, but it may
-    // not calmly ignore a visible attacker because a long-term utility score said
-    // that another plan looked nicer.
-    if (attacker) {
+    // A hit grants a short defensive response window, not a compulsory duel to
+    // the death. Repeated hits do not extend that window every frame; after a
+    // cooldown a still-aggressive attacker can provoke another defensive burst.
+    if (attacker && now < activeThreat.forceUntil) {
       const profile = base.profile ?? brain.profile(botId);
       const desiredRange = Math.max(8, Number(profile?.preferredRange) || 8);
       return {
@@ -197,7 +213,7 @@ export async function setup(ctx) {
         desiredRange,
         tactic: Number(attacker.distance) < desiredRange - 1 ? "space" : "press",
         defensive: true,
-        holdUntil: Math.min(Number(base.holdUntil) || now + 350, now + 350),
+        holdUntil: Math.min(Number(base.holdUntil) || now + 300, now + 300),
       };
     }
 
@@ -206,8 +222,6 @@ export async function setup(ctx) {
       && Number(transform.y) < upperY - 0.12;
     if (!onStairTransition) return base;
 
-    // Once the capsule has physically started changing floors, do not let an
-    // evade/curiosity re-plan turn it around on the first centimetres of ramp.
     const visibleTarget = visible[0] ?? null;
     if (visibleTarget && Math.abs(Number(visibleTarget.transform?.y) - Number(transform.y)) > 0.8) {
       return {
