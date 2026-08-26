@@ -62,16 +62,43 @@ jobs:
         env:
           REQUEST_ID: ${{ steps.request.outputs.id }}
         run: |
-          curl --fail --silent --show-error \
-            -X POST \
-            -H 'Content-Type: application/json' \
-            --data "{\"requestId\":${REQUEST_ID}}" \
-            https://echo-front.k69ysrndm7.workers.dev/api/engine-command \
-            | tee engine-command-result.json
-          jq . engine-command-result.json
+          : > engine-command-result.json
+          LAST_STATUS="000"
+          for i in {1..30}; do
+            STATUS=$(curl --max-time 15 --silent --show-error \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              --data "{\"requestId\":${REQUEST_ID}}" \
+              --output engine-command-result.json \
+              --write-out '%{http_code}' \
+              https://echo-front.k69ysrndm7.workers.dev/api/engine-command || true)
+            LAST_STATUS="${STATUS:-000}"
+            echo "Engine command HTTP $LAST_STATUS (attempt $i)"
+            if [ -s engine-command-result.json ]; then
+              jq . engine-command-result.json || cat engine-command-result.json
+            else
+              echo '{"ok":false,"error":"empty engine command response"}' > engine-command-result.json
+            fi
+
+            case "$LAST_STATUS" in
+              2??)
+                exit 0
+                ;;
+              409)
+                echo "Compiled Worker is fresh but the Durable Object may still be on the previous isolate; retrying."
+                sleep 2
+                ;;
+              *)
+                echo "Engine command failed with HTTP $LAST_STATUS"
+                exit 1
+                ;;
+            esac
+          done
+          echo "Engine command never became executable; final HTTP status $LAST_STATUS"
+          exit 1
 
       - uses: actions/upload-artifact@v4
-        if: steps.request.outputs.id != '0'
+        if: always() && steps.request.outputs.id != '0'
         with:
           name: engine-command-${{ steps.request.outputs.id }}
           path: engine-command-result.json
@@ -79,9 +106,13 @@ jobs:
           retention-days: 7
 
       - name: Summary
-        if: steps.request.outputs.id != '0'
+        if: always() && steps.request.outputs.id != '0'
         run: |
           echo "### Engine command" >> "$GITHUB_STEP_SUMMARY"
           echo "Request: ${{ steps.request.outputs.id }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Command: ${{ steps.request.outputs.command }}" >> "$GITHUB_STEP_SUMMARY"
-          cat engine-command-result.json >> "$GITHUB_STEP_SUMMARY"
+          if [ -s engine-command-result.json ]; then
+            cat engine-command-result.json >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No response body was captured." >> "$GITHUB_STEP_SUMMARY"
+          fi
