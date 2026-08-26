@@ -52,18 +52,19 @@ test("a visible attacker cannot shoot a BR bot repeatedly without provoking retu
 });
 
 test("after reaching the last heard footsteps a bot searches the area instead of instantly roaming away", async () => {
-  const { game, now } = await activeBattleRoyale("tactical-search-human");
+  const { game } = await activeBattleRoyale("tactical-search-human");
   const hunter = keepOneBot(game);
   const movement = game.host.services.get("movement");
   const interest = game.host.services.get("bot-interest");
   const grid = game.host.services.get("spatial-grid");
+  const soundNow = Date.now() + 1_000;
 
   movement.teleport(hunter.id, { x: 0, y: 0, z: 0, angle: 0 });
   movement.teleport("tactical-search-human", { x: 30, y: 0, z: 0, angle: Math.PI });
-  grid.rebuild(Date.now() + 1_000);
+  grid.rebuild(soundNow);
 
   for (let i = 0; i < 4; i += 1) {
-    game.host.events.emit("sound:spatial", {
+    const heardBy = interest.recordSound({
       entityId: "tactical-search-human",
       key: `footstep.forest.${(i % 3) + 1}`,
       gait: "walk",
@@ -71,23 +72,25 @@ test("after reaching the last heard footsteps a bot searches the area instead of
       y: 0,
       z: 0,
       radius: 32,
-    });
+    }, soundNow + i * 200);
+    assert.equal(heardBy, 1, `synthetic footstep ${i + 1} was not heard by the nearby bot`);
   }
 
   let transform = game.host.components.get(hunter.id, "Transform");
-  const heard = interest.targetFor(hunter.id, transform, now + 100);
+  const heard = interest.targetFor(hunter.id, transform, soundNow + 700);
   assert.equal(heard?.kind, "sound-interest");
   assert.equal(heard?.x, 30);
+  assert.equal(heard?.confidence, 4);
 
   movement.teleport(hunter.id, { x: 30, y: 0, z: 0, angle: 0 });
   transform = game.host.components.get(hunter.id, "Transform");
-  const search = interest.targetFor(hunter.id, transform, now + 200);
+  const search = interest.targetFor(hunter.id, transform, soundNow + 800);
   assert.equal(search?.kind, "sound-interest");
   assert.equal(search?.phase, "search");
   assert.ok(Math.hypot(search.x - 30, search.z) >= 4, "search point never expanded beyond the heard coordinate");
 
   movement.teleport("tactical-search-human", { x: 120, y: 0, z: 80, angle: 0 });
-  const stillSearching = interest.targetFor(hunter.id, transform, now + 400);
+  const stillSearching = interest.targetFor(hunter.id, transform, soundNow + 1_000);
   assert.equal(stillSearching?.phase, "search");
   assert.ok(
     Math.hypot(stillSearching.x - 30, stillSearching.z) < 20,
