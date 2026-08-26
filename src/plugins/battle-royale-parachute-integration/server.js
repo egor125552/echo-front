@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-parachute-integration",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: [
     "match-api", "battle-royale-parachute", "battle-royale", "movement",
     "rapier-physics", "entities",
@@ -16,7 +16,9 @@ const PARACHUTE_SUPPORT_PROBE_DISTANCE = 800;
 const LANDING_SUPPORT_TOLERANCE = 0.08;
 const UNSTABLE_CONTACT_PROBE_DISTANCE = 0.28;
 const UNSTABLE_SIDE_SLIP_PER_TICK = 0.085;
-const STABLE_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
+const UNSTABLE_SLIP_MEMORY_MS = 650;
+const UNSTABLE_SLIP_SPEED_RETAIN = 0.94;
+const UNSTABLE_INITIAL_SPEED_RETAIN = 0.86;
 const UNSTABLE_TOP_KINDS = new Set(["building-wall", "building-door"]);
 
 function enrichSnapshot(snapshot, parachute) {
@@ -69,6 +71,13 @@ export async function setup(ctx) {
     return { ...hit, distance };
   }
 
+  function clearSlipMemory(state) {
+    state.unstableContactKey = null;
+    state.unstableSlipX = 0;
+    state.unstableSlipZ = 0;
+    state.unstableSlipUntil = 0;
+  }
+
   function clearUnsupportedGrounding() {
     for (const entity of entities.all()) {
       if (!entity.alive || entity.bot || entity.kind !== "human") continue;
@@ -81,68 +90,102 @@ export async function setup(ctx) {
     }
   }
 
+  function chooseSlipVector(transform, object) {
+    const hx = Math.max(0.01, Math.abs(Number(object?.hx) || 0.01));
+    const hz = Math.max(0.01, Math.abs(Number(object?.hz) || 0.01));
+
+    if (hx <= hz) {
+      let side = Math.sign((Number(transform.x) || 0) - (Number(object?.x) || 0));
+      if (!side) side = Math.cos(Number(transform.angle) || 0) >= 0 ? 1 : -1;
+      return { x: side * UNSTABLE_SIDE_SLIP_PER_TICK, z: 0 };
+    }
+
+    let side = Math.sign((Number(transform.z) || 0) - (Number(object?.z) || 0));
+    if (!side) side = Math.sin(Number(transform.angle) || 0) >= 0 ? 1 : -1;
+    return { x: 0, z: side * UNSTABLE_SIDE_SLIP_PER_TICK };
+  }
+
+  function applySlip(entityId, state, transform, slipX, slipZ, retain) {
+    physics.move(entityId, slipX, slipZ, 0);
+    const position = physics.position(entityId);
+    if (position) {
+      transform.x = position.x;
+      transform.y = position.y;
+      transform.z = position.z;
+    }
+    transform.grounded = false;
+    state.glideSpeed = Math.max(0.55, (Number(state.glideSpeed) || 0) * retain);
+    state.turnRate = (Number(state.turnRate) || 0) * 0.72;
+    state.airSpeed = Math.hypot(
+      Math.max(0, -(Number(state.simulatedVerticalVelocity) || 0)),
+      state.glideSpeed,
+    );
+  }
+
   function resolveUnstableTopContacts(now = Date.now()) {
     for (const entity of entities.all()) {
       if (!entity.alive || entity.bot || entity.kind !== "human") continue;
       const state = ctx.components.get(entity.id, "Parachute");
       const transform = ctx.components.get(entity.id, "Transform");
       if (!state?.airborne || state.phase !== "deployed" || !transform) continue;
+
       if (supportDistanceAt(transform) <= LANDING_SUPPORT_TOLERANCE) {
-        state.unstableContactKey = null;
+        clearSlipMemory(state);
         continue;
       }
 
       const hit = worldSurfaceAtFeet(transform);
       const object = hit?.worldObject ?? null;
       const kind = String(object?.kind ?? "");
-      if (!hit || !UNSTABLE_TOP_KINDS.has(kind)) {
-        state.unstableContactKey = null;
+
+      if (hit && UNSTABLE_TOP_KINDS.has(kind)) {
+        const slip = chooseSlipVector(transform, object);
+        state.unstableSlipX = slip.x;
+        state.unstableSlipZ = slip.z;
+        state.unstableSlipUntil = now + UNSTABLE_SLIP_MEMORY_MS;
+
+        applySlip(
+          entity.id,
+          state,
+          transform,
+          state.unstableSlipX,
+          state.unstableSlipZ,
+          UNSTABLE_INITIAL_SPEED_RETAIN,
+        );
+
+        const key = `${kind}:${hit.colliderHandle ?? object.id ?? "surface"}`;
+        if (state.unstableContactKey !== key) {
+          state.unstableContactKey = key;
+          ctx.events.emit("parachute:obstacle-impact", {
+            entityId: entity.id,
+            kind,
+            objectId: object.doorId ?? object.id ?? null,
+            objectName: object.accessibleName ?? null,
+            unstableTop: true,
+            speedAfter: state.glideSpeed,
+            now,
+          });
+        }
         continue;
       }
 
-      const hx = Math.max(0.01, Math.abs(Number(object.hx) || 0.01));
-      const hz = Math.max(0.01, Math.abs(Number(object.hz) || 0.01));
-      let slipX = 0;
-      let slipZ = 0;
-
-      if (hx <= hz) {
-        let side = Math.sign((Number(transform.x) || 0) - (Number(object.x) || 0));
-        if (!side) side = Math.cos(Number(transform.angle) || 0) >= 0 ? 1 : -1;
-        slipX = side * UNSTABLE_SIDE_SLIP_PER_TICK;
-      } else {
-        let side = Math.sign((Number(transform.z) || 0) - (Number(object.z) || 0));
-        if (!side) side = Math.sin(Number(transform.angle) || 0) >= 0 ? 1 : -1;
-        slipZ = side * UNSTABLE_SIDE_SLIP_PER_TICK;
+      if (
+        Number(state.unstableSlipUntil || 0) > now
+        && (Math.abs(Number(state.unstableSlipX) || 0) > 0.001
+          || Math.abs(Number(state.unstableSlipZ) || 0) > 0.001)
+      ) {
+        applySlip(
+          entity.id,
+          state,
+          transform,
+          Number(state.unstableSlipX) || 0,
+          Number(state.unstableSlipZ) || 0,
+          UNSTABLE_SLIP_SPEED_RETAIN,
+        );
+        continue;
       }
 
-      physics.move(entity.id, slipX, slipZ, 0);
-      const position = physics.position(entity.id);
-      if (position) {
-        transform.x = position.x;
-        transform.y = position.y;
-        transform.z = position.z;
-      }
-      transform.grounded = false;
-      state.glideSpeed = Math.max(0.55, (Number(state.glideSpeed) || 0) * 0.86);
-      state.turnRate = (Number(state.turnRate) || 0) * 0.55;
-      state.airSpeed = Math.hypot(
-        Math.max(0, -(Number(state.simulatedVerticalVelocity) || 0)),
-        state.glideSpeed,
-      );
-
-      const key = `${kind}:${hit.colliderHandle ?? object.id ?? "surface"}`;
-      if (state.unstableContactKey !== key) {
-        state.unstableContactKey = key;
-        ctx.events.emit("parachute:obstacle-impact", {
-          entityId: entity.id,
-          kind,
-          objectId: object.doorId ?? object.id ?? null,
-          objectName: object.accessibleName ?? null,
-          unstableTop: true,
-          speedAfter: state.glideSpeed,
-          now,
-        });
-      }
+      clearSlipMemory(state);
     }
   }
 
