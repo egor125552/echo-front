@@ -90,7 +90,16 @@ test("a BR bot already halfway up the stair keeps climbing instead of combat-str
   }
 
   const transform = game.host.components.get(hunter.id, "Transform");
-  assert.equal(reachedUpper, true, `bot still failed the live stair pursuit: x=${transform?.x}, y=${transform?.y}, z=${transform?.z}`);
+  const input = game.host.components.get(hunter.id, "Input");
+  const map = game.host.services.get("map");
+  const brain = game.host.services.get("bot-brain");
+  const route = map.navigationWaypoint(transform, { x: 65, y: UPPER_FLOOR_Y, z: -9 });
+  const commitment = brain.commitmentFor(hunter.id);
+  assert.equal(
+    reachedUpper,
+    true,
+    `bot still failed the live stair pursuit: ${JSON.stringify({ transform, input, route, commitment })}`,
+  );
   assert.ok(Math.abs(transform.z) < 1.5, `bot should stay near the stair centreline instead of falling off the side: z=${transform.z}`);
 
   await game.host.stop();
