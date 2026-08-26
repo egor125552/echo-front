@@ -14,7 +14,7 @@ export const BOT_BEHAVIOR_STATES = Object.freeze([
 
 export const manifest = {
   id: "bot-state-machine",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["bot-controller", "bot-ai-rollout"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -79,6 +79,24 @@ function traversingToSoundInvestigation(decision) {
     && decision?.resumeTarget?.kind === "sound-interest";
 }
 
+function sameSound(a, b) {
+  if (a?.kind !== "sound-interest" || b?.kind !== "sound-interest") return false;
+  if (a.sourceId && b.sourceId && a.sourceId !== b.sourceId) return false;
+  if (Number.isFinite(Number(a.heardAt)) && Number.isFinite(Number(b.heardAt))) {
+    return Number(a.heardAt) === Number(b.heardAt);
+  }
+  return Math.hypot(
+    (Number(a.x) || 0) - (Number(b.x) || 0),
+    (Number(a.y) || 0) - (Number(b.y) || 0),
+    (Number(a.z) || 0) - (Number(b.z) || 0),
+  ) < 0.25;
+}
+
+function traversalContinuesInvestigation(currentDecision, candidate) {
+  return traversingToSoundInvestigation(candidate)
+    && sameSound(currentDecision?.target, candidate.resumeTarget);
+}
+
 export function preserveCommittedSoundWork(machineState, currentDecision, candidate, meta = {}, now = Date.now()) {
   if (!candidate) return candidate;
   const urgent = Boolean(meta.underFire || meta.visibleThreat || meta.freshSound);
@@ -89,6 +107,7 @@ export function preserveCommittedSoundWork(machineState, currentDecision, candid
   }
 
   if (machineState === "investigate" && soundInvestigation(currentDecision)) {
+    if (traversalContinuesInvestigation(currentDecision, candidate)) return candidate;
     return { ...currentDecision };
   }
 
@@ -99,6 +118,7 @@ export function preserveCommittedSoundWork(machineState, currentDecision, candid
       target: currentDecision.resumeTarget,
       targetEntityId: currentDecision.targetEntityId ?? null,
       heardAt: currentDecision.resumeHeardAt ?? currentDecision.resumeTarget.heardAt ?? null,
+      investigateUntil: currentDecision.resumeInvestigateUntil ?? null,
       holdUntil: Number(now) + 900,
       profile: currentDecision.profile,
     };
