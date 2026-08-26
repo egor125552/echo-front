@@ -18,6 +18,7 @@ import * as botPerception from "../plugins/battle-royale-bot-perception/server.j
 import * as battleRoyale from "../plugins/battle-royale/server.js";
 import * as botInterest from "../plugins/battle-royale-bot-interest/server.js";
 import * as botBrain from "../plugins/battle-royale-bot-brain/server.js";
+import * as botTactics from "../plugins/battle-royale-bot-tactics/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
@@ -43,6 +44,7 @@ export const battleRoyalePreset = [
   battleRoyale,
   botInterest,
   botBrain,
+  botTactics,
   botCombat,
   botFill,
   matchApi,
