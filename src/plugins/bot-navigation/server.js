@@ -1,11 +1,12 @@
 export const BOT_OBSTACLE_PROBE_DISTANCE = 1.45;
+export const BOT_DOOR_PROBE_DISTANCE = 2.1;
 export const BOT_STUCK_SAMPLE_MS = 300;
 export const BOT_STUCK_DISTANCE = 0.055;
 
 export const manifest = {
   id: "bot-navigation",
-  version: "1.0.0",
-  requires: ["rapier-physics"],
+  version: "1.1.0",
+  requires: ["rapier-physics", "map-test-arena"],
   capabilities: ["services.consume", "services.provide"],
 };
 
@@ -112,10 +113,34 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
   };
 }
 
+function openDoorInMovementPath(map, physics, botId, transform, input, now) {
+  if (typeof map?.setDoorOpen !== "function") return false;
+  const movementMagnitude = Math.hypot(input.forward ?? 0, input.strafe ?? 0);
+  if (movementMagnitude < 0.05) return false;
+
+  const direction = localToWorld(transform.angle, input.forward ?? 0, input.strafe ?? 0);
+  const hit = physics.raycast(
+    { x: transform.x, y: (transform.y ?? 0) + 1, z: transform.z },
+    { x: direction.x, y: 0, z: direction.z },
+    BOT_DOOR_PROBE_DISTANCE,
+    botId,
+  );
+  const doorId = hit?.worldObject?.kind === "building-door"
+    ? hit.worldObject.doorId
+    : null;
+  if (!doorId) return false;
+
+  const door = map.doors?.find((entry) => entry.id === doorId);
+  if (!door || door.open) return false;
+  return Boolean(map.setDoorOpen(doorId, true, botId, now));
+}
+
 export async function setup(ctx) {
   const physics = ctx.services.get("physics");
+  const map = ctx.services.get("map");
   ctx.services.provide("bot-navigation", {
     avoid(botId, transform, botState, input, now = Date.now()) {
+      openDoorInMovementPath(map, physics, botId, transform, input, now);
       return applyBotObstacleAvoidance(physics, botId, transform, botState, input, now);
     },
   });
