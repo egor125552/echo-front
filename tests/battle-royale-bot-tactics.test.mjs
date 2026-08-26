@@ -115,3 +115,65 @@ test("after reaching heard footsteps the XState bot enters a bounded search inst
 
   await game.host.stop();
 });
+
+test("a slow warehouse traversal carries the heard gunshot into investigate and search after hearing TTL expires", async () => {
+  const { game, now } = await activeBattleRoyale("tactical-traverse-human");
+  const hunter = keepCanaryBot(game);
+  const movement = game.host.services.get("movement");
+  const brain = game.host.services.get("bot-brain");
+
+  movement.teleport(hunter.id, { x: 80, y: 0, z: 0, angle: -Math.PI / 2 });
+  const sound = {
+    kind: "sound-interest",
+    sourceId: "tactical-traverse-human",
+    key: "weapon.pistol.fire",
+    priority: 3,
+    confidence: 1,
+    heardAt: now + 100,
+    expiresAt: now + 8_100,
+    x: 60,
+    y: 3.2,
+    z: 0,
+  };
+
+  const traverse = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: sound,
+    traversal: {
+      active: true,
+      route: { x: 73.7, y: 0, z: 0, kind: "door", doorId: "warehouse-front-door" },
+      target: sound,
+    },
+  }, now + 150);
+  assert.equal(traverse.goal, "traverse");
+  assert.equal(traverse.resumeGoal, "investigate");
+  assert.equal(traverse.resumeTarget.sourceId, "tactical-traverse-human");
+
+  movement.teleport(hunter.id, { x: 66, y: 3.2, z: 0, angle: Math.PI / 2 });
+  const resumed = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: null,
+    traversal: null,
+  }, now + 9_500);
+  assert.equal(resumed.goal, "investigate");
+  assert.equal(resumed.target.sourceId, "tactical-traverse-human");
+
+  movement.teleport(hunter.id, { x: 60, y: 3.2, z: 0, angle: Math.PI / 2 });
+  const searched = brain.decide(hunter.id, {
+    visibleEnemies: [],
+    memory: null,
+    zoneTarget: null,
+    interestTarget: null,
+    traversal: null,
+    investigationReached: true,
+  }, now + 9_800);
+  assert.equal(searched.goal, "search");
+  assert.ok(searched.searchPoints.some((point) => point.y === 3.2));
+  assert.ok(searched.searchPoints.some((point) => point.y === 0));
+
+  await game.host.stop();
+});
