@@ -11,6 +11,7 @@ import * as spatialGridPlugin from "../src/plugins/battle-royale-spatial-grid/se
 import * as botInterestPlugin from "../src/plugins/battle-royale-bot-interest/server.js";
 import {
   BOT_INTEREST_CAPACITY,
+  BOT_HEARING_FOOTSTEP_TTL_MS,
   BOT_HEARING_WEAPON_TTL_MS,
   BOT_WEAPON_INVESTIGATION_CAP,
 } from "../src/plugins/battle-royale-bot-interest/server.js";
@@ -82,6 +83,48 @@ test("nearby enemy gunfire creates a temporary investigation target for a bot", 
   assert.equal(target?.kind, "sound-interest");
   assert.equal(target?.x, 100);
   assert.equal(target?.z, 40);
+
+  await host.stop();
+});
+
+test("repeated footsteps refresh the last heard position and build confidence", async () => {
+  const host = await interestHost();
+  const entities = host.services.get("entities");
+  const interest = host.services.get("bot-interest");
+  const grid = host.services.get("spatial-grid");
+  const now = 135_000;
+
+  entities.spawn({
+    id: "walking-human",
+    team: 1,
+    position: { x: 20, y: 0, z: 0, angle: 0 },
+  });
+  entities.spawn({
+    id: "listening-bot",
+    bot: true,
+    team: 2,
+    position: { x: 10, y: 0, z: 0, angle: 0 },
+  });
+  grid.rebuild(now);
+
+  for (let step = 0; step < 3; step += 1) {
+    interest.recordSound({
+      entityId: "walking-human",
+      key: `footstep.forest.${step + 1}`,
+      gait: "walk",
+      x: 20 + step,
+      y: 0,
+      z: 0,
+      radius: 32,
+    }, now + step * 900);
+  }
+
+  const heard = interest.heardFor("listening-bot");
+  assert.equal(heard?.sourceId, "walking-human");
+  assert.equal(heard?.confidence, 3);
+  assert.equal(heard?.x, 22);
+  assert.equal(heard?.heardAt, now + 1_800);
+  assert.equal(heard?.expiresAt, now + 1_800 + BOT_HEARING_FOOTSTEP_TTL_MS);
 
   await host.stop();
 });
