@@ -9,6 +9,7 @@ export const BUILDING_CENTER_X = 60;
 export const BUILDING_CENTER_Z = 0;
 export const DOOR_TOGGLE_DEBOUNCE_MS = 450;
 export const STAIR_ROUTE_EDGE_CLEARANCE = 0.36;
+export const STAIR_ROUTE_CAPTURE_HALF_WIDTH = 0.45;
 
 export const BUILDING = Object.freeze({
   id: "warehouse",
@@ -45,7 +46,7 @@ const FIRST_RING_SKIPS = new Set([1, 9, 11, 19]);
 
 export const manifest = {
   id: "map-test-arena",
-  version: "4.2.1",
+  version: "4.2.2",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -198,23 +199,33 @@ function upperDoorWaypoint(from, target) {
 }
 
 function centeredForStairCapture(from) {
-  return from.z >= STAIR.minZ + STAIR_ROUTE_EDGE_CLEARANCE
-    && from.z <= STAIR.maxZ - STAIR_ROUTE_EDGE_CLEARANCE;
+  const z = Number(from?.z);
+  return Number.isFinite(z)
+    && Math.abs(z - BUILDING_CENTER_Z) <= STAIR_ROUTE_CAPTURE_HALF_WIDTH;
+}
+
+function ascendingStairCaptured(from) {
+  return insideRect(from, STAIR, 0.05) && Number(from?.y ?? 0) > 0.08;
+}
+
+function descendingStairCaptured(from) {
+  return insideRect(from, STAIR, 0.05)
+    && Number(from?.y ?? UPPER_FLOOR_Y) < UPPER_FLOOR_Y - 0.08;
 }
 
 function stairWaypoint(from, goingUp) {
   if (goingUp) {
     const bottom = { x: STAIR.maxX - 0.5, y: 0, z: BUILDING_CENTER_Z };
-    const captured = centeredForStairCapture(from)
-      && (insideRect(from, STAIR, 0.05) || distance2(from, bottom) <= 1.25);
+    const nearRamp = insideRect(from, STAIR, 0.05) || distance2(from, bottom) <= 1.25;
+    const captured = nearRamp && (ascendingStairCaptured(from) || centeredForStairCapture(from));
     if (captured) {
       return { x: STAIR.minX - 0.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, kind: "stair" };
     }
     return { ...bottom, kind: "stair" };
   }
   const top = { x: STAIR.minX - 0.5, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z };
-  const captured = centeredForStairCapture(from)
-    && (insideRect(from, STAIR, 0.05) || distance2(from, top) <= 1.25);
+  const nearRamp = insideRect(from, STAIR, 0.05) || distance2(from, top) <= 1.25;
+  const captured = nearRamp && (descendingStairCaptured(from) || centeredForStairCapture(from));
   if (captured) {
     return { x: STAIR.maxX + 0.5, y: 0, z: BUILDING_CENTER_Z, kind: "stair" };
   }
