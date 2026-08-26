@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "2.3.0",
+  version: "2.4.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -334,6 +334,25 @@ async function createRapierPhysics() {
     return describeRayHit(hit);
   }
 
+  function raycastSupportWorld(origin, direction, maxDistance) {
+    const ray = makeRay(origin, direction);
+    const hit = world.castRay(
+      ray,
+      maxDistance,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      collider => {
+        if (colliderToEntity.has(collider.handle)) return false;
+        const kind = colliderMetadata.get(collider.handle)?.kind;
+        return CHARACTER_SUPPORT_KINDS.has(kind);
+      },
+    );
+    return describeRayHit(hit);
+  }
+
   function lineOfSight(from, to, excludeEntityId = null, targetEntityId = null) {
     const dx = to.x - from.x;
     const dy = (to.y ?? 0) - (from.y ?? 0);
@@ -367,6 +386,7 @@ async function createRapierPhysics() {
     move,
     raycast,
     raycastWorld,
+    raycastSupportWorld,
     lineOfSight,
     syncQueries,
     beginBatch,
