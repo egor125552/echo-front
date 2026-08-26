@@ -17,9 +17,8 @@ import * as spatialGrid from "../plugins/battle-royale-spatial-grid/server.js";
 import * as botPerception from "../plugins/battle-royale-bot-perception/server.js";
 import * as battleRoyale from "../plugins/battle-royale/server.js";
 import * as botInterest from "../plugins/battle-royale-bot-interest/server.js";
+import * as botStateMachine from "../plugins/battle-royale-bot-state-machine/server.js";
 import * as botBrain from "../plugins/battle-royale-bot-brain/server.js";
-import * as botTactics from "../plugins/battle-royale-bot-tactics/server.js";
-import * as stairCommitment from "../plugins/battle-royale-stair-commitment/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
@@ -44,9 +43,8 @@ export const battleRoyalePreset = [
   botPerception,
   battleRoyale,
   botInterest,
+  botStateMachine,
   botBrain,
-  botTactics,
-  stairCommitment,
   botCombat,
   botFill,
   matchApi,
