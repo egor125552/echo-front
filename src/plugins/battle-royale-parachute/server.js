@@ -17,7 +17,7 @@ const GROUND_PROBE_DISTANCE = 400;
 
 export const manifest = {
   id: "battle-royale-parachute",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: ["entities", "movement", "rapier-physics", "battle-royale", "health"],
   capabilities: [
     "services.consume", "services.provide",
@@ -60,11 +60,27 @@ function impactDamage(speed) {
 }
 
 function emergencyDeployDistance(speed) {
-  const downward = Math.max(0, Number(speed) || 0);
-  if (downward <= PARACHUTE_CANOPY_TERMINAL_SPEED) return 12;
-  const openingSeconds = Math.min(2.8, (downward - PARACHUTE_CANOPY_TERMINAL_SPEED) / PARACHUTE_MAX_OPENING_DECEL);
-  const brakingDistance = ((downward + PARACHUTE_CANOPY_TERMINAL_SPEED) / 2) * openingSeconds;
-  return Math.max(12, brakingDistance + 12);
+  let downward = Math.max(0, Number(speed) || 0);
+  let distance = 0;
+  let elapsed = 0;
+  const dt = 0.05;
+  for (let i = 0; i < 120; i += 1) {
+    const inflation = clamp((elapsed * 1000) / PARACHUTE_INFLATION_MS, 0, 1);
+    const curve = smoothstep(inflation);
+    const terminal = PARACHUTE_FREEFALL_TERMINAL_SPEED
+      + (PARACHUTE_CANOPY_TERMINAL_SPEED - PARACHUTE_FREEFALL_TERMINAL_SPEED) * curve;
+    const next = aerodynamicDownwardSpeed(
+      downward,
+      terminal,
+      dt,
+      PARACHUTE_MAX_OPENING_DECEL,
+    );
+    distance += ((downward + next) / 2) * dt;
+    downward = next;
+    elapsed += dt;
+    if (inflation >= 1 && downward <= PARACHUTE_CANOPY_TERMINAL_SPEED + 0.5) break;
+  }
+  return Math.max(15, distance + 15);
 }
 
 function publicState(state, transform = null) {
@@ -293,6 +309,29 @@ export async function setup(ctx) {
           sprint: input.sprint,
         };
 
+        const inflationElapsed = Math.max(0, now - Number(state.deployedAt || now));
+        state.inflation = clamp(inflationElapsed / PARACHUTE_INFLATION_MS, 0, 1);
+        const inflationCurve = smoothstep(state.inflation);
+        terminalSpeed = PARACHUTE_FREEFALL_TERMINAL_SPEED
+          + (PARACHUTE_CANOPY_TERMINAL_SPEED - PARACHUTE_FREEFALL_TERMINAL_SPEED) * inflationCurve;
+        maximumDeceleration = PARACHUTE_MAX_OPENING_DECEL;
+
+        const shouldBeginLanding = state.inflation >= 0.95
+          && Number.isFinite(state.timeToImpact)
+          && state.timeToImpact <= PARACHUTE_LANDING_APPROACH_SECONDS;
+        if (!state.landingApproach && shouldBeginLanding) {
+          state.landingApproach = true;
+          if (!state.landingApproachAnnounced) {
+            state.landingApproachAnnounced = true;
+            ctx.events.emit("parachute:landing-approach", {
+              entityId: entity.id,
+              groundDistance: state.groundDistance,
+              timeToImpact: state.timeToImpact,
+              now,
+            });
+          }
+        }
+
         const turnInput = clamp(input.strafe, -1, 1);
         const landingTurnFactor = state.landingApproach ? 0.58 : 1;
         const targetTurnRate = turnInput * PARACHUTE_MAX_TURN_RATE * landingTurnFactor;
@@ -302,25 +341,6 @@ export async function setup(ctx) {
           PARACHUTE_TURN_ACCELERATION * safeDt,
         );
         transform.angle += state.turnRate * safeDt;
-
-        state.landingApproach = Number.isFinite(state.timeToImpact)
-          && state.timeToImpact <= PARACHUTE_LANDING_APPROACH_SECONDS;
-        if (state.landingApproach && !state.landingApproachAnnounced) {
-          state.landingApproachAnnounced = true;
-          ctx.events.emit("parachute:landing-approach", {
-            entityId: entity.id,
-            groundDistance: state.groundDistance,
-            timeToImpact: state.timeToImpact,
-            now,
-          });
-        }
-
-        const inflationElapsed = Math.max(0, now - Number(state.deployedAt || now));
-        state.inflation = clamp(inflationElapsed / PARACHUTE_INFLATION_MS, 0, 1);
-        const inflationCurve = smoothstep(state.inflation);
-        terminalSpeed = PARACHUTE_FREEFALL_TERMINAL_SPEED
-          + (PARACHUTE_CANOPY_TERMINAL_SPEED - PARACHUTE_FREEFALL_TERMINAL_SPEED) * inflationCurve;
-        maximumDeceleration = PARACHUTE_MAX_OPENING_DECEL;
 
         const flare = state.landingApproach
           ? smoothstep(clamp((2.2 - state.timeToImpact) / 2.2, 0, 1))
