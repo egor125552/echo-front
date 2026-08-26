@@ -1,6 +1,7 @@
 export const BOT_VISIBLE_MEMORY_MS = 10_000;
 export const BOT_DAMAGE_MEMORY_MS = 12_000;
 export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
+export const BOT_INVESTIGATION_REACHED_DISTANCE = 3.2;
 export const BOT_REACTION_MIN_MS = 650;
 export const BOT_REACTION_SPREAD_MS = 450;
 export const BOT_RETURN_FIRE_REACTION_MS = 220;
@@ -13,7 +14,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "4.3.0",
+  version: "4.3.1",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -401,10 +402,15 @@ export async function setup(ctx) {
       : (previousDecision?.goal === "traverse" && previousDecision?.resumeTarget
         ? previousDecision.resumeTarget
         : null);
+    const freshSoundTarget = interestTarget?.kind === "sound-interest"
+      && Number(interestTarget.heardAt) > Number(previousDecision?.heardAt ?? previousDecision?.resumeHeardAt ?? -Infinity)
+      ? interestTarget
+      : null;
     const target = visibleEnemies[0]?.transform
       ?? memory?.transform
-      ?? interestTarget
+      ?? freshSoundTarget
       ?? carriedBehaviorTarget
+      ?? interestTarget
       ?? zoneTarget
       ?? null;
     if (!target || typeof map.navigationWaypoint !== "function") return null;
@@ -451,7 +457,7 @@ export async function setup(ctx) {
     );
     const investigationReached = previousDecision?.goal === "investigate"
       && previousDecision.target
-      && distance3(transform, previousDecision.target) <= 1.8;
+      && distance3(transform, previousDecision.target) <= BOT_INVESTIGATION_REACHED_DISTANCE;
 
     const decision = brain.decide(bot.id, {
       visibleEnemies,
