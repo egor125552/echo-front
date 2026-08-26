@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createEchoFrontGame } from "../src/server/game.js";
-import { BOT_AI_ROLLOUT } from "../src/config/bot-ai-rollout.js";
+import { BOT_AI_ROLLOUT } from "../src/plugins/battle-royale-bot-rollout/server.js";
 
 async function activeBattleRoyale(playerId) {
   const game = await createEchoFrontGame({ mode: "battle-royale" });
