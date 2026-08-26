@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "@dimforge/rapier3d": "0.19.3",
-    "@dimforge/rapier3d-compat": "0.19.3"
+    "@dimforge/rapier3d-compat": "0.19.3",
+    "xstate": "5.32.5"
   },
   "devDependencies": {
     "wrangler": "^4.120.1"
