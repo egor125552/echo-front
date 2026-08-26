@@ -12,6 +12,7 @@ import * as botInterestPlugin from "../src/plugins/battle-royale-bot-interest/se
 import {
   BOT_INTEREST_CAPACITY,
   BOT_HEARING_WEAPON_TTL_MS,
+  BOT_WEAPON_INVESTIGATION_CAP,
 } from "../src/plugins/battle-royale-bot-interest/server.js";
 import { UPPER_FLOOR_Y } from "../src/plugins/battle-royale-map/server.js";
 
@@ -81,6 +82,47 @@ test("nearby enemy gunfire creates a temporary investigation target for a bot", 
   assert.equal(target?.kind, "sound-interest");
   assert.equal(target?.x, 100);
   assert.equal(target?.z, 40);
+
+  await host.stop();
+});
+
+test("one gunshot cannot pull an unlimited crowd of bots into the same fight", async () => {
+  const host = await interestHost();
+  const entities = host.services.get("entities");
+  const interest = host.services.get("bot-interest");
+  const grid = host.services.get("spatial-grid");
+  const now = 150_000;
+
+  entities.spawn({
+    id: "crowd-source",
+    team: 1,
+    position: { x: 0, y: 0, z: 0, angle: 0 },
+  });
+  const botIds = [];
+  for (let i = 1; i <= 18; i += 1) {
+    const id = `crowd-bot-${i}`;
+    botIds.push(id);
+    entities.spawn({
+      id,
+      bot: true,
+      team: i + 1,
+      position: { x: 8 + i, y: 0, z: (i % 3) - 1, angle: 0 },
+    });
+  }
+  grid.rebuild(now);
+
+  const listeners = interest.recordSound({
+    entityId: "crowd-source",
+    key: "weapon.rifle",
+    x: 0,
+    y: 0,
+    z: 0,
+    radius: 110,
+  }, now);
+
+  const actuallyHeard = botIds.filter((id) => interest.heardFor(id));
+  assert.equal(listeners, BOT_WEAPON_INVESTIGATION_CAP);
+  assert.equal(actuallyHeard.length, BOT_WEAPON_INVESTIGATION_CAP);
 
   await host.stop();
 });
