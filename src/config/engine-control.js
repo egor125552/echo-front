@@ -1,6 +1,6 @@
 export const ENGINE_CONTROL = Object.freeze({
-  enabled: false,
-  revision: 4,
+  enabled: true,
+  revision: 5,
   maxHistory: 96,
   maxBatchCommands: 32,
 });
