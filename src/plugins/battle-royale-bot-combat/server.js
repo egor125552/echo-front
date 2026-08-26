@@ -13,7 +13,7 @@ export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 
 export const manifest = {
   id: "bot-combat",
-  version: "3.1.0",
+  version: "3.2.0",
   requires: [
     "bot-controller", "bot-perception", "bot-navigation", "battle-royale-bot-interest",
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
@@ -210,7 +210,14 @@ export async function setup(ctx) {
   function routeToward(bot, transform, state, route, now, thinkDelay = 120) {
     if (!route) return false;
     openRouteDoor(bot.id, transform, route, now);
-    const preciseRoute = stagedStairRoute(transform, route);
+    const stagedRoute = stagedStairRoute(transform, route);
+    const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
+    const midStair = stagedRoute?.kind === "stair"
+      && Number(transform.y) > 0.2
+      && Number(transform.y) < upperY - 0.15;
+    const preciseRoute = midStair
+      ? { ...stagedRoute, z: Number(transform.z) || 0, stairStage: "traverse" }
+      : stagedRoute;
     const steering = steeringTo(transform, preciseRoute);
     const headingError = Math.abs(wrapAngle(
       Math.atan2(preciseRoute.x - transform.x, -(preciseRoute.z - transform.z)) - transform.angle,
@@ -378,11 +385,11 @@ export async function setup(ctx) {
       memory = null;
     }
     const zoneTarget = battleRoyale.zoneSteeringTarget(bot.id, now);
-    const interestTarget = !visibleEnemies.length && !memory
+    const interestTarget = !visibleEnemies.length
       ? interest.targetFor(bot.id, transform, now)
       : null;
 
-    const traversalTarget = visibleEnemies[0]?.transform ?? memory?.transform ?? interestTarget;
+    const traversalTarget = visibleEnemies[0]?.transform ?? interestTarget ?? memory?.transform;
     if (traversalTarget && typeof map.navigationWaypoint === "function") {
       const route = map.navigationWaypoint(transform, traversalTarget);
       const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
