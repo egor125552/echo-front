@@ -1,0 +1,1 @@
+Automatic checks validate that the Worker builds, starts locally, answers the health endpoint, and accepts a playable WebSocket session. The older gameplay regression suite remains manual through `npm test` while its stale expectations are repaired.
