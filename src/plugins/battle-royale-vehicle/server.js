@@ -13,7 +13,7 @@ export const VEHICLE_PHYSICS_STEP = 1 / 60;
 
 export const manifest = {
   id: "battle-royale-vehicle",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["rapier-physics", "movement", "entities", "battle-royale", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -144,6 +144,13 @@ export async function setup(ctx) {
 
   let driverId = null;
   let input = { throttle: 0, steering: 0, handbrake: false };
+  // Sprint and handbrake share one input bit. If sprint was already held (or a
+  // touch/VoiceOver sprint control was latched) before entering the vehicle,
+  // treating it as a fresh handbrake press leaves the jeep unable to move.
+  // Require one observed release after entering before Shift can become the
+  // handbrake. This preserves intentional handbraking without inheriting stale
+  // on-foot sprint state.
+  let handbrakeArmed = true;
   let previousSpeed = 0;
   let peakImpactDelta = 0;
   let physicsFrames = 0;
@@ -200,6 +207,7 @@ export async function setup(ctx) {
       groundedWheels: wheels.filter((wheel) => wheel.contact).length,
       wheels,
       input: { ...input },
+      handbrakeArmed,
       mass: body.mass,
       peakImpactDelta,
       physicsFrames,
@@ -252,6 +260,7 @@ export async function setup(ctx) {
     if (distance3(transform, body) > VEHICLE_ENTER_DISTANCE) return false;
     driverId = playerId;
     input = { throttle: 0, steering: 0, handbrake: false };
+    handbrakeArmed = false;
     movement.setInput(playerId, {});
     physics.setCharacterEnabled(playerId, false);
     syncDriver();
@@ -271,6 +280,7 @@ export async function setup(ctx) {
     const target = exitPosition();
     driverId = null;
     input = { throttle: 0, steering: 0, handbrake: true };
+    handbrakeArmed = true;
     physics.setCharacterEnabled(playerId, true);
     if (target) movement.teleport(playerId, target);
     ctx.events.emit("vehicle:exited", {
@@ -292,10 +302,12 @@ export async function setup(ctx) {
 
   function setInput(playerId, raw = {}) {
     if (driverId !== playerId) return false;
+    const requestedHandbrake = Boolean(raw.sprint);
+    if (!handbrakeArmed && !requestedHandbrake) handbrakeArmed = true;
     input = {
       throttle: clamp(raw.forward, -1, 1),
       steering: clamp(raw.strafe, -1, 1),
-      handbrake: Boolean(raw.sprint),
+      handbrake: handbrakeArmed && requestedHandbrake,
     };
     return true;
   }
@@ -386,6 +398,7 @@ export async function setup(ctx) {
     // A dead driver's collider stays disabled; just release vehicle control.
     driverId = null;
     input = { throttle: 0, steering: 0, handbrake: true };
+    handbrakeArmed = true;
     ctx.events.emit("vehicle:driver-lost", { entityId, vehicleId: VEHICLE_ID, now });
   });
 
@@ -393,6 +406,7 @@ export async function setup(ctx) {
     if (entityId !== driverId) return;
     driverId = null;
     input = { throttle: 0, steering: 0, handbrake: true };
+    handbrakeArmed = true;
   });
 
   ctx.services.provide("vehicles", {
