@@ -2,10 +2,12 @@ export const RAGDOLL_MIN_FALL_SPEED = 9.5;
 export const RAGDOLL_VEHICLE_EJECT_SPEED = 3.5;
 export const RAGDOLL_MAX_ACTIVE_SECONDS = 12;
 export const RAGDOLL_DEAD_LIFETIME_SECONDS = 20;
+export const RAGDOLL_REFERENCE_MASS = 69.4;
+export const RAGDOLL_TARGET_MASS = 20;
 
 export const manifest = {
   id: "battle-royale-ragdoll",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "rapier-physics",
     "movement",
@@ -21,6 +23,8 @@ export const manifest = {
     "events.on", "events.emit",
   ],
 };
+
+const RAGDOLL_MASS_SCALE = RAGDOLL_TARGET_MASS / RAGDOLL_REFERENCE_MASS;
 
 const PARTS = Object.freeze([
   { name: "pelvis", shape: "cuboid", side: 0, y: 0.91, forward: 0, hx: 0.19, hy: 0.11, hz: 0.13, mass: 9.0, impact: 0.90 },
@@ -181,7 +185,7 @@ export async function setup(ctx) {
       desc = RAPIER.ColliderDesc.cuboid(spec.hx, spec.hy, spec.hz);
     }
     return desc
-      .setMass(spec.mass)
+      .setMass(spec.mass * RAGDOLL_MASS_SCALE)
       .setFriction(0.74)
       .setRestitution(0.025);
   }
@@ -921,6 +925,9 @@ export async function setup(ctx) {
       minFallSpeed: RAGDOLL_MIN_FALL_SPEED,
       vehicleEjectSpeed: RAGDOLL_VEHICLE_EJECT_SPEED,
       bodyParts: PARTS.length,
+      referenceMass: RAGDOLL_REFERENCE_MASS,
+      targetMass: RAGDOLL_TARGET_MASS,
+      massScale: RAGDOLL_MASS_SCALE,
     },
   });
 }
