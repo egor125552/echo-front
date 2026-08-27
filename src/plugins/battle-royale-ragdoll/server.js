@@ -5,7 +5,7 @@ export const RAGDOLL_DEAD_LIFETIME_SECONDS = 20;
 
 export const manifest = {
   id: "battle-royale-ragdoll",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "rapier-physics",
     "movement",
@@ -63,6 +63,7 @@ const CONTROL_CHEST_TORQUE = 5.2;
 const CONTROL_PELVIS_TORQUE = 3.0;
 const MAX_ACTIVE_RAGDOLLS = 8;
 const VEHICLE_PEDESTRIAN_HIT_SPEED = 3.0;
+const PARACHUTE_HANDOFF_MIN_ALTITUDE = 8;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -664,6 +665,90 @@ export async function setup(ctx) {
     world.propagateModifiedBodyPositionsToColliders?.();
   }
 
+  function deployParachute(entityId, now = frameNow) {
+    const entry = active.get(entityId);
+    const entity = entities.get(entityId);
+    const pelvis = entry?.byName.get("pelvis")?.body;
+    if (!entry || entry.dead || !entity?.alive || entity.bot || entity.kind !== "human" || !pelvis) return false;
+
+    const p = pelvis.translation();
+    const velocity = pelvis.linvel();
+    const targetY = Number(p.y) - 0.91;
+    if (!Number.isFinite(targetY) || targetY < PARACHUTE_HANDOFF_MIN_ALTITUDE) return false;
+
+    const probeLift = 0.12;
+    const probeDistance = Math.max(20, Number(parachute.constants?.groundProbeDistance) || 700);
+    const support = physics.raycastSupportWorld(
+      { x: p.x, y: targetY + probeLift, z: p.z },
+      { x: 0, y: -1, z: 0 },
+      probeDistance,
+    );
+    const clearance = support
+      ? Math.max(0, Number(support.distance) - probeLift)
+      : Infinity;
+    const minimumClearance = Math.max(0, Number(parachute.constants?.minimumDeployClearance) || 3.2);
+    if (clearance < minimumClearance) return false;
+
+    const target = { x: p.x, y: targetY, z: p.z, angle: entry.angle };
+    const verticalVelocity = Number(velocity.y) || 0;
+    const duration = entry.elapsed;
+    const ragdollReason = entry.reason;
+
+    removeBodies(entry);
+    active.delete(entityId);
+    movement.setInput(entityId, {});
+    physics.setCharacterEnabled(entityId, true);
+
+    const launched = parachute.launch(entityId, {
+      x: target.x,
+      z: target.z,
+      angle: target.angle,
+      altitude: target.y,
+    }, now);
+    const transform = ctx.components.get(entityId, "Transform");
+    if (!launched || !transform) {
+      movement.teleport(entityId, target);
+      if (transform) {
+        transform.verticalVelocity = verticalVelocity;
+        transform.grounded = false;
+      }
+      ctx.events.emit("ragdoll:ended", {
+        entityId,
+        reason: ragdollReason,
+        recovered: false,
+        handoff: "freefall",
+        duration,
+        x: target.x,
+        y: target.y,
+        z: target.z,
+        now,
+      });
+      return false;
+    }
+
+    // Preserve the real downward speed captured from the Rapier pelvis. If the
+    // catapult is still travelling upward, the existing parachute deploy logic
+    // safely clamps that transition into canopy inflation instead of preserving
+    // an absurd upward solver-explosion velocity.
+    transform.verticalVelocity = verticalVelocity;
+    transform.grounded = false;
+    const deployed = parachute.deploy(entityId, now);
+
+    ctx.events.emit("ragdoll:ended", {
+      entityId,
+      reason: ragdollReason,
+      recovered: false,
+      handoff: deployed ? "parachute" : "freefall",
+      duration,
+      x: target.x,
+      y: target.y,
+      z: target.z,
+      verticalVelocity,
+      now,
+    });
+    return Boolean(deployed);
+  }
+
   function recoveryTarget(entry) {
     const pelvis = entry.byName.get("pelvis")?.body;
     if (!pelvis) return null;
@@ -814,6 +899,7 @@ export async function setup(ctx) {
   ctx.services.provide("ragdoll", {
     activate,
     setInput,
+    deployParachute,
     beginFrame,
     endFrame,
     isActive(entityId) { return active.has(entityId); },
