@@ -6,11 +6,11 @@ export const BOT_VERTICAL_SIGHT_TOLERANCE = 1.75;
 
 export const manifest = {
   id: "battle-royale-bot-awareness",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "bot-perception", "bot-brain", "teams", "rapier-physics", "spatial-grid", "entities",
   ],
-  capabilities: ["services.consume", "services.provide", "events.on"],
+  capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
 
 function clamp(value, minimum, maximum) {
