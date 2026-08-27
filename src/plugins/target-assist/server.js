@@ -1,9 +1,11 @@
 export const manifest = {
   id: "target-assist",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities", "teams", "rapier-physics", "movement"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
+
+const BOT_ASSIST_MIN_FRONTNESS = Math.cos(0.28);
 
 function normalize3(direction) {
   const length = Math.hypot(direction.x, direction.y ?? 0, direction.z) || 1;
@@ -21,12 +23,13 @@ export async function setup(ctx) {
 
   function selectTarget(entityId, direction, maxDistance) {
     const shooter = entities.get(entityId);
-    if (!shooter || shooter.bot) return null;
+    if (!shooter) return null;
 
     const origin = ctx.components.get(entityId, "Transform");
     if (!origin) return null;
 
     const facing = normalize3(direction);
+    const bot = Boolean(shooter.bot);
     let best = null;
 
     for (const enemy of teams.enemiesOf(entityId)) {
@@ -46,11 +49,15 @@ export async function setup(ctx) {
       const tz = dz / distance;
       const frontness = Math.max(-1, Math.min(1, facing.x * tx + facing.y * ty + facing.z * tz));
 
-      // Distance is the main factor. Facing only biases selection so an enemy
-      // already in front wins over a similarly distant enemy behind the player.
-      // Vertical correction is automatic because Echo Front has no manual pitch
-      // control and multi-floor combat must remain accessible.
-      const score = distance + (1 - frontness) * 3.5;
+      // Bots already have their own target choice and horizontal reaction logic.
+      // Only grant vertical correction when that target is actually in their
+      // narrow forward cone, so multi-floor combat works without aim snapping
+      // to an unrelated enemy somewhere else in the room.
+      if (bot && frontness < BOT_ASSIST_MIN_FRONTNESS) continue;
+
+      const score = bot
+        ? distance + (1 - frontness) * 12
+        : distance + (1 - frontness) * 3.5;
       if (best && score >= best.score) continue;
 
       best = {
