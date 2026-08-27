@@ -23,6 +23,7 @@ import * as warehousePriority from "../plugins/battle-royale-bot-warehouse-prior
 import * as botAiRollout from "../plugins/battle-royale-bot-rollout/server.js";
 import * as botStateMachine from "../plugins/battle-royale-bot-state-machine/server.js";
 import * as botBrain from "../plugins/battle-royale-bot-brain/server.js";
+import * as botAwareness from "../plugins/battle-royale-bot-awareness/server.js";
 import * as botCoverFire from "../plugins/battle-royale-bot-cover-fire/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
@@ -60,6 +61,7 @@ export const battleRoyalePreset = [
   botAiRollout,
   botStateMachine,
   botBrain,
+  botAwareness,
   botCoverFire,
   botCombat,
   botObserver,
