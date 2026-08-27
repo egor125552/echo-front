@@ -31,6 +31,7 @@ import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/server.js";
 import * as parachuteDynamics from "../plugins/battle-royale-parachute-dynamics/server.js";
+import * as parachuteRapierFlight from "../plugins/battle-royale-parachute-rapier-flight/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -66,4 +67,5 @@ export const battleRoyalePreset = [
   parachuteIntegration,
   parachuteCanopy,
   parachuteDynamics,
+  parachuteRapierFlight,
 ];
