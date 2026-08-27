@@ -16,6 +16,7 @@ import * as battleRoyaleAudio from "../plugins/battle-royale-audio.js";
 import * as battleRoyaleZoneAudio from "../plugins/battle-royale-zone-audio.js";
 import * as botParachuteAudio from "../plugins/battle-royale-bot-parachute-audio.js";
 import * as vehicleAudio from "../plugins/battle-royale-vehicle-audio.js";
+import * as ragdollAudio from "../plugins/battle-royale-ragdoll-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
 import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
@@ -43,6 +44,7 @@ export const echoFrontClientPreset = [
   battleRoyaleZoneAudio,
   botParachuteAudio,
   vehicleAudio,
+  ragdollAudio,
   parachuteAudio,
   parachuteDynamicsAudio,
   lowHealthAudio,

@@ -32,6 +32,7 @@ import * as warehouseCombatFlow from "../plugins/battle-royale-bot-warehouse-com
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
+import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
@@ -39,6 +40,7 @@ import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/serv
 import * as parachuteDynamics from "../plugins/battle-royale-parachute-dynamics/server.js";
 import * as parachuteRapierFlight from "../plugins/battle-royale-parachute-rapier-flight/server.js";
 import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js";
+import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integration/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -75,6 +77,7 @@ export const battleRoyalePreset = [
   botObserver,
   botFill,
   vehicle,
+  ragdoll,
   matchApi,
   vehicleIntegration,
   parachuteIntegration,
@@ -82,4 +85,5 @@ export const battleRoyalePreset = [
   parachuteDynamics,
   parachuteRapierFlight,
   botParachute,
+  ragdollIntegration,
 ];
