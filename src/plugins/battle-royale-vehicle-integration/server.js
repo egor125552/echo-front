@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-vehicle-integration",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: ["match-api", "battle-royale-vehicle", "movement", "battle-royale"],
   capabilities: ["services.consume"],
 };
@@ -62,6 +62,9 @@ export async function setup(ctx) {
       }
       if (packet.event === "vehicle:driver-lost") return payload.entityId === playerId;
       if (packet.event === "vehicle:impact") return payload.driverId === playerId;
+      if (String(packet.event ?? "").startsWith("vehicle:nitro-")) {
+        return payload.driverId === playerId;
+      }
       return false;
     });
     return [...base, ...additional];
