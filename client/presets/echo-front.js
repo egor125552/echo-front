@@ -13,6 +13,7 @@ import * as environmentAudio from "../plugins/environment-audio.js";
 import * as buildingAcoustics from "../plugins/building-acoustics.js";
 import * as battleRoyaleAudio from "../plugins/battle-royale-audio.js";
 import * as battleRoyaleZoneAudio from "../plugins/battle-royale-zone-audio.js";
+import * as botParachuteAudio from "../plugins/battle-royale-bot-parachute-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
 import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
@@ -36,6 +37,7 @@ export const echoFrontClientPreset = [
   buildingAcoustics,
   battleRoyaleAudio,
   battleRoyaleZoneAudio,
+  botParachuteAudio,
   parachuteAudio,
   parachuteDynamicsAudio,
   lowHealthAudio,
