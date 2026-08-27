@@ -10,9 +10,45 @@ const BRAKE_RADIUS = 105;
 const CRASH_RADIUS = 120;
 const ENGINE_URL = "/audio/vehicles/ts3/ts3_truck_engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
+const ENGINE_LOOP_SECONDS = 1.6148;
+const ENGINE_CROSSFADE_SECONDS = 0.14;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
+}
+
+function createSeamlessEngineLoop(context, sourceBuffer) {
+  const loopLength = Math.min(
+    sourceBuffer.length,
+    Math.floor(sourceBuffer.sampleRate * ENGINE_LOOP_SECONDS),
+  );
+  const availableOverlap = sourceBuffer.length - loopLength;
+  const crossfadeLength = Math.min(
+    Math.floor(sourceBuffer.sampleRate * ENGINE_CROSSFADE_SECONDS),
+    Math.floor(loopLength / 3),
+    availableOverlap,
+  );
+
+  if (loopLength < 2 || crossfadeLength < 2) return sourceBuffer;
+
+  const loopBuffer = context.createBuffer(
+    sourceBuffer.numberOfChannels,
+    loopLength,
+    sourceBuffer.sampleRate,
+  );
+
+  for (let channel = 0; channel < sourceBuffer.numberOfChannels; channel += 1) {
+    const input = sourceBuffer.getChannelData(channel);
+    const output = loopBuffer.getChannelData(channel);
+    output.set(input.subarray(0, loopLength));
+
+    for (let i = 0; i < crossfadeLength; i += 1) {
+      const mix = i / (crossfadeLength - 1);
+      output[i] = input[loopLength + i] * (1 - mix) + input[i] * mix;
+    }
+  }
+
+  return loopBuffer;
 }
 
 function createCrashBuffer(context) {
@@ -34,10 +70,11 @@ function createCrashBuffer(context) {
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
-  const [engineBuffer, brakeBuffer] = await Promise.all([
+  const [rawEngineBuffer, brakeBuffer] = await Promise.all([
     audio.load(ENGINE_URL),
     audio.load(BRAKE_URL),
   ]);
+  const engineBuffer = createSeamlessEngineLoop(audio.context, rawEngineBuffer);
   const crashBuffer = createCrashBuffer(audio.context);
   let engine = null;
   let currentVehicleId = null;
