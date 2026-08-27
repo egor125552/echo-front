@@ -30,6 +30,7 @@ import * as warehouseTraffic from "../plugins/battle-royale-bot-warehouse-traffi
 import * as warehouseCombatFlow from "../plugins/battle-royale-bot-warehouse-combat-flow/server.js";
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
+import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/server.js";
@@ -70,6 +71,7 @@ export const battleRoyalePreset = [
   warehouseCombatFlow,
   botObserver,
   botFill,
+  vehicle,
   matchApi,
   parachuteIntegration,
   parachuteCanopy,
