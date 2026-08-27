@@ -4,6 +4,8 @@ const GAS_CHANNEL = "br-zone-proximity";
 const GAS_AUDIBLE_DISTANCE = 145;
 const GAS_REFERENCE_DISTANCE = 5;
 const GAS_ROLLOFF = 0.17;
+const GAS_LOOP_START_SECONDS = 0.08;
+const GAS_LOOP_END_PADDING_SECONDS = 0.12;
 
 export const manifest = {
   id: "battle-royale-zone-audio",
@@ -38,13 +40,6 @@ export async function setup(ctx) {
     const dx = (Number(listener?.x) || 0) - zx;
     const dz = (Number(listener?.z) || 0) - zz;
     const radialDistance = Math.hypot(dx, dz);
-    const outside = radialDistance >= radius;
-    if (outside) {
-      return {
-        position: { x: Number(listener.x) || 0, y: Number(listener.y) || 0, z: Number(listener.z) || 0 },
-        distanceToGas: 0,
-      };
-    }
 
     let ux;
     let uz;
@@ -56,14 +51,26 @@ export async function setup(ctx) {
       ux = Math.sin(angle);
       uz = -Math.cos(angle);
     }
+
     return {
       position: {
         x: zx + ux * radius,
         y: Number(listener?.y) || 0,
         z: zz + uz * radius,
       },
-      distanceToGas: Math.max(0, radius - radialDistance),
+      distanceToGas: Math.abs(radius - radialDistance),
+      outside: radialDistance > radius,
     };
+  }
+
+  function trimLoopBoundary(handle) {
+    const source = handle?.source;
+    const duration = Number(source?.buffer?.duration);
+    if (!source || !(duration > 0.4)) return;
+    const start = Math.min(GAS_LOOP_START_SECONDS, duration * 0.12);
+    const end = Math.max(start + 0.15, duration - GAS_LOOP_END_PADDING_SECONDS);
+    source.loopStart = start;
+    source.loopEnd = Math.min(duration, end);
   }
 
   async function startLoop(position, expectedGeneration) {
@@ -84,6 +91,7 @@ export async function setup(ctx) {
         try { handle?.source?.stop(); } catch {}
         return;
       }
+      trimLoopBoundary(handle);
       loopHandle = handle;
     } catch (error) {
       console.warn("Battle royale gas proximity audio", error);
