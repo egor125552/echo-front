@@ -1,5 +1,6 @@
 export const manifest = {
   id: "audio-resilience",
+  version: "1.1.0",
   requires: ["spatial-audio-web"],
 };
 
@@ -68,6 +69,40 @@ export async function setup(ctx) {
     if (context.state !== "running") void recover(reason, { force: true });
   }
 
+  // Make every shared playback path resilient too. URL playback can await the
+  // resume attempt. Buffer playback is intentionally synchronous for moving
+  // loops, so it starts the source immediately and wakes the shared context in
+  // parallel; a source scheduled while suspended will become audible on resume.
+  const originalPlayCentered = audio.playCentered?.bind(audio);
+  const originalPlaySpatial = audio.playSpatial?.bind(audio);
+  const originalPlayCenteredBuffer = audio.playCenteredBuffer?.bind(audio);
+  const originalPlaySpatialBuffer = audio.playSpatialBuffer?.bind(audio);
+
+  if (originalPlayCentered) {
+    audio.playCentered = async (...args) => {
+      if (context.state !== "running") await recover("play-centered");
+      return originalPlayCentered(...args);
+    };
+  }
+  if (originalPlaySpatial) {
+    audio.playSpatial = async (...args) => {
+      if (context.state !== "running") await recover("play-spatial");
+      return originalPlaySpatial(...args);
+    };
+  }
+  if (originalPlayCenteredBuffer) {
+    audio.playCenteredBuffer = (...args) => {
+      if (context.state !== "running") void recover("play-centered-buffer");
+      return originalPlayCenteredBuffer(...args);
+    };
+  }
+  if (originalPlaySpatialBuffer) {
+    audio.playSpatialBuffer = (...args) => {
+      if (context.state !== "running") void recover("play-spatial-buffer");
+      return originalPlaySpatialBuffer(...args);
+    };
+  }
+
   context.addEventListener?.("statechange", () => {
     report("statechange", null, true);
     if (context.state !== "running" && document.visibilityState === "visible") {
@@ -78,16 +113,20 @@ export async function setup(ctx) {
   // Safari may suspend or interrupt WebAudio after focus/audio-route changes.
   // Any genuine user gesture is a legal opportunity to resume the shared graph.
   window.addEventListener("pointerdown", () => recoverFromGesture("pointerdown"), { capture: true, passive: true });
+  window.addEventListener("pointerup", () => recoverFromGesture("pointerup"), { capture: true, passive: true });
   window.addEventListener("touchstart", () => recoverFromGesture("touchstart"), { capture: true, passive: true });
   window.addEventListener("keydown", () => recoverFromGesture("keydown"), { capture: true });
   window.addEventListener("click", () => recoverFromGesture("click"), { capture: true, passive: true });
+  window.addEventListener("focus", () => {
+    if (context.state !== "running") void recover("window-focus", { force: true });
+  });
   window.addEventListener("pageshow", () => {
-    if (context.state !== "running") void recover("pageshow");
+    if (context.state !== "running") void recover("pageshow", { force: true });
   });
   document.addEventListener("visibilitychange", () => {
     report("visibilitychange", null, true);
     if (document.visibilityState === "visible" && context.state !== "running") {
-      void recover("visibility-visible");
+      void recover("visibility-visible", { force: true });
     }
   });
 
