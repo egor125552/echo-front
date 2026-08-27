@@ -1,163 +1,77 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 62,
+  id: 63,
   mode: "battle-royale",
-  room: "engine-lab-parachute-62",
+  room: "engine-lab-bot-parachutes-63",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: {
     commands: [
       {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "engine-parachute-62",
-            kind: "human",
-            name: "Rapier Flight Pilot",
-            bot: false,
-            team: 999999,
-            health: 200,
-            weapons: ["pistol"],
-            position: { x: 0, y: 0, z: 0, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "engine-parachute-sentinel-62",
-            kind: "human",
-            name: "Deployment Sentinel",
-            bot: false,
-            team: 999998,
-            health: 200,
-            weapons: ["pistol"],
-            position: { x: -220, y: 0, z: -220, angle: 0 }
-          }
-        }
+        command: "service.call",
+        args: { service: "battle-royale", method: "arm", arguments: [2000001900000] }
       },
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [2000001800000] }
+        args: { service: "bot-parachutes", method: "summary", arguments: [] }
       },
       {
         command: "service.call",
-        args: {
-          service: "parachute",
-          method: "launch",
-          arguments: ["engine-parachute-sentinel-62", { altitude: 1000, x: -220, z: -220, angle: 0 }, 2000001800010]
-        }
-      },
-
-      {
-        command: "service.call",
-        args: {
-          service: "parachute",
-          method: "launch",
-          arguments: ["engine-parachute-62", { altitude: 300, x: 0, z: 100, angle: 0 }, 2000001800100]
-        }
+        args: { service: "bot-parachutes", method: "assignmentFor", arguments: ["br-bot-18"] }
       },
       {
         command: "service.call",
-        args: { service: "parachute", method: "deploy", arguments: ["engine-parachute-62", 2000001800150] }
+        args: { service: "bot-parachutes", method: "assignmentFor", arguments: ["br-bot-23"] }
       },
       {
         command: "service.call",
-        args: {
-          service: "match-api",
-          method: "handleInput",
-          arguments: ["engine-parachute-62", { forward: 1 }, 2000001800200]
-        }
+        args: { service: "bot-parachutes", method: "assignmentFor", arguments: ["br-bot-63"] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 80, now: 2000001800250 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-62" } },
+      { command: "game.step", args: { dt: 0.05, steps: 300, now: 2000001900050 } },
       {
         command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-62"] }
-      },
-
-      {
-        command: "service.call",
-        args: { service: "health", method: "reset", arguments: ["engine-parachute-62"] }
+        args: { service: "bot-parachutes", method: "summary", arguments: [] }
       },
       {
         command: "service.call",
-        args: {
-          service: "parachute",
-          method: "launch",
-          arguments: ["engine-parachute-62", { altitude: 29, x: -70, z: -70, angle: 0 }, 2000001810000]
-        }
+        args: { service: "parachute", method: "stateFor", arguments: ["br-bot-18"] }
+      },
+      { command: "entity.inspect", args: { entityId: "br-bot-18" } },
+      { command: "game.step", args: { dt: 0.05, steps: 600, now: 2000001915050 } },
+      {
+        command: "service.call",
+        args: { service: "bot-parachutes", method: "summary", arguments: [] }
       },
       {
         command: "service.call",
-        args: { service: "parachute", method: "deploy", arguments: ["engine-parachute-62", 2000001810050] }
+        args: { service: "parachute", method: "stateFor", arguments: ["br-bot-23"] }
+      },
+      { command: "entity.inspect", args: { entityId: "br-bot-23" } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000001945050 } },
+      {
+        command: "service.call",
+        args: { service: "bot-parachutes", method: "summary", arguments: [] }
       },
       {
         command: "service.call",
-        args: { service: "parachute", method: "cut", arguments: ["engine-parachute-62", 2000001810100] }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 80, now: 2000001810150 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-62" } },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-62"] }
-      },
-
-      {
-        command: "service.call",
-        args: { service: "health", method: "reset", arguments: ["engine-parachute-62"] }
+        args: { service: "battle-royale", method: "status", arguments: [2000001970050] }
       },
       {
         command: "service.call",
-        args: {
-          service: "parachute",
-          method: "launch",
-          arguments: ["engine-parachute-62", { altitude: 50, x: -90, z: -90, angle: 0 }, 2000001820000]
-        }
+        args: { service: "bot-parachutes", method: "assignmentFor", arguments: ["br-bot-18"] }
       },
       {
         command: "service.call",
-        args: { service: "parachute", method: "deploy", arguments: ["engine-parachute-62", 2000001820050] }
+        args: { service: "bot-parachutes", method: "assignmentFor", arguments: ["br-bot-23"] }
       },
       {
         command: "service.call",
-        args: { service: "parachute", method: "cut", arguments: ["engine-parachute-62", 2000001820100] }
+        args: { service: "bot-parachutes", method: "assignmentFor", arguments: ["br-bot-63"] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 110, now: 2000001820150 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-62" } },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-62"] }
-      },
-
-      {
-        command: "service.call",
-        args: { service: "health", method: "reset", arguments: ["engine-parachute-62"] }
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "parachute",
-          method: "launch",
-          arguments: ["engine-parachute-62", { altitude: 100, x: -110, z: -110, angle: 0 }, 2000001830000]
-        }
-      },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "deploy", arguments: ["engine-parachute-62", 2000001830050] }
-      },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "cut", arguments: ["engine-parachute-62", 2000001830100] }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 180, now: 2000001830150 } },
-      { command: "entity.inspect", args: { entityId: "engine-parachute-62" } },
-      {
-        command: "service.call",
-        args: { service: "parachute", method: "stateFor", arguments: ["engine-parachute-62"] }
-      }
+      { command: "entity.inspect", args: { entityId: "br-bot-18" } },
+      { command: "entity.inspect", args: { entityId: "br-bot-23" } },
+      { command: "entity.inspect", args: { entityId: "br-bot-63" } }
     ]
   },
-  requestedAt: "2026-08-27T10:10:00Z"
+  requestedAt: "2026-08-27T10:45:00Z"
 });
