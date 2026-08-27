@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-integration",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "match-api",
     "battle-royale-ragdoll",
@@ -63,6 +63,7 @@ export async function setup(ctx) {
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     if (ragdoll.isActive(playerId)) {
       movement.setInput(playerId, {});
+      if (input.parachutePressed && ragdoll.deployParachute(playerId, now)) return;
       ragdoll.setInput(playerId, input);
       return;
     }
