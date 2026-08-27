@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "3.0.1",
+  version: "2.4.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -12,9 +12,6 @@ const CHARACTER_BASE_OFFSET = CHARACTER_HALF_HEIGHT + CHARACTER_RADIUS + CHARACT
 const CHARACTER_SUPPORT_SNAP_DISTANCE = 0.35;
 const CHARACTER_SUPPORT_PENETRATION_LIMIT = 0.5;
 const CHARACTER_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
-const DEFAULT_TIMESTEP = 1 / 60;
-const MIN_TIMESTEP = 1 / 120;
-const MAX_TIMESTEP = 1 / 30;
 
 async function loadRapier() {
   if (typeof WebSocketPair !== "undefined") {
@@ -28,18 +25,9 @@ async function loadRapier() {
   return RAPIER;
 }
 
-function clamp(value, minimum, maximum) {
-  return Math.max(minimum, Math.min(maximum, Number(value) || 0));
-}
-
 async function createRapierPhysics() {
   const RAPIER = await loadRapier();
-  // Characters are driven by Rapier's CharacterController, so world gravity
-  // only integrates true dynamic rigid bodies such as vehicles and debris.
-  const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
-  world.timestep = DEFAULT_TIMESTEP;
-  if ("maxCcdSubsteps" in world) world.maxCcdSubsteps = 2;
-
+  const world = new RAPIER.World({ x: 0, y: 0, z: 0 });
   const controller = world.createCharacterController(CHARACTER_CONTROLLER_OFFSET);
   controller.enableAutostep(0.24, 0.35, false);
   controller.enableSnapToGround(0.35);
@@ -47,20 +35,13 @@ async function createRapierPhysics() {
   controller.setMinSlopeSlideAngle(Math.PI / 3);
 
   const characters = new Map();
-  const dynamicBodies = new Map();
   const colliderToEntity = new Map();
   const colliderMetadata = new Map();
   let batchDepth = 0;
   let queryDirty = false;
-  let dynamicsSteps = 0;
 
   function flushQueries() {
-    // Rapier.js 0.19.x uses the broad-phase directly for scene queries and no
-    // longer exposes World.updateSceneQueries(). If a rigid-body pose was
-    // modified manually, propagate it to its attached colliders without
-    // advancing simulation time. Standalone colliders are already updated by
-    // their own setters.
-    world.propagateModifiedBodyPositionsToColliders?.();
+    world.step();
     queryDirty = false;
   }
 
@@ -84,7 +65,7 @@ async function createRapierPhysics() {
 
   function rememberCollider(collider, spec) {
     const {
-      x, y = 0, z, hx, hy, hz, height, thickness,
+      x, y = 0, z, hx, hz, height, thickness,
       ...metadata
     } = spec;
     colliderMetadata.set(collider.handle, {
@@ -93,7 +74,6 @@ async function createRapierPhysics() {
       y,
       z,
       hx,
-      hy,
       hz,
       height,
       thickness,
@@ -220,144 +200,6 @@ async function createRapierPhysics() {
     if (!entry) return;
     entry.collider.setTranslation({ x, y: y + CHARACTER_BASE_OFFSET, z });
     syncQueries();
-  }
-
-  function createDynamicCuboid(bodyId, spec = {}) {
-    if (!bodyId) throw new Error("Dynamic rigid body requires an id");
-    if (dynamicBodies.has(bodyId)) return dynamicBodies.get(bodyId);
-
-    const {
-      x = 0,
-      y = 1,
-      z = 0,
-      hx = 0.5,
-      hy = 0.5,
-      hz = 0.5,
-      rotation = { x: 0, y: 0, z: 0, w: 1 },
-      mass = 1,
-      friction = 0.7,
-      restitution = 0.05,
-      linearDamping = 0.04,
-      angularDamping = 0.15,
-      canSleep = true,
-      ccd = false,
-      metadata = {},
-    } = spec;
-
-    const body = world.createRigidBody(
-      RAPIER.RigidBodyDesc.dynamic()
-        .setTranslation(x, y, z)
-        .setRotation(rotation)
-        .setLinearDamping(Math.max(0, Number(linearDamping) || 0))
-        .setAngularDamping(Math.max(0, Number(angularDamping) || 0))
-        .setCanSleep(Boolean(canSleep))
-        .setCcdEnabled(Boolean(ccd)),
-    );
-    const collider = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(
-        Math.max(0.01, Math.abs(Number(hx) || 0.5)),
-        Math.max(0.01, Math.abs(Number(hy) || 0.5)),
-        Math.max(0.01, Math.abs(Number(hz) || 0.5)),
-      )
-        .setMass(Math.max(0.001, Number(mass) || 1))
-        .setFriction(Math.max(0, Number(friction) || 0))
-        .setRestitution(clamp(restitution, 0, 1)),
-      body,
-    );
-    rememberCollider(collider, {
-      kind: metadata.kind ?? "dynamic-body",
-      bodyId,
-      x,
-      y,
-      z,
-      hx,
-      hy,
-      hz,
-      ...metadata,
-    });
-    const entry = { id: bodyId, body, colliders: [collider] };
-    dynamicBodies.set(bodyId, entry);
-    syncQueries();
-    return entry;
-  }
-
-  function addDynamicCuboidCollider(bodyId, spec = {}) {
-    const entry = dynamicBodies.get(bodyId);
-    if (!entry) return null;
-    const {
-      x = 0,
-      y = 0,
-      z = 0,
-      hx = 0.25,
-      hy = 0.25,
-      hz = 0.25,
-      mass = 0,
-      friction = 0.7,
-      restitution = 0.05,
-      sensor = false,
-      metadata = {},
-    } = spec;
-    const collider = world.createCollider(
-      RAPIER.ColliderDesc.cuboid(
-        Math.max(0.01, Math.abs(Number(hx) || 0.25)),
-        Math.max(0.01, Math.abs(Number(hy) || 0.25)),
-        Math.max(0.01, Math.abs(Number(hz) || 0.25)),
-      )
-        .setTranslation(Number(x) || 0, Number(y) || 0, Number(z) || 0)
-        .setMass(Math.max(0, Number(mass) || 0))
-        .setFriction(Math.max(0, Number(friction) || 0))
-        .setRestitution(clamp(restitution, 0, 1))
-        .setSensor(Boolean(sensor)),
-      entry.body,
-    );
-    rememberCollider(collider, {
-      kind: metadata.kind ?? "dynamic-body-part",
-      bodyId,
-      x,
-      y,
-      z,
-      hx,
-      hy,
-      hz,
-      ...metadata,
-    });
-    entry.colliders.push(collider);
-    syncQueries();
-    return collider;
-  }
-
-  function dynamicBody(bodyId) {
-    return dynamicBodies.get(bodyId)?.body ?? null;
-  }
-
-  function dynamicBodyState(bodyId) {
-    const body = dynamicBody(bodyId);
-    if (!body) return null;
-    const translation = body.translation();
-    const rotation = body.rotation();
-    const linvel = body.linvel();
-    const angvel = body.angvel();
-    return {
-      id: bodyId,
-      x: translation.x,
-      y: translation.y,
-      z: translation.z,
-      rotation: { x: rotation.x, y: rotation.y, z: rotation.z, w: rotation.w },
-      linvel: { x: linvel.x, y: linvel.y, z: linvel.z },
-      angvel: { x: angvel.x, y: angvel.y, z: angvel.z },
-      mass: body.mass(),
-      sleeping: body.isSleeping(),
-    };
-  }
-
-  function removeDynamicBody(bodyId) {
-    const entry = dynamicBodies.get(bodyId);
-    if (!entry) return false;
-    for (const collider of entry.colliders) colliderMetadata.delete(collider.handle);
-    world.removeRigidBody(entry.body);
-    dynamicBodies.delete(bodyId);
-    syncQueries();
-    return true;
   }
 
   function describeCharacterCollision(collision) {
@@ -527,22 +369,6 @@ async function createRapierPhysics() {
     return targetEntityId !== null && hit.entityId === targetEntityId;
   }
 
-  function isCharacterCollider(collider) {
-    return Boolean(collider) && colliderToEntity.has(collider.handle);
-  }
-
-  function metadataForCollider(collider) {
-    return collider ? (colliderMetadata.get(collider.handle) ?? null) : null;
-  }
-
-  function step(dt = DEFAULT_TIMESTEP) {
-    world.timestep = clamp(dt, MIN_TIMESTEP, MAX_TIMESTEP);
-    world.step();
-    dynamicsSteps += 1;
-    queryDirty = false;
-    return world.timestep;
-  }
-
   return {
     RAPIER,
     world,
@@ -558,30 +384,13 @@ async function createRapierPhysics() {
     position,
     teleport,
     move,
-    createDynamicCuboid,
-    addDynamicCuboidCollider,
-    dynamicBody,
-    dynamicBodyState,
-    removeDynamicBody,
     raycast,
     raycastWorld,
     raycastSupportWorld,
     lineOfSight,
-    isCharacterCollider,
-    metadataForCollider,
-    step,
     syncQueries,
     beginBatch,
     endBatch,
-    stats() {
-      return {
-        gravity: { x: world.gravity.x, y: world.gravity.y, z: world.gravity.z },
-        timestep: world.timestep,
-        dynamicsSteps,
-        dynamicBodies: dynamicBodies.size,
-        characters: characters.size,
-      };
-    },
   };
 }
 
