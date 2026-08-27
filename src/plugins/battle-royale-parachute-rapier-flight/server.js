@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-parachute-rapier-flight",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["entities", "battle-royale-parachute", "rapier-physics", "health"],
   capabilities: [
     "services.consume",
@@ -149,15 +149,19 @@ export async function setup(ctx) {
     const value = originalStateFor(entityId);
     if (!value) return value;
     const state = ctx.components.get(entityId, "Parachute");
-    const glideSpeed = state?.airborne && state?.phase === "deployed"
+    const airborne = Boolean(value.airborne);
+    const deployed = airborne && state?.phase === "deployed";
+    const glideSpeed = deployed
       ? Math.max(0, Number(state.rapierGlideSpeed) || Number(value.glideSpeed) || 0)
-      : Math.max(0, Number(value.glideSpeed) || 0);
-    const downward = Math.max(0, -(Number(value.verticalVelocity) || 0));
-    const wind = Math.max(0, Number(value.windSpeed) || Number(state?.windSpeed) || 0);
+      : 0;
+    const downward = airborne ? Math.max(0, -(Number(value.verticalVelocity) || 0)) : 0;
+    const wind = airborne
+      ? Math.max(0, Number(value.windSpeed) || Number(state?.windSpeed) || 0)
+      : 0;
     return {
       ...value,
       glideSpeed,
-      airSpeed: Math.hypot(downward, glideSpeed, wind),
+      airSpeed: airborne ? Math.hypot(downward, glideSpeed, wind) : 0,
       rapierFlight: true,
       rapierMaxGlideSpeed: RAPIER_MAX_GLIDE,
     };
