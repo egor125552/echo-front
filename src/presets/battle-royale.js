@@ -32,6 +32,7 @@ import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
+import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/server.js";
 import * as parachuteDynamics from "../plugins/battle-royale-parachute-dynamics/server.js";
@@ -73,6 +74,7 @@ export const battleRoyalePreset = [
   botFill,
   vehicle,
   matchApi,
+  vehicleIntegration,
   parachuteIntegration,
   parachuteCanopy,
   parachuteDynamics,
