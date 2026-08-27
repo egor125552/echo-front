@@ -84,10 +84,29 @@ jobs:
               rm -f "$TMP"
               exit 1
             fi
+
             jq -c . "$TMP" >> engine-command-results.jsonl
             echo "ENGINE_CONTROL_RESULT_BEGIN iteration=$iteration"
             jq -c . "$TMP"
             echo "ENGINE_CONTROL_RESULT_END iteration=$iteration"
+
+            if ! jq -e '
+              (.ok == true)
+              and ((.response.ok // true) == true)
+              and (
+                if ((.response.result? | type) == "array")
+                then ([.response.result[] | select(.ok != true)] | length) == 0
+                else true
+                end
+              )
+            ' "$TMP" > /dev/null; then
+              echo "Engine Control reported a failed command inside a successful HTTP response."
+              jq -c '.response.result[]? | select(type == "object" and .ok != true)' "$TMP" || true
+              cat /tmp/echo-front-engine-control.log || true
+              rm -f "$TMP"
+              exit 1
+            fi
+
             if [ $((iteration % FRAME)) -eq 0 ]; then
               jq -c . "$TMP" >> engine-command-frames.jsonl
               echo "Recorded observation frame at iteration $iteration"
