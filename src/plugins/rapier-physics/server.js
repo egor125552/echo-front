@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "3.0.0",
+  version: "3.0.1",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -34,9 +34,8 @@ function clamp(value, minimum, maximum) {
 
 async function createRapierPhysics() {
   const RAPIER = await loadRapier();
-  // Characters are still driven by Rapier's CharacterController and therefore
-  // are not affected by world gravity. Dynamic rigid bodies (vehicles, future
-  // debris, etc.) are. This lets both systems share one physical world.
+  // Characters are driven by Rapier's CharacterController, so world gravity
+  // only integrates true dynamic rigid bodies such as vehicles and debris.
   const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
   world.timestep = DEFAULT_TIMESTEP;
   if ("maxCcdSubsteps" in world) world.maxCcdSubsteps = 2;
@@ -56,11 +55,12 @@ async function createRapierPhysics() {
   let dynamicsSteps = 0;
 
   function flushQueries() {
-    // Scene-query synchronization must never advance dynamics. The old physics
-    // layer used world.step() here, which was harmless while every collider was
-    // effectively static but would make a dynamic vehicle simulate many times
-    // per game tick. Rapier exposes updateSceneQueries specifically for this.
-    world.updateSceneQueries();
+    // Rapier.js 0.19.x uses the broad-phase directly for scene queries and no
+    // longer exposes World.updateSceneQueries(). If a rigid-body pose was
+    // modified manually, propagate it to its attached colliders without
+    // advancing simulation time. Standalone colliders are already updated by
+    // their own setters.
+    world.propagateModifiedBodyPositionsToColliders?.();
     queryDirty = false;
   }
 
@@ -536,9 +536,6 @@ async function createRapierPhysics() {
   }
 
   function step(dt = DEFAULT_TIMESTEP) {
-    // Keep the step bounded. Network/game ticks may occasionally arrive late;
-    // feeding one huge dt to a suspension solver is much worse than a bounded
-    // physical step and is explicitly discouraged by Rapier's documentation.
     world.timestep = clamp(dt, MIN_TIMESTEP, MAX_TIMESTEP);
     world.step();
     dynamicsSteps += 1;
