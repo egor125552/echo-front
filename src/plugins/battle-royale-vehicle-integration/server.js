@@ -1,7 +1,7 @@
 export const manifest = {
   id: "battle-royale-vehicle-integration",
-  version: "1.0.0",
-  requires: ["match-api", "vehicles", "movement", "battle-royale"],
+  version: "1.0.1",
+  requires: ["match-api", "battle-royale-vehicle", "movement", "battle-royale"],
   capabilities: ["services.consume"],
 };
 
