@@ -1,10 +1,11 @@
 export const manifest = {
   id: "battle-royale-parachute-integration",
-  version: "1.4.0",
+  version: "1.4.1",
   requires: [
     "match-api", "battle-royale-parachute", "battle-royale", "movement",
     "rapier-physics", "entities",
   ],
+  optional: ["health-regeneration"],
   capabilities: [
     "services.consume",
     "components.read", "components.write",
@@ -39,6 +40,9 @@ export async function setup(ctx) {
   const movement = ctx.services.get("movement");
   const physics = ctx.services.get("physics");
   const entities = ctx.services.get("entities");
+  const healthRegeneration = ctx.services.has("health-regeneration")
+    ? ctx.services.get("health-regeneration")
+    : null;
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
   const originalStep = matchApi.step.bind(matchApi);
@@ -241,6 +245,7 @@ export async function setup(ctx) {
     resolveUnstableTopContacts(now);
     clearUnsupportedGrounding();
     withParachuteQueries(() => parachute.finishMovement(dt, now), { wrapMove: true });
+    if (deploymentActive) healthRegeneration?.tick(dt, now);
     return result;
   };
 
