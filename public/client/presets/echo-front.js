@@ -5,6 +5,7 @@ import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
+import * as audioResilience from "../plugins/audio-resilience.js";
 import * as parachuteAudioPreload from "../plugins/parachute-audio-preload.js";
 import * as soundPack from "../plugins/core-sound-pack.js";
 import * as eventSoundPack from "../plugins/event-sound-pack.js";
@@ -31,6 +32,7 @@ export const echoFrontClientPreset = [
   smoothing,
   speechSettings,
   spatialAudio,
+  audioResilience,
   parachuteAudioPreload,
   soundPack,
   eventSoundPack,
