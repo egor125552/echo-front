@@ -5,7 +5,7 @@ export const RAGDOLL_DEAD_LIFETIME_SECONDS = 20;
 
 export const manifest = {
   id: "battle-royale-ragdoll",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "rapier-physics",
     "movement",
@@ -49,6 +49,14 @@ const SOUND_COOLDOWN_SECONDS = 0.11;
 const DAMAGE_COOLDOWN_SECONDS = 0.22;
 const RECOVER_STABLE_SECONDS = 0.55;
 const RECOVER_MIN_ACTIVE_SECONDS = 0.90;
+const RECOVER_CORE_MAX_LINEAR_SPEED = 0.85;
+const RECOVER_CORE_MAX_ANGULAR_SPEED = 1.5;
+const RECOVER_TIMEOUT_MAX_LINEAR_SPEED = 2.0;
+const RECOVER_TIMEOUT_MAX_ANGULAR_SPEED = 3.0;
+const RECOVER_SUPPORT_PROBE_DISTANCE = 3.5;
+const RECOVERY_CORE_PARTS = new Set([
+  "pelvis", "abdomen", "chest", "head", "left-upper-leg", "right-upper-leg",
+]);
 const IMPACT_SOUND_THRESHOLD = 1.35;
 const IMPACT_DAMAGE_THRESHOLD = 4.0;
 const CONTROL_CHEST_TORQUE = 5.2;
@@ -129,7 +137,7 @@ export async function setup(ctx) {
   const characterColliderOwners = new Map();
 
   // Keep entity ownership for real character colliders created after this plugin
-  // comes online. This lets the vehicle contact graph identify the human it hit
+  // comes online. This lets the vehicle contact graph identify the character it hit
   // without introducing a second collision model.
   const originalCreateCharacter = physics.createCharacter.bind(physics);
   physics.createCharacter = (entityId, position) => {
@@ -447,7 +455,7 @@ export async function setup(ctx) {
         ?? physics.entityIdForCollider?.(other);
       if (!entityId || entityId === vehicle.driverId || active.has(entityId)) return;
       const entity = entities.get(entityId);
-      if (!entity?.alive || entity.bot || entity.kind !== "human") return;
+      if (!entity?.alive || entity.bot) return;
       if (!pairHasActualContact(chassisCollider, other)) return;
       hitIds.add(entityId);
     });
@@ -497,6 +505,18 @@ export async function setup(ctx) {
     }
   }
 
+  function hasRecoverySupport(entry) {
+    const pelvis = entry.byName.get("pelvis")?.body;
+    if (!pelvis || typeof physics.raycastSupportWorld !== "function") return false;
+    const p = pelvis.translation();
+    const origin = { x: p.x, y: p.y + 0.35, z: p.z };
+    return Boolean(physics.raycastSupportWorld(
+      origin,
+      { x: 0, y: -1, z: 0 },
+      RECOVER_SUPPORT_PROBE_DISTANCE,
+    ));
+  }
+
   function substepAfter(dt) {
     const safeDt = clamp(dt, 0, 0.05);
     for (const entry of active.values()) {
@@ -505,15 +525,17 @@ export async function setup(ctx) {
       entry.damageCooldown = Math.max(0, entry.damageCooldown - safeDt);
 
       let anyContact = false;
-      let maxLinearSpeed = 0;
-      let maxAngularSpeed = 0;
+      let maxCoreLinearSpeed = 0;
+      let maxCoreAngularSpeed = 0;
       let strongest = entry.pendingImpact;
 
       for (const part of entry.parts) {
         const velocity = part.body.linvel();
         const angular = part.body.angvel();
-        maxLinearSpeed = Math.max(maxLinearSpeed, magnitude(velocity));
-        maxAngularSpeed = Math.max(maxAngularSpeed, magnitude(angular));
+        if (RECOVERY_CORE_PARTS.has(part.name)) {
+          maxCoreLinearSpeed = Math.max(maxCoreLinearSpeed, magnitude(velocity));
+          maxCoreAngularSpeed = Math.max(maxCoreAngularSpeed, magnitude(angular));
+        }
 
         const touching = hasActualExternalContact(entry, part);
         if (!touching) continue;
@@ -539,7 +561,10 @@ export async function setup(ctx) {
       entry.hadExternalContact = anyContact;
       syncTransform(entry, anyContact);
 
-      if (anyContact && maxLinearSpeed < 0.85 && maxAngularSpeed < 1.25) {
+      const supported = anyContact && hasRecoverySupport(entry);
+      if (supported
+        && maxCoreLinearSpeed < RECOVER_CORE_MAX_LINEAR_SPEED
+        && maxCoreAngularSpeed < RECOVER_CORE_MAX_ANGULAR_SPEED) {
         entry.stableSeconds += safeDt;
       } else {
         entry.stableSeconds = 0;
@@ -550,7 +575,11 @@ export async function setup(ctx) {
         && entry.stableSeconds >= RECOVER_STABLE_SECONDS) {
         entry.recoveryRequested = true;
       }
-      if (!entry.dead && entry.elapsed >= RAGDOLL_MAX_ACTIVE_SECONDS) {
+      if (!entry.dead
+        && entry.elapsed >= RAGDOLL_MAX_ACTIVE_SECONDS
+        && supported
+        && maxCoreLinearSpeed < RECOVER_TIMEOUT_MAX_LINEAR_SPEED
+        && maxCoreAngularSpeed < RECOVER_TIMEOUT_MAX_ANGULAR_SPEED) {
         entry.recoveryRequested = true;
       }
       if (entry.dead && entry.elapsed >= RAGDOLL_DEAD_LIFETIME_SECONDS) {
@@ -641,18 +670,23 @@ export async function setup(ctx) {
     const p = pelvis.translation();
     const origin = { x: p.x, y: p.y + 2.5, z: p.z };
     const support = physics.raycastSupportWorld(origin, { x: 0, y: -1, z: 0 }, 9);
-    const groundY = support ? origin.y - support.distance : Math.max(0, p.y - 0.91);
+    if (!support) return null;
+    const groundY = origin.y - support.distance;
     return { x: p.x, y: groundY + 0.02, z: p.z, angle: entry.angle };
   }
 
   function recover(entry, now) {
     const target = recoveryTarget(entry);
+    if (!target) {
+      entry.recoveryRequested = false;
+      return false;
+    }
     removeBodies(entry);
     active.delete(entry.entityId);
     const entity = entities.get(entry.entityId);
     if (entity?.alive) {
       physics.setCharacterEnabled(entry.entityId, true);
-      if (target) movement.teleport(entry.entityId, target);
+      movement.teleport(entry.entityId, target);
     }
     totalRecovered += 1;
     ctx.events.emit("ragdoll:ended", {
@@ -660,11 +694,12 @@ export async function setup(ctx) {
       reason: entry.reason,
       recovered: Boolean(entity?.alive),
       duration: entry.elapsed,
-      x: target?.x ?? null,
-      y: target?.y ?? null,
-      z: target?.z ?? null,
+      x: target.x,
+      y: target.y,
+      z: target.z,
       now,
     });
+    return true;
   }
 
   function cleanup(entry, now, reason = "expired") {
