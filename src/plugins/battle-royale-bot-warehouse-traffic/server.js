@@ -7,14 +7,14 @@ export const WAREHOUSE_TRAFFIC_LANES = Object.freeze([-0.68, 0, 0.68]);
 
 export const manifest = {
   id: "battle-royale-bot-warehouse-traffic",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "bot-controller", "bot-combat", "bot-brain", "bot-perception",
     "movement", "entities", "battle-royale", "map-test-arena",
   ],
   capabilities: [
     "services.consume", "services.provide",
-    "components.read",
+    "components.read", "events.on",
   ],
 };
 
@@ -118,7 +118,6 @@ export async function setup(ctx) {
   const brain = ctx.services.get("bot-brain");
   const perception = ctx.services.get("bot-perception");
   const movement = ctx.services.get("movement");
-  const entities = ctx.services.get("entities");
   const battleRoyale = ctx.services.get("battle-royale");
   const map = ctx.services.get("map");
 
@@ -218,7 +217,7 @@ export async function setup(ctx) {
     return Math.hypot(dx, dz) <= WAREHOUSE_TRAFFIC_APPROACH_RADIUS;
   }
 
-  function nearbyDoorBots(now) {
+  function nearbyDoorBots() {
     const list = [];
     for (const bot of bots.all()) {
       if (!bot.alive) continue;
@@ -321,7 +320,7 @@ export async function setup(ctx) {
 
   function coordinate(now) {
     if (!building || !battleRoyale.isActive()) return;
-    const doorBots = nearbyDoorBots(now);
+    const doorBots = nearbyDoorBots();
     const crowd = doorBots.length >= 3;
     const activeBots = bots.all()
       .filter((bot) => bot.alive)
@@ -415,9 +414,9 @@ export async function setup(ctx) {
   function clearBot(entityId) {
     traffic.delete(entityId);
   }
-  ctx.events?.on?.("entity:died", ({ entityId }) => clearBot(entityId));
-  ctx.events?.on?.("entity:removed", ({ entityId }) => clearBot(entityId));
-  ctx.events?.on?.("entity:respawned", ({ entityId }) => clearBot(entityId));
+  ctx.events.on("entity:died", ({ entityId }) => clearBot(entityId));
+  ctx.events.on("entity:removed", ({ entityId }) => clearBot(entityId));
+  ctx.events.on("entity:respawned", ({ entityId }) => clearBot(entityId));
 
   ctx.services.provide("warehouse-traffic", {
     stateFor(botId) {
