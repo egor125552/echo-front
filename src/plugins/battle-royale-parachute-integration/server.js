@@ -1,9 +1,9 @@
 export const manifest = {
   id: "battle-royale-parachute-integration",
-  version: "1.4.1",
+  version: "1.4.2",
   requires: [
     "match-api", "battle-royale-parachute", "battle-royale", "movement",
-    "rapier-physics", "entities",
+    "rapier-physics", "entities", "battle-royale-vehicle",
   ],
   optional: ["health-regeneration"],
   capabilities: [
@@ -40,6 +40,7 @@ export async function setup(ctx) {
   const movement = ctx.services.get("movement");
   const physics = ctx.services.get("physics");
   const entities = ctx.services.get("entities");
+  const vehicles = ctx.services.get("vehicles");
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
     : null;
@@ -237,6 +238,12 @@ export async function setup(ctx) {
     let result = null;
     if (deploymentActive) {
       battleRoyale.tick(now);
+      // Keep the one shared Rapier world advancing while some players are still
+      // descending. This is required even when the jeep is parked: Rapier 0.19.x
+      // broad-phase updates for door enable/disable changes happen on the physics
+      // step. It also means an early-landed player can drive immediately instead
+      // of waiting for the last parachute to touch down.
+      vehicles.tickPhysics(dt, now);
       movement.tick(dt, now);
     } else {
       result = originalStep(dt, now);
