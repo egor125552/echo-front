@@ -2,11 +2,11 @@ export const BOT_LONG_SIGHT_DISTANCE = 62;
 export const BOT_ATTACKER_LOCK_MS = 2_000;
 export const BOT_HUMAN_DISTANCE_BIAS = 0.78;
 export const BOT_ATTACKER_DISTANCE_BIAS = 0.34;
-export const BOT_VERTICAL_SIGHT_TOLERANCE = 1.75;
+export const BOT_VERTICAL_SIGHT_TOLERANCE = 5.2;
 
 export const manifest = {
   id: "battle-royale-bot-awareness",
-  version: "1.0.1",
+  version: "1.0.2",
   requires: [
     "bot-perception", "bot-brain", "teams", "rapier-physics", "spatial-grid", "entities",
   ],
@@ -89,6 +89,9 @@ export async function setup(ctx) {
         (Number(entry.transform.z) || 0) - (Number(transform.z) || 0),
       );
       if (distance > maxDistance) continue;
+      // Characters do not blind each other here; only real Rapier world geometry
+      // blocks awareness. The larger vertical reach lets an exposed enemy on the
+      // stairs be seen while concrete floors and walls still block the ray.
       if (!worldLineOfSight(transform, entry.transform)) continue;
       candidates.push({
         entityId: enemy.id,
