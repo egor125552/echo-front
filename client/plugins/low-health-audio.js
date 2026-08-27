@@ -1,7 +1,8 @@
 export const HEARTBEAT_URL = "/assets/audio/core/heartbeat-fast.mp3";
 export const WOUNDED_URL = "/assets/audio/core/player-wounded.mp3";
-export const HEARTBEAT_START_RATIO = 0.45;
-export const HEARTBEAT_STOP_RATIO = 0.65;
+export const HEARTBEAT_START_RATIO = 0.55;
+export const HEARTBEAT_STOP_RATIO = 0.72;
+export const HEARTBEAT_RETRY_MS = 1500;
 export const REVERB_START_RATIO = 0.65;
 export const REVERB_FULL_RATIO = 0.15;
 export const MAX_REVERB_MIX = 0.78;
@@ -51,7 +52,7 @@ export async function setup(ctx) {
   const network = ctx.services.get("network");
   let heartbeat = null;
   let heartbeatStarting = false;
-  let heartbeatUnavailable = false;
+  let heartbeatRetryAfter = 0;
   let woundedCueArmed = true;
   let lastRatio = 1;
   let alive = false;
@@ -78,23 +79,26 @@ export async function setup(ctx) {
   }
 
   async function startHeartbeat() {
-    if (heartbeat || heartbeatStarting || heartbeatUnavailable || !alive) return;
+    if (heartbeat || heartbeatStarting || !alive || Date.now() < heartbeatRetryAfter) return;
     heartbeatStarting = true;
     try {
+      await audio.resume();
       const handle = await audio.playCentered(HEARTBEAT_URL, {
         gain: heartbeatGainForRatio(lastRatio),
         channel: "low-health-heartbeat",
         replace: true,
         loop: true,
+        foreground: true,
       });
-      if (!alive) {
+      if (!alive || lastRatio > HEARTBEAT_STOP_RATIO) {
         handle?.stop?.();
         return;
       }
       heartbeat = handle;
+      heartbeatRetryAfter = 0;
       heartbeat.setGain?.(heartbeatGainForRatio(lastRatio), 0.28);
     } catch (error) {
-      heartbeatUnavailable = true;
+      heartbeatRetryAfter = Date.now() + HEARTBEAT_RETRY_MS;
       console.error("Echo Front heartbeat audio error", error);
     } finally {
       heartbeatStarting = false;
@@ -111,15 +115,13 @@ export async function setup(ctx) {
     alive = false;
     lastRatio = 1;
     woundedCueArmed = true;
+    heartbeatRetryAfter = 0;
     audio.stopChannel("low-health-wounded");
     stopHeartbeat();
     applyIntensity(0);
   }
 
   function suspendEffectsForReconnect() {
-    // A network hiccup is not a new life. Do not re-arm the wounded cue or
-    // recreate the heartbeat; just fade the local injury presentation until the
-    // authoritative snapshot returns.
     audio.stopChannel("low-health-wounded");
     heartbeat?.setGain?.(0, 0.2);
     applyIntensity(0);
@@ -139,6 +141,7 @@ export async function setup(ctx) {
 
     if (lastRatio >= HEARTBEAT_STOP_RATIO) {
       woundedCueArmed = true;
+      if (heartbeat) stopHeartbeat();
     }
 
     if (lastRatio <= HEARTBEAT_START_RATIO) {
