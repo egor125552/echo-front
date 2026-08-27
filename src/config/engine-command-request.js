@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 65,
+  id: 66,
   mode: "battle-royale",
-  room: "engine-lab-bot-awareness-65",
+  room: "engine-lab-bot-awareness-66",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -9,12 +9,41 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
     commands: [
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [2000002200000] }
+        args: { service: "battle-royale", method: "arm", arguments: [2000002300000] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 1400, now: 2000002200050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002300050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002325050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002350050 } },
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "status", arguments: [2000002270050] }
+        args: { service: "bot-parachutes", method: "summary", arguments: [] }
+      },
+      {
+        command: "entity.spawn",
+        args: {
+          spec: {
+            id: "awareness-deployment-sentinel",
+            kind: "human",
+            name: "Awareness Deployment Sentinel",
+            bot: false,
+            team: 89999,
+            health: 1,
+            weapons: [],
+            position: { x: -340, y: 0, z: 0, angle: 0 }
+          }
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "health",
+          method: "applyDamage",
+          arguments: ["awareness-deployment-sentinel", 5, { "weaponId": "engine-sentinel", "now": 2000002375100 }]
+        }
+      },
+      {
+        command: "service.call",
+        args: { service: "battle-royale", method: "status", arguments: [2000002375150] }
       },
 
       {
@@ -28,7 +57,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
             team: 81001,
             health: 200,
             weapons: ["rifle"],
-            position: { x: -250, y: 0, z: -250, angle: 3.141592653589793 }
+            position: { x: -300, y: 0, z: -40, angle: 3.141592653589793 }
           }
         }
       },
@@ -43,15 +72,15 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
             team: 81002,
             health: 200,
             weapons: [],
-            position: { x: -250, y: 0, z: -195, angle: 0 }
+            position: { x: -300, y: 0, z: 15, angle: 0 }
           }
         }
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-open-bot", 2000002270100] }
+        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-open-bot", 2000002375200] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000002270100 } },
+      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000002375200 } },
       { command: "entity.inspect", args: { entityId: "awareness-open-bot" } },
       { command: "entity.inspect", args: { entityId: "awareness-open-human" } },
       {
@@ -115,7 +144,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
             team: 82001,
             health: 200,
             weapons: [],
-            position: { x: 60, y: 3.2, z: -3.0, angle: 0 }
+            position: { x: 60, y: 3.2, z: -3, angle: 0 }
           }
         }
       },
@@ -136,9 +165,9 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-warehouse-bot", 2000002272200] }
+        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-warehouse-bot", 2000002377300] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 35, now: 2000002272200 } },
+      { command: "game.step", args: { dt: 0.05, steps: 35, now: 2000002377300 } },
       { command: "entity.inspect", args: { entityId: "awareness-warehouse-human" } },
       {
         command: "service.call",
@@ -195,14 +224,14 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "combat",
           method: "damage",
-          arguments: ["awareness-threat-bot", 5, { "attackerId": "awareness-attacker-human", "weaponId": "engine-probe", "now": 2000002274000 }]
+          arguments: ["awareness-threat-bot", 5, { "attackerId": "awareness-attacker-human", "weaponId": "engine-probe", "now": 2000002379100 }]
         }
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-threat-bot", 2000002274050] }
+        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-threat-bot", 2000002379150] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000002274050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000002379150 } },
       { command: "entity.inspect", args: { entityId: "awareness-attacker-human" } },
       { command: "entity.inspect", args: { entityId: "awareness-close-decoy" } },
       {
@@ -211,5 +240,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       }
     ]
   },
-  requestedAt: "2026-08-27T11:20:00Z"
+  requestedAt: "2026-08-27T11:30:00Z"
 });
