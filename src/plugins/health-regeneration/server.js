@@ -3,8 +3,8 @@ export const REGEN_RATE_PER_SECOND = 25;
 
 export const manifest = {
   id: "health-regeneration",
-  version: "1.1.0",
-  requires: ["entities", "health"],
+  version: "1.2.0",
+  requires: ["entities", "health", "bot-controller"],
   capabilities: [
     "services.consume", "services.provide",
     "events.on",
@@ -14,6 +14,7 @@ export const manifest = {
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const health = ctx.services.get("health");
+  const bots = ctx.services.get("bots");
   const lastHealthDamageAt = new Map();
 
   ctx.events.on("health:damaged", (payload = {}) => {
@@ -33,9 +34,7 @@ export async function setup(ctx) {
     if (!(dt > 0)) return;
 
     for (const entity of entities.all()) {
-      // Keep bot balance unchanged. This mechanic is the human player's
-      // automatic recovery layer and can be removed independently.
-      if (entity.bot || !entity.alive) continue;
+      if (entity.bot || bots.isBot(entity.id) || !entity.alive) continue;
 
       const damagedAt = lastHealthDamageAt.get(entity.id);
       if (!Number.isFinite(damagedAt) || now - damagedAt < REGEN_DELAY_MS) continue;
