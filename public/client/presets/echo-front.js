@@ -12,6 +12,7 @@ import * as armorPlatingAudio from "../plugins/armor-plating-audio.js";
 import * as environmentAudio from "../plugins/environment-audio.js";
 import * as buildingAcoustics from "../plugins/building-acoustics.js";
 import * as battleRoyaleAudio from "../plugins/battle-royale-audio.js";
+import * as battleRoyaleZoneAudio from "../plugins/battle-royale-zone-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
 import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
@@ -34,6 +35,7 @@ export const echoFrontClientPreset = [
   environmentAudio,
   buildingAcoustics,
   battleRoyaleAudio,
+  battleRoyaleZoneAudio,
   parachuteAudio,
   parachuteDynamicsAudio,
   lowHealthAudio,
