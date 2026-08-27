@@ -57,7 +57,7 @@ export async function setup(ctx) {
       driving = true;
       nearArmed = false;
       announce(
-        "Вы в внедорожнике. Стрелка вверх — газ. Стрелка вниз — тормоз и задний ход. Стрелки влево и вправо — руль. Shift — ручник. E — выйти",
+        "Вы в внедорожнике. Стрелка вверх — газ. Стрелка вниз — тормоз и задний ход. Стрелки влево и вправо — руль. Shift — ручник. Удерживайте X вместе с газом — нитро. E — выйти",
         true,
       );
       return;
@@ -65,6 +65,18 @@ export async function setup(ctx) {
     if (packet.event === "vehicle:exited" && payload.entityId === network.playerId) {
       driving = false;
       announce("Вы вышли из внедорожника", true);
+      return;
+    }
+    if (packet.event === "vehicle:nitro-start" && payload.driverId === network.playerId) {
+      announce("Нитро", true);
+      return;
+    }
+    if (packet.event === "vehicle:nitro-stop" && payload.driverId === network.playerId) {
+      announce("Нитро перезаряжается. Десять секунд", false);
+      return;
+    }
+    if (packet.event === "vehicle:nitro-ready" && payload.driverId === network.playerId) {
+      announce("Нитро готово", false);
       return;
     }
     if (packet.event === "vehicle:impact" && payload.driverId === network.playerId) {
