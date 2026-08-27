@@ -4,30 +4,15 @@ export const manifest = {
 };
 
 const ENGINE_CHANNEL = "br-vehicle-engine";
+const BRAKE_CHANNEL = "br-vehicle-brake";
 const ENGINE_RADIUS = 170;
+const BRAKE_RADIUS = 105;
 const CRASH_RADIUS = 120;
+const ENGINE_URL = "/audio/vehicles/ts3/ts3_truck_engine.mp3";
+const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
-}
-
-function createEngineLoop(context) {
-  const duration = 1;
-  const length = Math.max(1, Math.floor(context.sampleRate * duration));
-  const buffer = context.createBuffer(1, length, context.sampleRate);
-  const data = buffer.getChannelData(0);
-  const base = 40;
-  for (let i = 0; i < length; i += 1) {
-    const t = i / context.sampleRate;
-    const pulse = 0.34 * Math.sin(Math.PI * 2 * base * t)
-      + 0.19 * Math.sin(Math.PI * 2 * base * 2 * t + 0.28)
-      + 0.11 * Math.sin(Math.PI * 2 * base * 3 * t + 0.71)
-      + 0.06 * Math.sin(Math.PI * 2 * base * 5 * t + 1.1);
-    const mechanical = 0.04 * Math.sin(Math.PI * 2 * 13 * t)
-      * Math.sin(Math.PI * 2 * base * 4 * t);
-    data[i] = clamp(pulse + mechanical, -0.78, 0.78);
-  }
-  return buffer;
 }
 
 function createCrashBuffer(context) {
@@ -49,15 +34,20 @@ function createCrashBuffer(context) {
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
-  const engineBuffer = createEngineLoop(audio.context);
+  const [engineBuffer, brakeBuffer] = await Promise.all([
+    audio.load(ENGINE_URL),
+    audio.load(BRAKE_URL),
+  ]);
   const crashBuffer = createCrashBuffer(audio.context);
   let engine = null;
   let currentVehicleId = null;
+  let brakingActive = false;
 
   function stopEngine() {
     audio.stopChannel(ENGINE_CHANNEL);
     engine = null;
     currentVehicleId = null;
+    brakingActive = false;
   }
 
   function playerFor(snapshot) {
@@ -72,6 +62,31 @@ export async function setup(ctx) {
       (Number(a?.x) || 0) - (Number(b?.x) || 0),
       (Number(a?.z) || 0) - (Number(b?.z) || 0),
     );
+  }
+
+  function isBraking(vehicle) {
+    const speedKph = Math.max(0, Number(vehicle?.speedKph) || 0);
+    if (speedKph < 4) return false;
+    const throttle = Number(vehicle?.input?.throttle) || 0;
+    const forwardSpeed = Number(vehicle?.forwardSpeed) || 0;
+    if (vehicle?.input?.handbrake) return true;
+    if (throttle < -0.08 && forwardSpeed > 1.25) return true;
+    if (throttle > 0.08 && forwardSpeed < -1.25) return true;
+    return false;
+  }
+
+  function playBrake(vehicle) {
+    void audio.resume();
+    audio.playSpatialBuffer(brakeBuffer, vehicle, {
+      radius: BRAKE_RADIUS,
+      gain: 0.78,
+      referenceDistance: 2.5,
+      rolloffFactor: 0.36,
+      airAbsorptionMinHz: 4300,
+      loop: false,
+      channel: BRAKE_CHANNEL,
+      replace: true,
+    });
   }
 
   function updateEngine(snapshot) {
@@ -91,7 +106,7 @@ export async function setup(ctx) {
       void audio.resume();
       engine = audio.playSpatialBuffer(engineBuffer, vehicle, {
         radius: ENGINE_RADIUS,
-        gain: 0.48,
+        gain: 0.58,
         referenceDistance: 2.8,
         rolloffFactor: 0.28,
         airAbsorptionMinHz: 4300,
@@ -107,8 +122,15 @@ export async function setup(ctx) {
     const speedKph = Math.max(0, Number(vehicle.speedKph) || 0);
     const throttle = Math.abs(Number(vehicle.input?.throttle) || 0);
     const airborne = Math.max(0, 4 - (Number(vehicle.groundedWheels) || 0));
-    const rate = clamp(0.76 + speedKph / 82 + throttle * 0.24 + airborne * 0.035, 0.72, 2.45);
-    engine.source?.playbackRate?.setTargetAtTime(rate, audio.context.currentTime, 0.08);
+
+    // A single off-road engine recording drives the whole rev range. Raising
+    // playbackRate raises both playback speed and pitch, like increasing RPM.
+    const rate = clamp(0.78 + speedKph / 92 + throttle * 0.3 + airborne * 0.025, 0.76, 2.2);
+    engine.source?.playbackRate?.setTargetAtTime(rate, audio.context.currentTime, 0.09);
+
+    const braking = isBraking(vehicle);
+    if (braking && !brakingActive) playBrake(vehicle);
+    brakingActive = braking;
   }
 
   ctx.events.on("game:snapshot", updateEngine);
@@ -129,5 +151,8 @@ export async function setup(ctx) {
     });
   });
 
-  ctx.events.on("network:disconnected", stopEngine);
+  ctx.events.on("network:disconnected", () => {
+    audio.stopChannel(BRAKE_CHANNEL);
+    stopEngine();
+  });
 }
