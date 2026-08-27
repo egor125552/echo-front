@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-bot-parachute",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "entities", "movement", "battle-royale-parachute", "match-api", "battle-royale", "map-test-arena",
   ],
@@ -50,10 +50,6 @@ function distance2(a, b) {
     (Number(a?.x) || 0) - (Number(b?.x) || 0),
     (Number(a?.z) || 0) - (Number(b?.z) || 0),
   );
-}
-
-function isBot(entity) {
-  return Boolean(entity?.alive && entity.bot);
 }
 
 function warehouseTarget(seed, map) {
@@ -186,6 +182,7 @@ export async function setup(ctx) {
       landedAt: null,
       impactSpeed: null,
       damage: 0,
+      landingKilled: false,
       killed: false,
       landingError: null,
     };
@@ -294,6 +291,28 @@ export async function setup(ctx) {
     return entities.all().filter((entity) => entity.alive && entity.bot);
   }
 
+  function retarget(entityIds, target = {}, options = {}) {
+    const ids = Array.isArray(entityIds) ? entityIds : [entityIds];
+    const point = clampToMap({
+      x: Number(target.x) || 0,
+      y: Number(target.y) || 0,
+      z: Number(target.z) || 0,
+      kind: String(target.kind || "stress-target"),
+    });
+    const requestedDeployAltitude = Number(options.deployAltitude);
+    let changed = 0;
+    for (const entityId of ids) {
+      const assignment = assignments.get(entityId);
+      if (!assignment || assignment.landedAt != null) continue;
+      assignment.target = { ...point };
+      if (Number.isFinite(requestedDeployAltitude)) {
+        assignment.deployAltitude = clamp(requestedDeployAltitude, 120, 420);
+      }
+      changed += 1;
+    }
+    return { changed, target: point, deployAltitude: Number.isFinite(requestedDeployAltitude) ? clamp(requestedDeployAltitude, 120, 420) : null };
+  }
+
   ctx.events.on("battle-royale:started", ({ startedAt }) => {
     generation += 1;
     assignments.clear();
@@ -316,6 +335,7 @@ export async function setup(ctx) {
     assignment.landedAt = Number(now) || Date.now();
     assignment.impactSpeed = Math.max(0, Number(impactSpeed) || 0);
     assignment.damage = Math.max(0, Number(damage) || 0);
+    assignment.landingKilled = Boolean(killed);
     assignment.killed = Boolean(killed);
     assignment.landingError = transform ? distance2(transform, assignment.target) : null;
     movement.setInput(entityId, {});
@@ -325,7 +345,7 @@ export async function setup(ctx) {
       landingError: assignment.landingError,
       impactSpeed: assignment.impactSpeed,
       damage: assignment.damage,
-      killed: assignment.killed,
+      killed: assignment.landingKilled,
       now: assignment.landedAt,
     });
   });
@@ -333,7 +353,7 @@ export async function setup(ctx) {
   ctx.events.on("entity:died", ({ entityId }) => {
     const assignment = assignments.get(entityId);
     if (!assignment) return;
-    if (assignment.status !== "landed") assignment.status = "dead";
+    if (assignment.landedAt == null) assignment.status = "dead";
     assignment.killed = true;
     movement.setInput(entityId, {});
   });
@@ -368,6 +388,10 @@ export async function setup(ctx) {
       const value = assignments.get(entityId);
       return value ? structuredClone(value) : null;
     },
+    retarget,
+    retargetAll(target = {}, options = {}) {
+      return retarget([...assignments.keys()], target, options);
+    },
     summary() {
       const values = [...assignments.values()];
       const landed = values.filter((value) => value.landedAt != null);
@@ -384,7 +408,8 @@ export async function setup(ctx) {
         warehouseTargets: values.filter((value) => String(value.target?.kind).startsWith("warehouse")).length,
         upperWarehouseTargets: values.filter((value) => value.target?.kind === "warehouse-upper").length,
         hardLandings: landed.filter((value) => Number(value.impactSpeed) > 8).length,
-        fatalLandings: landed.filter((value) => value.killed).length,
+        fatalLandings: landed.filter((value) => value.landingKilled).length,
+        postLandingDeaths: landed.filter((value) => value.killed && !value.landingKilled).length,
         averageLandingError: errors.length ? errors.reduce((sum, value) => sum + value, 0) / errors.length : null,
         maxLandingError: errors.length ? Math.max(...errors) : null,
         averageImpactSpeed: impacts.length ? impacts.reduce((sum, value) => sum + value, 0) / impacts.length : null,
