@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 67,
+  id: 68,
   mode: "battle-royale",
-  room: "engine-lab-bot-awareness-67",
+  room: "engine-lab-journal-fixes-68",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -9,27 +9,35 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
     commands: [
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [2000002400000] }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002400050 } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002425050 } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002450050 } },
-      {
-        command: "service.call",
-        args: { service: "bot-parachutes", method: "summary", arguments: [] }
+        args: { service: "battle-royale", method: "arm", arguments: [2000002600000] }
       },
       {
         command: "entity.spawn",
         args: {
           spec: {
-            id: "awareness-deployment-sentinel",
-            kind: "human",
-            name: "Awareness Deployment Sentinel",
+            id: "journal-regen-human",
+            kind: "test-human",
+            name: "Journal Regen Human",
             bot: false,
-            team: 89999,
-            health: 1,
+            team: 90001,
+            health: 200,
             weapons: [],
-            position: { x: -340, y: 0, z: 0, angle: 0 }
+            position: { x: -350, y: 0, z: 0, angle: 0 }
+          }
+        }
+      },
+      {
+        command: "entity.spawn",
+        args: {
+          spec: {
+            id: "journal-regen-bot",
+            kind: "bot",
+            name: "Journal Regen Bot",
+            bot: true,
+            team: 90002,
+            health: 200,
+            weapons: [],
+            position: { x: -330, y: 0, z: 0, angle: 0 }
           }
         }
       },
@@ -38,203 +46,79 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "health",
           method: "applyDamage",
-          arguments: ["awareness-deployment-sentinel", 5, { "weaponId": "engine-sentinel", "now": 2000002475100 }]
-        }
-      },
-      {
-        command: "service.call",
-        args: { service: "battle-royale", method: "status", arguments: [2000002475150] }
-      },
-
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-open-bot",
-            kind: "bot",
-            name: "Open Field Bot",
-            bot: true,
-            team: 81001,
-            health: 200,
-            weapons: ["rifle"],
-            position: { x: -300, y: 0, z: -40, angle: 3.141592653589793 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-open-human",
-            kind: "test-human",
-            name: "Open Field Human",
-            bot: false,
-            team: 81002,
-            health: 200,
-            weapons: [],
-            position: { x: -300, y: 0, z: 15, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-open-bot", 2000002475200] }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000002475200 } },
-      { command: "entity.inspect", args: { entityId: "awareness-open-bot" } },
-      { command: "entity.inspect", args: { entityId: "awareness-open-human" } },
-
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-warehouse-bot",
-            kind: "bot",
-            name: "Warehouse Bot",
-            bot: true,
-            team: 82001,
-            health: 200,
-            weapons: ["rifle"],
-            position: { x: 60, y: 3.2, z: -8, angle: 3.141592653589793 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-warehouse-human",
-            kind: "test-human",
-            name: "Warehouse Human",
-            bot: false,
-            team: 82002,
-            health: 200,
-            weapons: [],
-            position: { x: 60, y: 3.2, z: 0, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-blocker-1",
-            kind: "blocker",
-            name: "Friendly Blocker 1",
-            bot: false,
-            team: 82001,
-            health: 200,
-            weapons: [],
-            position: { x: 60, y: 3.2, z: -5.5, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-blocker-2",
-            kind: "blocker",
-            name: "Friendly Blocker 2",
-            bot: false,
-            team: 82001,
-            health: 200,
-            weapons: [],
-            position: { x: 60, y: 3.2, z: -3, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-blocker-3",
-            kind: "blocker",
-            name: "Friendly Blocker 3",
-            bot: false,
-            team: 82001,
-            health: 200,
-            weapons: [],
-            position: { x: 60, y: 3.2, z: -0.8, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-warehouse-bot", 2000002477300] }
-      },
-      { command: "game.step", args: { dt: 0.05, steps: 35, now: 2000002477300 } },
-      { command: "entity.inspect", args: { entityId: "awareness-warehouse-human" } },
-      {
-        command: "service.call",
-        args: { service: "bot-brain", method: "stateFor", arguments: ["awareness-warehouse-bot"] }
-      },
-
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-threat-bot",
-            kind: "bot",
-            name: "Threat Priority Bot",
-            bot: true,
-            team: 83001,
-            health: 200,
-            weapons: ["rifle"],
-            position: { x: 250, y: 0, z: 240, angle: 3.141592653589793 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-attacker-human",
-            kind: "test-human",
-            name: "Attacker Human",
-            bot: false,
-            team: 83002,
-            health: 200,
-            weapons: [],
-            position: { x: 250, y: 0, z: 258, angle: 0 }
-          }
-        }
-      },
-      {
-        command: "entity.spawn",
-        args: {
-          spec: {
-            id: "awareness-close-decoy",
-            kind: "test-human",
-            name: "Closer Decoy",
-            bot: false,
-            team: 83003,
-            health: 200,
-            weapons: [],
-            position: { x: 255, y: 0, z: 245, angle: 0 }
-          }
+          arguments: ["journal-regen-human", 107, { "weaponId": "fall-impact", "now": 2000002600050 }]
         }
       },
       {
         command: "service.call",
         args: {
-          service: "combat",
-          method: "damage",
-          arguments: ["awareness-threat-bot", 5, { "attackerId": "awareness-attacker-human", "weaponId": "engine-probe", "now": 2000002479100 }]
+          service: "health",
+          method: "applyDamage",
+          arguments: ["journal-regen-bot", 50, { "weaponId": "engine-probe", "now": 2000002600050 }]
+        }
+      },
+      { command: "entity.inspect", args: { entityId: "journal-regen-human" } },
+      { command: "entity.inspect", args: { entityId: "journal-regen-bot" } },
+      {
+        command: "service.call",
+        args: { service: "battle-royale", method: "status", arguments: [2000002600100] }
+      },
+      { command: "game.step", args: { dt: 0.05, steps: 120, now: 2000002600100 } },
+      { command: "entity.inspect", args: { entityId: "journal-regen-human" } },
+      { command: "entity.inspect", args: { entityId: "journal-regen-bot" } },
+      {
+        command: "service.call",
+        args: { service: "battle-royale", method: "status", arguments: [2000002606100] }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "ground-navigation",
+          method: "waypoint",
+          arguments: [{ "x": 40, "y": 0, "z": 0 }, { "x": 55, "y": 0, "z": 5 }]
         }
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-threat-bot", 2000002479150] }
+        args: {
+          service: "ground-navigation",
+          method: "waypoint",
+          arguments: [{ "x": 43.65, "y": 0, "z": 13.55 }, { "x": 55, "y": 0, "z": 5 }]
+        }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000002479150 } },
-      { command: "entity.inspect", args: { entityId: "awareness-attacker-human" } },
-      { command: "entity.inspect", args: { entityId: "awareness-close-decoy" } },
       {
         command: "service.call",
-        args: { service: "bot-brain", method: "stateFor", arguments: ["awareness-threat-bot"] }
+        args: {
+          service: "ground-navigation",
+          method: "waypoint",
+          arguments: [{ "x": 76.35, "y": 0, "z": 13.55 }, { "x": 55, "y": 0, "z": 5 }]
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "ground-navigation",
+          method: "waypoint",
+          arguments: [{ "x": 60, "y": 0, "z": 0 }, { "x": 55, "y": 3.2, "z": 7 }]
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "ground-navigation",
+          method: "waypoint",
+          arguments: [{ "x": 66.1, "y": 0, "z": 3.35 }, { "x": 55, "y": 3.2, "z": 7 }]
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "ground-navigation",
+          method: "waypoint",
+          arguments: [{ "x": 73.9, "y": 0, "z": 3.35 }, { "x": 55, "y": 3.2, "z": 7 }]
+        }
       }
     ]
   },
-  requestedAt: "2026-08-27T11:35:00Z"
+  requestedAt: "2026-08-27T12:20:00Z"
 });
