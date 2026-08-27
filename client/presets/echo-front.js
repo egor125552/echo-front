@@ -14,12 +14,14 @@ import * as buildingAcoustics from "../plugins/building-acoustics.js";
 import * as battleRoyaleAudio from "../plugins/battle-royale-audio.js";
 import * as battleRoyaleZoneAudio from "../plugins/battle-royale-zone-audio.js";
 import * as botParachuteAudio from "../plugins/battle-royale-bot-parachute-audio.js";
+import * as vehicleAudio from "../plugins/battle-royale-vehicle-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
 import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
 import * as parachuteAnnouncer from "../plugins/parachute-announcer.js";
+import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js";
 
 export const echoFrontClientPreset = [
   input,
@@ -38,10 +40,12 @@ export const echoFrontClientPreset = [
   battleRoyaleAudio,
   battleRoyaleZoneAudio,
   botParachuteAudio,
+  vehicleAudio,
   parachuteAudio,
   parachuteDynamicsAudio,
   lowHealthAudio,
   hud,
   announcer,
   parachuteAnnouncer,
+  vehicleAnnouncer,
 ];
