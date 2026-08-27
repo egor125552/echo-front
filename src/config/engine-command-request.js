@@ -1,42 +1,35 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 71,
+  id: 72,
   mode: "battle-royale",
-  room: "engine-lab-warehouse-combat-flow-71",
+  room: "engine-lab-rapier-vehicle-72",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: {
     commands: [
-      { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [2000003000000] } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000003000050 } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000003025050 } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000003050050 } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-flow-sentinel-71", kind: "human", name: "Flow Sentinel", bot: false, team: 97000, health: 1, weapons: [], position: { x: -390, y: 0, z: -390, angle: 0 } } } },
-      { command: "service.call", args: { service: "health", method: "applyDamage", arguments: ["warehouse-flow-sentinel-71", 5, { "weaponId": "engine-sentinel", "now": 2000003075100 }] } },
-      { command: "service.call", args: { service: "map", method: "setDoorOpen", arguments: ["warehouse-front-door", true, null, 2000003075150] } },
+      { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [2000003200000] } },
+      { command: "entity.spawn", args: { spec: { id: "vehicle-driver-72", kind: "human", name: "Vehicle Driver", bot: false, team: 99172, health: 200, weapons: [], position: { x: 94, y: 0, z: 24, angle: 0 } } } },
+      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["vehicle-driver-72", 2000003200050] } },
+      { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } },
 
-      { command: "entity.spawn", args: { spec: { id: "warehouse-target-71", kind: "test-human", name: "Warehouse Target", bot: false, team: 99000, health: 99999, weapons: [], position: { x: 70, y: 0, z: 0, angle: 0 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-single-71", kind: "bot", name: "Warehouse Single", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 80, y: 0, z: 0, angle: -1.5707963267948966 } } } },
-      { command: "game.step", args: { dt: 0.05, steps: 160, now: 2000003075200 } },
-      { command: "entity.inspect", args: { entityId: "warehouse-single-71" } },
-      { command: "entity.inspect", args: { entityId: "warehouse-target-71" } },
-      { command: "service.call", args: { service: "warehouse-combat-flow", method: "summary", arguments: [] } },
+      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["vehicle-driver-72", { "forward": 1, "strafe": 0, "sprint": false }] } },
+      { command: "game.step", args: { dt: 0.0166666667, steps: 120, now: 2000003200100 } },
+      { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } },
 
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-1-71", kind: "bot", name: "Crowd 1", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 78.4, y: 0, z: -0.9, angle: -1.5707963267948966 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-2-71", kind: "bot", name: "Crowd 2", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 79.1, y: 0, z: -0.6, angle: -1.5707963267948966 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-3-71", kind: "bot", name: "Crowd 3", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 79.8, y: 0, z: -0.3, angle: -1.5707963267948966 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-4-71", kind: "bot", name: "Crowd 4", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 80.5, y: 0, z: 0, angle: -1.5707963267948966 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-5-71", kind: "bot", name: "Crowd 5", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 79.8, y: 0, z: 0.3, angle: -1.5707963267948966 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-6-71", kind: "bot", name: "Crowd 6", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 79.1, y: 0, z: 0.6, angle: -1.5707963267948966 } } } },
-      { command: "entity.spawn", args: { spec: { id: "warehouse-crowd-7-71", kind: "bot", name: "Crowd 7", bot: true, team: 18, health: 5000, weapons: ["rifle"], position: { x: 78.4, y: 0, z: 0.9, angle: -1.5707963267948966 } } } },
-      { command: "game.step", args: { dt: 0.05, steps: 300, now: 2000003083300 } },
-      { command: "service.call", args: { service: "warehouse-combat-flow", method: "summary", arguments: [] } },
-      { command: "service.call", args: { service: "warehouse-traffic", method: "summary", arguments: [] } },
-      { command: "entity.inspect", args: { entityId: "warehouse-crowd-1-71" } },
-      { command: "entity.inspect", args: { entityId: "warehouse-crowd-4-71" } },
-      { command: "entity.inspect", args: { entityId: "warehouse-crowd-7-71" } },
-      { command: "entity.inspect", args: { entityId: "warehouse-target-71" } }
+      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["vehicle-driver-72", { "forward": 1, "strafe": 1, "sprint": false }] } },
+      { command: "game.step", args: { dt: 0.0166666667, steps: 120, now: 2000003202100 } },
+      { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } },
+
+      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["vehicle-driver-72", { "forward": 0, "strafe": 0, "sprint": true }] } },
+      { command: "game.step", args: { dt: 0.0166666667, steps: 60, now: 2000003204100 } },
+      { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } },
+
+      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["vehicle-driver-72", { "forward": -1, "strafe": -0.6, "sprint": false }] } },
+      { command: "game.step", args: { dt: 0.0166666667, steps: 120, now: 2000003205100 } },
+      { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } },
+      { command: "entity.inspect", args: { entityId: "vehicle-driver-72" } },
+      { command: "service.call", args: { service: "physics", method: "stats", arguments: [] } }
     ]
   },
-  requestedAt: "2026-08-27T13:12:00Z"
+  requestedAt: "2026-08-27T16:10:00Z"
 });
