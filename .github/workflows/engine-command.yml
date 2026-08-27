@@ -85,6 +85,9 @@ jobs:
               exit 1
             fi
             jq -c . "$TMP" >> engine-command-results.jsonl
+            echo "ENGINE_CONTROL_RESULT_BEGIN iteration=$iteration"
+            jq -c . "$TMP"
+            echo "ENGINE_CONTROL_RESULT_END iteration=$iteration"
             if [ $((iteration % FRAME)) -eq 0 ]; then
               jq -c . "$TMP" >> engine-command-frames.jsonl
               echo "Recorded observation frame at iteration $iteration"
