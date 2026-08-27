@@ -1,9 +1,11 @@
 export const manifest = {
   id: "bot-perception",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: ["bot-controller", "teams", "rapier-physics", "movement", "spatial-grid"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
+
+export const BOT_VISIBLE_VERTICAL_REACH = 5.2;
 
 export async function setup(ctx) {
   const teams = ctx.services.get("teams");
@@ -21,7 +23,7 @@ export async function setup(ctx) {
       if (enemy.id === botId || !enemy.alive) continue;
       if (teams.teamOf(enemy.id) === ownTeam) continue;
       const vertical = Math.abs((entry.transform.y ?? 0) - (transform.y ?? 0));
-      if (vertical > 5) continue;
+      if (vertical > BOT_VISIBLE_VERTICAL_REACH) continue;
       const distance = Math.hypot(entry.transform.x - transform.x, entry.transform.z - transform.z);
       if (distance > maxDistance) continue;
       const priority = enemy.bot ? 1 : Math.max(0.55, Math.min(1, Number(humanPriority) || 1));
@@ -44,7 +46,7 @@ export async function setup(ctx) {
       const enemy = entry.entity;
       if (enemy.id === botId || !enemy.alive || teams.teamOf(enemy.id) === ownTeam) continue;
       const vertical = Math.abs((entry.transform.y ?? 0) - (transform.y ?? 0));
-      if (vertical > 1.45) continue;
+      if (vertical > BOT_VISIBLE_VERTICAL_REACH) continue;
       const distance = Math.hypot(entry.transform.x - transform.x, entry.transform.z - transform.z);
       if (distance > maxDistance) continue;
       candidates.push({ entry, distance });
@@ -53,6 +55,9 @@ export async function setup(ctx) {
     candidates.sort((a, b) => a.distance - b.distance);
     const result = [];
     for (const candidate of candidates.slice(0, limit + 4)) {
+      // Elevation is deliberately resolved by the real Rapier line of sight.
+      // A concrete floor or wall still blocks vision, but an exposed enemy on
+      // the warehouse stairs is no longer discarded just because Y differs.
       if (!physics.lineOfSight(transform, candidate.entry.transform, botId, candidate.entry.entity.id)) continue;
       result.push({
         entityId: candidate.entry.entity.id,
