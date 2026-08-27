@@ -186,7 +186,7 @@ export async function setup(ctx) {
 
     if (mode === "battle-royale") {
       if (packet.event === "battle-royale:deployment") announce("Высадка начинается", { interrupt: true });
-      if (packet.event === "battle-royale:started") announce("Высадка завершена. В бой", { interrupt: true });
+      if (packet.event === "battle-royale:started") announce("Падение началось", { interrupt: true });
       if (packet.event === "battle-royale:remaining") announce(`Осталось ${payload.alive} игроков`, { interrupt: false, repeat: true });
       if (packet.event === "battle-royale:eliminated" && payload.entityId === network.playerId) {
         const placement = Number(payload.placement);
