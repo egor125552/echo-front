@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 66,
+  id: 67,
   mode: "battle-royale",
-  room: "engine-lab-bot-awareness-66",
+  room: "engine-lab-bot-awareness-67",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -9,11 +9,11 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
     commands: [
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [2000002300000] }
+        args: { service: "battle-royale", method: "arm", arguments: [2000002400000] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002300050 } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002325050 } },
-      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002350050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002400050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002425050 } },
+      { command: "game.step", args: { dt: 0.05, steps: 500, now: 2000002450050 } },
       {
         command: "service.call",
         args: { service: "bot-parachutes", method: "summary", arguments: [] }
@@ -38,12 +38,12 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "health",
           method: "applyDamage",
-          arguments: ["awareness-deployment-sentinel", 5, { "weaponId": "engine-sentinel", "now": 2000002375100 }]
+          arguments: ["awareness-deployment-sentinel", 5, { "weaponId": "engine-sentinel", "now": 2000002475100 }]
         }
       },
       {
         command: "service.call",
-        args: { service: "battle-royale", method: "status", arguments: [2000002375150] }
+        args: { service: "battle-royale", method: "status", arguments: [2000002475150] }
       },
 
       {
@@ -78,15 +78,11 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-open-bot", 2000002375200] }
+        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-open-bot", 2000002475200] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000002375200 } },
+      { command: "game.step", args: { dt: 0.05, steps: 40, now: 2000002475200 } },
       { command: "entity.inspect", args: { entityId: "awareness-open-bot" } },
       { command: "entity.inspect", args: { entityId: "awareness-open-human" } },
-      {
-        command: "service.call",
-        args: { service: "bot-brain", method: "stateFor", arguments: ["awareness-open-bot"] }
-      },
 
       {
         command: "entity.spawn",
@@ -165,9 +161,9 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-warehouse-bot", 2000002377300] }
+        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-warehouse-bot", 2000002477300] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 35, now: 2000002377300 } },
+      { command: "game.step", args: { dt: 0.05, steps: 35, now: 2000002477300 } },
       { command: "entity.inspect", args: { entityId: "awareness-warehouse-human" } },
       {
         command: "service.call",
@@ -224,14 +220,14 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "combat",
           method: "damage",
-          arguments: ["awareness-threat-bot", 5, { "attackerId": "awareness-attacker-human", "weaponId": "engine-probe", "now": 2000002379100 }]
+          arguments: ["awareness-threat-bot", 5, { "attackerId": "awareness-attacker-human", "weaponId": "engine-probe", "now": 2000002479100 }]
         }
       },
       {
         command: "service.call",
-        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-threat-bot", 2000002379150] }
+        args: { service: "bot-awareness", method: "stateFor", arguments: ["awareness-threat-bot", 2000002479150] }
       },
-      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000002379150 } },
+      { command: "game.step", args: { dt: 0.05, steps: 36, now: 2000002479150 } },
       { command: "entity.inspect", args: { entityId: "awareness-attacker-human" } },
       { command: "entity.inspect", args: { entityId: "awareness-close-decoy" } },
       {
@@ -240,5 +236,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       }
     ]
   },
-  requestedAt: "2026-08-27T11:30:00Z"
+  requestedAt: "2026-08-27T11:35:00Z"
 });
