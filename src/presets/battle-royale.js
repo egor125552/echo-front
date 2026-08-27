@@ -1,5 +1,6 @@
 import * as entities from "../plugins/entities/server.js";
 import * as physics from "../plugins/rapier-physics/server.js";
+import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
 import * as cratePhysics from "../plugins/battle-royale-crate-physics/server.js";
@@ -42,6 +43,7 @@ import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js"
 export const battleRoyalePreset = [
   entities,
   physics,
+  liveCharacterQueries,
   map,
   groundNavigation,
   cratePhysics,
