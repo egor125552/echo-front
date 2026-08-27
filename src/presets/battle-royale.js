@@ -27,6 +27,7 @@ import * as botAwareness from "../plugins/battle-royale-bot-awareness/server.js"
 import * as botCoverFire from "../plugins/battle-royale-bot-cover-fire/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as warehouseTraffic from "../plugins/battle-royale-bot-warehouse-traffic/server.js";
+import * as warehouseCombatFlow from "../plugins/battle-royale-bot-warehouse-combat-flow/server.js";
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
@@ -66,6 +67,7 @@ export const battleRoyalePreset = [
   botCoverFire,
   botCombat,
   warehouseTraffic,
+  warehouseCombatFlow,
   botObserver,
   botFill,
   matchApi,
