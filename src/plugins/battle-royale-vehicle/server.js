@@ -6,6 +6,9 @@ export const VEHICLE_MAX_STEER = 0.46;
 export const VEHICLE_HIGH_SPEED_STEER = 0.2;
 export const VEHICLE_ENGINE_FORCE = 1850;
 export const VEHICLE_REVERSE_FORCE = 1150;
+export const VEHICLE_NITRO_ENGINE_FORCE = 9200;
+export const VEHICLE_NITRO_BURST_SECONDS = 2.5;
+export const VEHICLE_NITRO_COOLDOWN_SECONDS = 10;
 export const VEHICLE_SERVICE_BRAKE = 18;
 export const VEHICLE_HAND_BRAKE = 55;
 export const VEHICLE_PARK_BRAKE = 10;
@@ -13,7 +16,7 @@ export const VEHICLE_PHYSICS_STEP = 1 / 60;
 
 export const manifest = {
   id: "battle-royale-vehicle",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: ["rapier-physics", "movement", "entities", "battle-royale", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -143,7 +146,7 @@ export async function setup(ctx) {
   }
 
   let driverId = null;
-  let input = { throttle: 0, steering: 0, handbrake: false };
+  let input = { throttle: 0, steering: 0, handbrake: false, nitro: false };
   // Sprint and handbrake share one input bit. If sprint was already held (or a
   // touch/VoiceOver sprint control was latched) before entering the vehicle,
   // treating it as a fresh handbrake press leaves the jeep unable to move.
@@ -151,6 +154,11 @@ export async function setup(ctx) {
   // handbrake. This preserves intentional handbraking without inheriting stale
   // on-foot sprint state.
   let handbrakeArmed = true;
+  let nitroActive = false;
+  let nitroBurstRemaining = VEHICLE_NITRO_BURST_SECONDS;
+  let nitroCooldownRemaining = 0;
+  let nitroRequiresRelease = false;
+  let nitroReadyEmitted = true;
   let previousSpeed = 0;
   let peakImpactDelta = 0;
   let physicsFrames = 0;
@@ -182,6 +190,19 @@ export async function setup(ctx) {
     };
   }
 
+  function nitroState() {
+    return {
+      active: nitroActive,
+      requested: Boolean(input.nitro),
+      ready: !nitroActive && nitroCooldownRemaining <= 0 && !nitroRequiresRelease,
+      burstSecondsRemaining: Math.max(0, nitroBurstRemaining),
+      burstSeconds: VEHICLE_NITRO_BURST_SECONDS,
+      cooldownSecondsRemaining: Math.max(0, nitroCooldownRemaining),
+      cooldownSeconds: VEHICLE_NITRO_COOLDOWN_SECONDS,
+      engineForce: nitroActive ? VEHICLE_NITRO_ENGINE_FORCE : VEHICLE_ENGINE_FORCE,
+    };
+  }
+
   function state() {
     const body = bodyState();
     if (!body) return null;
@@ -208,6 +229,7 @@ export async function setup(ctx) {
       wheels,
       input: { ...input },
       handbrakeArmed,
+      nitro: nitroState(),
       mass: body.mass,
       peakImpactDelta,
       physicsFrames,
@@ -235,6 +257,95 @@ export async function setup(ctx) {
     transform.grounded = false;
   }
 
+  function stopNitro(now = Date.now(), sourceDriverId = driverId) {
+    if (!nitroActive) return false;
+    nitroActive = false;
+    nitroBurstRemaining = 0;
+    nitroCooldownRemaining = VEHICLE_NITRO_COOLDOWN_SECONDS;
+    nitroRequiresRelease = true;
+    nitroReadyEmitted = false;
+    ctx.events.emit("vehicle:nitro-stop", {
+      vehicleId: VEHICLE_ID,
+      driverId: sourceDriverId,
+      cooldownSeconds: VEHICLE_NITRO_COOLDOWN_SECONDS,
+      now,
+    });
+    return true;
+  }
+
+  function updateNitroState(dt, now = Date.now()) {
+    const safeDt = clamp(dt, 0, 0.1);
+    if (nitroCooldownRemaining > 0) {
+      nitroCooldownRemaining = Math.max(0, nitroCooldownRemaining - safeDt);
+      if (nitroCooldownRemaining <= 0) {
+        nitroBurstRemaining = VEHICLE_NITRO_BURST_SECONDS;
+        if (!nitroReadyEmitted && driverId) {
+          ctx.events.emit("vehicle:nitro-ready", {
+            vehicleId: VEHICLE_ID,
+            driverId,
+            now,
+          });
+        }
+        nitroReadyEmitted = true;
+      }
+    }
+
+    if (!input.nitro) nitroRequiresRelease = false;
+    const requested = Boolean(
+      driverId
+      && input.nitro
+      && input.throttle > 0.08
+      && !input.handbrake
+    );
+
+    if (nitroActive) {
+      if (!requested) {
+        stopNitro(now);
+        return;
+      }
+      nitroBurstRemaining = Math.max(0, nitroBurstRemaining - safeDt);
+      if (nitroBurstRemaining <= 0) stopNitro(now);
+      return;
+    }
+
+    if (nitroCooldownRemaining <= 0 && requested && !nitroRequiresRelease) {
+      nitroActive = true;
+      nitroBurstRemaining = VEHICLE_NITRO_BURST_SECONDS;
+      ctx.events.emit("vehicle:nitro-start", {
+        vehicleId: VEHICLE_ID,
+        driverId,
+        burstSeconds: VEHICLE_NITRO_BURST_SECONDS,
+        engineForce: VEHICLE_NITRO_ENGINE_FORCE,
+        now,
+      });
+    }
+  }
+
+  function enter(playerId, now = Date.now()) {
+    if (driverId || !playerId) return false;
+    const entity = entities.get(playerId);
+    const transform = ctx.components.get(playerId, "Transform");
+    const body = bodyState();
+    if (!entity?.alive || entity.bot || !transform || !body) return false;
+    if (distance3(transform, body) > VEHICLE_ENTER_DISTANCE) return false;
+    driverId = playerId;
+    input = { throttle: 0, steering: 0, handbrake: false, nitro: false };
+    handbrakeArmed = false;
+    nitroRequiresRelease = false;
+    movement.setInput(playerId, {});
+    physics.setCharacterEnabled(playerId, false);
+    syncDriver();
+    ctx.events.emit("vehicle:entered", {
+      entityId: playerId,
+      vehicleId: VEHICLE_ID,
+      now,
+      x: body.x,
+      y: body.y,
+      z: body.z,
+    });
+    return true;
+  }
+
   function exitPosition() {
     const body = bodyState();
     if (!body) return null;
@@ -251,35 +362,12 @@ export async function setup(ctx) {
     return { x, y, z, angle: headingFromRotation(body.rotation) };
   }
 
-  function enter(playerId, now = Date.now()) {
-    if (driverId || !playerId) return false;
-    const entity = entities.get(playerId);
-    const transform = ctx.components.get(playerId, "Transform");
-    const body = bodyState();
-    if (!entity?.alive || entity.bot || !transform || !body) return false;
-    if (distance3(transform, body) > VEHICLE_ENTER_DISTANCE) return false;
-    driverId = playerId;
-    input = { throttle: 0, steering: 0, handbrake: false };
-    handbrakeArmed = false;
-    movement.setInput(playerId, {});
-    physics.setCharacterEnabled(playerId, false);
-    syncDriver();
-    ctx.events.emit("vehicle:entered", {
-      entityId: playerId,
-      vehicleId: VEHICLE_ID,
-      now,
-      x: body.x,
-      y: body.y,
-      z: body.z,
-    });
-    return true;
-  }
-
   function exit(playerId, now = Date.now(), reason = "interact") {
     if (!driverId || driverId !== playerId) return false;
     const target = exitPosition();
+    stopNitro(now, playerId);
     driverId = null;
-    input = { throttle: 0, steering: 0, handbrake: true };
+    input = { throttle: 0, steering: 0, handbrake: true, nitro: false };
     handbrakeArmed = true;
     physics.setCharacterEnabled(playerId, true);
     if (target) movement.teleport(playerId, target);
@@ -308,6 +396,7 @@ export async function setup(ctx) {
       throttle: clamp(raw.forward, -1, 1),
       steering: clamp(raw.strafe, -1, 1),
       handbrake: handbrakeArmed && requestedHandbrake,
+      nitro: Boolean(raw.fireHeld),
     };
     return true;
   }
@@ -341,14 +430,17 @@ export async function setup(ctx) {
     } else if (input.throttle > 0.08 && longitudinal < -1.25) {
       brake = VEHICLE_SERVICE_BRAKE * input.throttle;
     } else if (input.throttle > 0.08) {
-      engineForce = VEHICLE_ENGINE_FORCE * input.throttle;
+      const force = nitroActive ? VEHICLE_NITRO_ENGINE_FORCE : VEHICLE_ENGINE_FORCE;
+      engineForce = force * input.throttle;
     } else if (input.throttle < -0.08) {
       engineForce = VEHICLE_REVERSE_FORCE * input.throttle;
     } else {
       brake = 1.8;
     }
 
-    // AWD: every contact patch contributes real longitudinal tire force.
+    // AWD: every contact patch contributes real longitudinal tire force. Nitro
+    // deliberately goes through this same Rapier wheel controller instead of
+    // assigning chassis velocity directly, so grip and collisions still matter.
     for (let i = 0; i < 4; i += 1) {
       controller.setWheelEngineForce(i, engineForce);
       controller.setWheelBrake(i, brake);
@@ -358,6 +450,7 @@ export async function setup(ctx) {
   function tickPhysics(dt, now = Date.now()) {
     const safeDt = clamp(dt, 0, 0.1);
     if (!(safeDt > 0)) return;
+    updateNitroState(safeDt, now);
     const substeps = Math.max(1, Math.min(6, Math.ceil(safeDt / VEHICLE_PHYSICS_STEP)));
     const subDt = safeDt / substeps;
     for (let i = 0; i < substeps; i += 1) {
@@ -396,16 +489,18 @@ export async function setup(ctx) {
   ctx.events.on("entity:died", ({ entityId, now }) => {
     if (entityId !== driverId) return;
     // A dead driver's collider stays disabled; just release vehicle control.
+    stopNitro(now, entityId);
     driverId = null;
-    input = { throttle: 0, steering: 0, handbrake: true };
+    input = { throttle: 0, steering: 0, handbrake: true, nitro: false };
     handbrakeArmed = true;
     ctx.events.emit("vehicle:driver-lost", { entityId, vehicleId: VEHICLE_ID, now });
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
     if (entityId !== driverId) return;
+    stopNitro(Date.now(), entityId);
     driverId = null;
-    input = { throttle: 0, steering: 0, handbrake: true };
+    input = { throttle: 0, steering: 0, handbrake: true, nitro: false };
     handbrakeArmed = true;
   });
 
