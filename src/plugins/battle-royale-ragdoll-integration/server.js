@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-integration",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "match-api",
     "battle-royale-ragdoll",
@@ -8,7 +8,7 @@ export const manifest = {
     "movement",
     "battle-royale",
   ],
-  capabilities: ["services.consume"],
+  capabilities: ["services.consume", "components.read"],
 };
 
 function clamp(value, minimum, maximum) {
