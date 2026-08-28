@@ -40,6 +40,7 @@ import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
 import * as vehicleFleet from "../plugins/battle-royale-vehicle-fleet/server.js";
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
+import * as fleetPedestrianRagdoll from "../plugins/battle-royale-fleet-pedestrian-ragdoll/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
@@ -96,6 +97,7 @@ export const battleRoyalePreset = [
   vehicleFleet,
   ragdoll,
   ragdollTuning,
+  fleetPedestrianRagdoll,
   matchApi,
   vehicleIntegration,
   parachuteIntegration,
