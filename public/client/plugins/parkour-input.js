@@ -12,6 +12,7 @@ export async function setup(ctx) {
   function trigger(reason) {
     if (!network.connected) return false;
     posePressed = true;
+    ctx.events.emit("input:parkour-pose", { reason });
     ctx.events.emit("input:changed", { reason });
     return true;
   }
