@@ -3,8 +3,7 @@ export const manifest = {
   requires: ["keyboard-input"],
 };
 
-// Keep the same feel as Archipelago: a short drag starts walking and a
-// deliberate long drag turns the same movement into a run.
+// Match the proven Archipelago feel: a short drag walks and a long drag runs.
 const MOVE_DEAD_ZONE_PX = 26;
 const RUN_THRESHOLD_PX = 125;
 const TAP_MAX_MOVE_PX = 20;
@@ -45,6 +44,10 @@ export async function setup(ctx) {
 
   function prevent(event) {
     if (event.cancelable) event.preventDefault();
+  }
+
+  function changedTouchesIncludeTracked(event) {
+    return Array.from(event.changedTouches ?? []).some((touch) => tracked.has(touch.identifier));
   }
 
   function cancelPendingTap() {
@@ -175,8 +178,8 @@ export async function setup(ctx) {
   function addChangedTouches(event) {
     let accepted = false;
     for (const touch of Array.from(event.changedTouches ?? [])) {
-      // Buttons and other controls always stay controls. Every other point on
-      // the screen becomes part of the game gesture surface while a match is visible.
+      // Controls are never part of a gesture. This stays true even when another
+      // finger is already steering, so buttons remain usable during movement.
       if (interactiveTarget(touch.target)) continue;
       const point = {
         id: touch.identifier,
@@ -224,14 +227,13 @@ export async function setup(ctx) {
     return { lastX, lastY, primaryEnded };
   }
 
-  // Capture gestures from the whole document, not just #game-panel. This is
-  // what makes every free part of the visible screen usable and also prevents
-  // an off-panel swipe from scrolling the page and carrying the controls away.
+  // During a visible match, every non-control point in the document is a game
+  // gesture surface. A swipe that starts outside #game-panel therefore cannot
+  // turn into normal page scrolling and carry the controls off-screen.
   document.addEventListener("touchstart", (event) => {
     if (!gameActive()) return;
-    const hadTrackedTouches = tracked.size > 0;
     const accepted = addChangedTouches(event);
-    if (!accepted && !hadTrackedTouches) return;
+    if (!accepted) return;
     prevent(event);
 
     if (tracked.size > 1) {
@@ -243,14 +245,14 @@ export async function setup(ctx) {
   }, { capture: true, passive: false });
 
   document.addEventListener("touchmove", (event) => {
-    if (!tracked.size) return;
+    if (!tracked.size || !changedTouchesIncludeTracked(event)) return;
     prevent(event);
     updateChangedTouches(event);
     updateMovement();
   }, { capture: true, passive: false });
 
   function endTouches(event) {
-    if (!tracked.size) return;
+    if (!tracked.size || !changedTouchesIncludeTracked(event)) return;
     prevent(event);
     updateChangedTouches(event);
     const { lastX, lastY, primaryEnded } = removeChangedTouches(event);
