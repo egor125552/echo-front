@@ -1,23 +1,35 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
 
 const EXPECTED_PARTS = 16;
-const LINEAR_DAMPING = 0.045;
-const ANGULAR_DAMPING = 0.07;
-const HEAD_ANGULAR_DAMPING = 0.11;
-const RAGDOLL_FRICTION = 0.62;
+const LINEAR_DAMPING = 0.03;
+const ANGULAR_DAMPING = 0.035;
+const HEAD_ANGULAR_DAMPING = 0.05;
+const RAGDOLL_FRICTION = 0.48;
 
 const COMMON_TUMBLE = Object.freeze({
-  "vehicle-eject": Object.freeze({ x: 1.65, y: 0.25, z: 1.25 }),
-  "vehicle-hit": Object.freeze({ x: 1.15, y: 0.18, z: 0.85 }),
-  "high-fall": Object.freeze({ x: 0.72, y: 0.12, z: 0.55 }),
+  "vehicle-eject": Object.freeze({ x: 3.0, y: 0.38, z: 2.4 }),
+  "vehicle-hit": Object.freeze({ x: 1.55, y: 0.20, z: 1.12 }),
+  "high-fall": Object.freeze({ x: 1.15, y: 0.16, z: 0.88 }),
   death: Object.freeze({ x: 0.45, y: 0.08, z: 0.34 }),
   default: Object.freeze({ x: 0.55, y: 0.10, z: 0.42 }),
 });
+
+function clamp(value, minimum, maximum) {
+  return Math.max(minimum, Math.min(maximum, Number(value) || 0));
+}
+
+function magnitude(vector) {
+  return Math.hypot(
+    Number(vector?.x) || 0,
+    Number(vector?.y) || 0,
+    Number(vector?.z) || 0,
+  );
+}
 
 function signFor(value) {
   const text = String(value ?? "ragdoll");
@@ -28,13 +40,28 @@ function signFor(value) {
   return (hash & 1) === 0 ? 1 : -1;
 }
 
-function tumbleFor(reason, entityId) {
+function tumbleScale(reason, options) {
+  const speedKph = magnitude(options?.velocity) * 3.6;
+  if (reason === "vehicle-eject") {
+    return 1 + clamp((speedKph - 25) / 100, 0, 2.2);
+  }
+  if (reason === "vehicle-hit") {
+    return 1 + clamp((speedKph - 20) / 120, 0, 1.4);
+  }
+  if (reason === "high-fall") {
+    return 1 + clamp((speedKph - 35) / 130, 0, 1.2);
+  }
+  return 1;
+}
+
+function tumbleFor(reason, entityId, options) {
   const base = COMMON_TUMBLE[reason] ?? COMMON_TUMBLE.default;
   const sign = signFor(entityId);
+  const scale = tumbleScale(reason, options);
   return {
-    x: base.x * sign,
-    y: base.y,
-    z: base.z * -sign,
+    x: base.x * sign * scale,
+    y: base.y * scale,
+    z: base.z * -sign * scale,
   };
 }
 
@@ -70,7 +97,7 @@ export async function setup(ctx) {
     }
 
     const reason = String(options?.reason ?? "impact");
-    const common = tumbleFor(reason, entityId);
+    const common = tumbleFor(reason, entityId, options);
     for (let index = 0; index < captured.length; index += 1) {
       const body = captured[index];
       body.setLinearDamping(LINEAR_DAMPING);
@@ -96,6 +123,7 @@ export async function setup(ctx) {
       headAngularDamping: HEAD_ANGULAR_DAMPING,
       friction: RAGDOLL_FRICTION,
       tumble: common,
+      speedKph: magnitude(options?.velocity) * 3.6,
       tunedAt: Number(now) || Date.now(),
     });
     tunedActivations += 1;
