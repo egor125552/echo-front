@@ -1,8 +1,8 @@
 export const manifest = {
   id: "battle-royale-ragdoll-stability",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["rapier-physics"],
-  capabilities: ["services.consume", "services.provide"],
+  capabilities: ["services.consume", "services.provide", "events.emit"],
 };
 
 const FIRST_RAGDOLL_GROUP = 1;
@@ -10,12 +10,30 @@ const LAST_RAGDOLL_GROUP = 15;
 const MAX_RAGDOLL_PART_MASS = 12;
 const EXPECTED_RAGDOLL_BODIES = 16;
 
+// Preserve violent, funny ragdoll launches while preventing solver explosions
+// from turning a person into a spacecraft. The centre-of-mass limits are high
+// enough for a dramatic throw, while relative limits stop limbs from feeding
+// unbounded energy back through joints and self-collision.
+const MAX_COM_SPEED = 70;
+const MAX_COM_UPWARD_SPEED = 30;
+const MAX_RELATIVE_PART_SPEED = 42;
+const MAX_PART_SPEED = 85;
+const MAX_PART_UPWARD_SPEED = 45;
+const MAX_PART_ANGULAR_SPEED = 45;
+
 function finite(value) {
   return Number.isFinite(Number(value));
 }
 
 function magnitude(v) {
   return Math.hypot(Number(v?.x) || 0, Number(v?.y) || 0, Number(v?.z) || 0);
+}
+
+function scaleToMagnitude(v, maximum) {
+  const speed = magnitude(v);
+  if (!(speed > maximum) || speed <= 0) return { ...v };
+  const scale = maximum / speed;
+  return { x: v.x * scale, y: v.y * scale, z: v.z * scale };
 }
 
 function packedCollisionGroups(groupId, selfCollisionEnabled = false) {
@@ -50,6 +68,9 @@ export async function setup(ctx) {
       bodies: new Map(),
       peakSpread: 0,
       peakSpeed: 0,
+      peakRawSpeed: 0,
+      peakRawUpwardSpeed: 0,
+      energyClamps: 0,
       nonFinite: false,
     };
     groups.set(id, group);
@@ -101,6 +122,9 @@ export async function setup(ctx) {
     for (const body of source.bodies.values()) applyGroupToBody(body, target);
     target.peakSpread = Math.max(target.peakSpread, source.peakSpread);
     target.peakSpeed = Math.max(target.peakSpeed, source.peakSpeed);
+    target.peakRawSpeed = Math.max(target.peakRawSpeed, source.peakRawSpeed);
+    target.peakRawUpwardSpeed = Math.max(target.peakRawUpwardSpeed, source.peakRawUpwardSpeed);
+    target.energyClamps += source.energyClamps;
     target.nonFinite ||= source.nonFinite;
     source.bodies.clear();
     groups.delete(source.id);
@@ -135,6 +159,78 @@ export async function setup(ctx) {
     }
     if (group1.id !== group2.id) group1 = mergeGroups(group1, group2);
     latestGroupId = group1.id;
+  }
+
+  function limitGroupEnergy(group) {
+    const bodies = [...group.bodies.values()].filter(body => body?.isValid?.() !== false);
+    if (!bodies.length) return;
+
+    let totalMass = 0;
+    let vx = 0;
+    let vy = 0;
+    let vz = 0;
+    const samples = [];
+
+    for (const body of bodies) {
+      const mass = Number(body.mass()) || 0;
+      const velocity = body.linvel();
+      const angular = body.angvel();
+      if (!(mass > 0) || ![velocity.x, velocity.y, velocity.z, angular.x, angular.y, angular.z].every(finite)) {
+        group.nonFinite = true;
+        continue;
+      }
+      const speed = magnitude(velocity);
+      group.peakRawSpeed = Math.max(group.peakRawSpeed, speed);
+      group.peakRawUpwardSpeed = Math.max(group.peakRawUpwardSpeed, Number(velocity.y) || 0);
+      totalMass += mass;
+      vx += velocity.x * mass;
+      vy += velocity.y * mass;
+      vz += velocity.z * mass;
+      samples.push({ body, mass, velocity: { x: velocity.x, y: velocity.y, z: velocity.z }, angular });
+    }
+
+    if (!(totalMass > 0) || !samples.length) return;
+
+    const rawCom = { x: vx / totalMass, y: vy / totalMass, z: vz / totalMass };
+    let limitedCom = scaleToMagnitude(rawCom, MAX_COM_SPEED);
+    if (limitedCom.y > MAX_COM_UPWARD_SPEED) limitedCom.y = MAX_COM_UPWARD_SPEED;
+
+    let changed = false;
+    for (const sample of samples) {
+      const relative = {
+        x: sample.velocity.x - rawCom.x,
+        y: sample.velocity.y - rawCom.y,
+        z: sample.velocity.z - rawCom.z,
+      };
+      const limitedRelative = scaleToMagnitude(relative, MAX_RELATIVE_PART_SPEED);
+      let nextVelocity = {
+        x: limitedCom.x + limitedRelative.x,
+        y: limitedCom.y + limitedRelative.y,
+        z: limitedCom.z + limitedRelative.z,
+      };
+      nextVelocity = scaleToMagnitude(nextVelocity, MAX_PART_SPEED);
+      if (nextVelocity.y > MAX_PART_UPWARD_SPEED) nextVelocity.y = MAX_PART_UPWARD_SPEED;
+
+      const velocityChanged = Math.abs(nextVelocity.x - sample.velocity.x) > 1e-6
+        || Math.abs(nextVelocity.y - sample.velocity.y) > 1e-6
+        || Math.abs(nextVelocity.z - sample.velocity.z) > 1e-6;
+      if (velocityChanged) {
+        sample.body.setLinvel(nextVelocity, true);
+        changed = true;
+      }
+
+      const angularSpeed = magnitude(sample.angular);
+      if (angularSpeed > MAX_PART_ANGULAR_SPEED) {
+        sample.body.setAngvel(scaleToMagnitude(sample.angular, MAX_PART_ANGULAR_SPEED), true);
+        changed = true;
+      }
+    }
+
+    if (changed) group.energyClamps += 1;
+  }
+
+  function limitAllEnergy() {
+    for (const group of groups.values()) limitGroupEnergy(group);
   }
 
   function sampleGroup(group) {
@@ -194,6 +290,9 @@ export async function setup(ctx) {
       mask: group.mask,
       peakSpread: group.peakSpread,
       peakSpeed: group.peakSpeed,
+      peakRawSpeed: group.peakRawSpeed,
+      peakRawUpwardSpeed: group.peakRawUpwardSpeed,
+      energyClamps: group.energyClamps,
       nonFinite: group.nonFinite,
       intraGroupContacts,
     };
@@ -222,6 +321,9 @@ export async function setup(ctx) {
             sequence: group.sequence,
             peakSpread: group.peakSpread,
             peakSpeed: group.peakSpeed,
+            peakRawSpeed: group.peakRawSpeed,
+            peakRawUpwardSpeed: group.peakRawUpwardSpeed,
+            energyClamps: group.energyClamps,
             nonFinite: group.nonFinite,
           });
           groups.delete(group.id);
@@ -237,6 +339,7 @@ export async function setup(ctx) {
   const originalPhysicsStep = physics.step.bind(physics);
   physics.step = (dt) => {
     const result = originalPhysicsStep(dt);
+    limitAllEnergy();
     sampleAll();
     return result;
   };
@@ -271,6 +374,9 @@ export async function setup(ctx) {
     for (const group of groups.values()) {
       group.peakSpread = 0;
       group.peakSpeed = 0;
+      group.peakRawSpeed = 0;
+      group.peakRawUpwardSpeed = 0;
+      group.energyClamps = 0;
       group.nonFinite = false;
     }
     return true;
@@ -280,6 +386,14 @@ export async function setup(ctx) {
     const active = [...groups.values()].map(currentGroupSummary);
     return {
       selfCollisionEnabled,
+      energyLimits: {
+        maxComSpeed: MAX_COM_SPEED,
+        maxComUpwardSpeed: MAX_COM_UPWARD_SPEED,
+        maxRelativePartSpeed: MAX_RELATIVE_PART_SPEED,
+        maxPartSpeed: MAX_PART_SPEED,
+        maxPartUpwardSpeed: MAX_PART_UPWARD_SPEED,
+        maxPartAngularSpeed: MAX_PART_ANGULAR_SPEED,
+      },
       activeGroups: active.length,
       groupedBodies: active.reduce((sum, group) => sum + group.bodies, 0),
       active,
