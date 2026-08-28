@@ -6,6 +6,7 @@ import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
+import * as navigation from "../plugins/battle-royale-navigation.js";
 import * as parachuteAudioPreload from "../plugins/parachute-audio-preload.js";
 import * as soundPack from "../plugins/core-sound-pack.js";
 import * as eventSoundPack from "../plugins/event-sound-pack.js";
@@ -34,6 +35,7 @@ export const echoFrontClientPreset = [
   speechSettings,
   spatialAudio,
   audioResilience,
+  navigation,
   parachuteAudioPreload,
   soundPack,
   eventSoundPack,
