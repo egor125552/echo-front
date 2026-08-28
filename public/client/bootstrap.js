@@ -22,6 +22,9 @@ async function start(mode) {
   gamePanel.hidden = false;
 
   try {
+    // Prime browser speech while this call still belongs to the user's tap/click.
+    // This is especially important for iPhone/WebKit and VoiceOver activation.
+    host.services.get("speech")?.prime?.("game-start");
     await host.services.get("audio").resume();
     host.services.get("network").connect("public", { mode });
     host.services.get("sound-pack").warmEssential().catch((error) => console.warn("Audio preload", error));
