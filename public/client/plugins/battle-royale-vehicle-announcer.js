@@ -13,12 +13,18 @@ function distance2(a, b) {
   );
 }
 
+function vehicleName(vehicle) {
+  if (String(vehicle?.accessibleName ?? "").trim()) return String(vehicle.accessibleName).trim();
+  return vehicle?.kind === "supercar" ? "суперкар" : "внедорожник";
+}
+
 export async function setup(ctx) {
   const network = ctx.services.get("network");
   const speech = ctx.services.get("speech");
   const live = document.querySelector("#announcer");
-  let nearArmed = true;
+  let announcedVehicleId = null;
   let driving = false;
+  let drivingVehicleName = "машины";
 
   function announce(text, interrupt = false) {
     if (!text) return;
@@ -31,23 +37,38 @@ export async function setup(ctx) {
 
   ctx.events.on("game:snapshot", (snapshot) => {
     if (snapshot?.mode !== "battle-royale") {
-      nearArmed = true;
+      announcedVehicleId = null;
       driving = false;
+      drivingVehicleName = "машины";
       return;
     }
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
-    const vehicle = snapshot?.vehicles?.[0] ?? null;
-    if (!self || !vehicle) return;
-    driving = vehicle.driverId === network.playerId;
-    if (driving) {
-      nearArmed = false;
+    const fleet = Array.isArray(snapshot?.vehicles) ? snapshot.vehicles : [];
+    if (!self) return;
+
+    const drivenVehicle = fleet.find((vehicle) => vehicle.driverId === network.playerId) ?? null;
+    driving = Boolean(drivenVehicle);
+    if (drivenVehicle) {
+      drivingVehicleName = vehicleName(drivenVehicle);
+      announcedVehicleId = drivenVehicle.id;
       return;
     }
-    const distance = distance2(self, vehicle);
-    if (distance >= REARM_DISTANCE) nearArmed = true;
-    if (nearArmed && distance <= NEAR_VEHICLE_DISTANCE) {
-      nearArmed = false;
-      announce("Внедорожник рядом. E — сесть", false);
+
+    const nearest = fleet
+      .filter((vehicle) => !vehicle.occupied)
+      .map((vehicle) => ({ vehicle, distance: distance2(self, vehicle) }))
+      .sort((a, b) => a.distance - b.distance)[0] ?? null;
+
+    if (!nearest) {
+      announcedVehicleId = null;
+      return;
+    }
+    if (nearest.distance >= REARM_DISTANCE && nearest.vehicle.id === announcedVehicleId) {
+      announcedVehicleId = null;
+    }
+    if (nearest.distance <= NEAR_VEHICLE_DISTANCE && nearest.vehicle.id !== announcedVehicleId) {
+      announcedVehicleId = nearest.vehicle.id;
+      announce(`${vehicleName(nearest.vehicle)} рядом. E — сесть`, false);
     }
   });
 
@@ -55,16 +76,20 @@ export async function setup(ctx) {
     const payload = packet.payload ?? {};
     if (packet.event === "vehicle:entered" && payload.entityId === network.playerId) {
       driving = true;
-      nearArmed = false;
+      drivingVehicleName = String(payload.vehicleName ?? "").trim()
+        || (payload.vehicleKind === "supercar" ? "суперкар" : "внедорожник");
+      announcedVehicleId = payload.vehicleId ?? announcedVehicleId;
       announce(
-        "Вы в внедорожнике. Стрелка вверх — газ. Стрелка вниз — тормоз и задний ход. Стрелки влево и вправо — руль. Shift — ручник. Удерживайте X вместе с газом — нитро. E — выйти",
+        `Вы в ${drivingVehicleName === "суперкар" ? "суперкаре" : "внедорожнике"}. Стрелка вверх — газ. Стрелка вниз — тормоз и задний ход. Стрелки влево и вправо — руль. Shift — ручник. Удерживайте X вместе с газом — нитро. E — выйти`,
         true,
       );
       return;
     }
     if (packet.event === "vehicle:exited" && payload.entityId === network.playerId) {
       driving = false;
-      announce("Вы вышли из внедорожника", true);
+      const name = String(payload.vehicleName ?? "").trim() || drivingVehicleName;
+      announce(`Вы вышли из ${name === "суперкар" ? "суперкара" : "внедорожника"}`, true);
+      drivingVehicleName = "машины";
       return;
     }
     if (packet.event === "vehicle:nitro-start" && payload.driverId === network.playerId) {
@@ -72,7 +97,8 @@ export async function setup(ctx) {
       return;
     }
     if (packet.event === "vehicle:nitro-stop" && payload.driverId === network.playerId) {
-      announce("Нитро перезаряжается. Десять секунд", false);
+      const seconds = Math.max(1, Math.round(Number(payload.cooldownSeconds) || 10));
+      announce(`Нитро перезаряжается. ${seconds} секунд`, false);
       return;
     }
     if (packet.event === "vehicle:nitro-ready" && payload.driverId === network.playerId) {
@@ -87,6 +113,7 @@ export async function setup(ctx) {
 
   ctx.events.on("network:disconnected", () => {
     driving = false;
-    nearArmed = true;
+    announcedVehicleId = null;
+    drivingVehicleName = "машины";
   });
 }
