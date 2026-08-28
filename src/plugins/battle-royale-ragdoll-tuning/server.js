@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.5.0",
+  version: "1.6.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -164,6 +164,32 @@ function tumbleFor(entityId, velocity, profile) {
   };
 }
 
+function massCenter(bodies) {
+  let totalMass = 0;
+  let x = 0;
+  let y = 0;
+  let z = 0;
+  for (const body of bodies) {
+    const mass = Math.max(0, Number(body?.mass?.()) || 0);
+    const position = body?.translation?.();
+    if (!(mass > 0) || !position) continue;
+    totalMass += mass;
+    x += position.x * mass;
+    y += position.y * mass;
+    z += position.z * mass;
+  }
+  if (!(totalMass > 0)) return { x: 0, y: 0, z: 0 };
+  return { x: x / totalMass, y: y / totalMass, z: z / totalMass };
+}
+
+function tangentialVelocity(omega, offset) {
+  return {
+    x: omega.y * offset.z - omega.z * offset.y,
+    y: omega.z * offset.x - omega.x * offset.z,
+    z: omega.x * offset.y - omega.y * offset.x,
+  };
+}
+
 export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const world = physics.world;
@@ -173,10 +199,6 @@ export async function setup(ctx) {
   let capturedBodyMismatches = 0;
   const recentBodies = [];
 
-  // Capture real Rapier rigid bodies continuously. A ragdoll activation creates
-  // all 16 parts synchronously and emits ragdoll:started immediately afterwards,
-  // so the newest 16 bodies are exactly that ragdoll regardless of whether the
-  // activation originated inside the core plugin or through the public service.
   const originalCreateRigidBody = world.createRigidBody.bind(world);
   world.createRigidBody = (descriptor) => {
     const body = originalCreateRigidBody(descriptor);
@@ -199,13 +221,33 @@ export async function setup(ctx) {
     const appliedProfile = snapshotProfile(profiles[key]);
     const initialVelocity = captured[0]?.linvel?.() ?? { x: 0, y: 0, z: 0 };
     const common = tumbleFor(entityId, initialVelocity, appliedProfile);
+    const center = massCenter(captured);
+    let peakTangentialSpeed = 0;
 
+    // Give every part the velocity field of one rotating rigid body: v = Vcom + ω×r.
+    // Without this tangential component the joints must cancel most of the requested
+    // angular motion, which made free-fall ragdolls look unnaturally dead.
     for (let index = 0; index < captured.length; index += 1) {
       const body = captured[index];
       body.setLinearDamping(appliedProfile.linearDamping);
       body.setAngularDamping(index === 3
         ? appliedProfile.headAngularDamping
         : appliedProfile.angularDamping);
+
+      const position = body.translation();
+      const offset = {
+        x: position.x - center.x,
+        y: position.y - center.y,
+        z: position.z - center.z,
+      };
+      const tangential = tangentialVelocity(common, offset);
+      peakTangentialSpeed = Math.max(peakTangentialSpeed, magnitude(tangential));
+      const linear = body.linvel();
+      body.setLinvel({
+        x: (Number(linear.x) || 0) + tangential.x,
+        y: (Number(linear.y) || 0) + tangential.y,
+        z: (Number(linear.z) || 0) + tangential.z,
+      }, true);
 
       const angular = body.angvel();
       body.setAngvel({
@@ -225,10 +267,14 @@ export async function setup(ctx) {
       bodies: captured.length,
       profile: appliedProfile,
       tumble: common,
+      tumbleRadiansPerSecond: magnitude(common),
+      tumbleRevolutionsPerSecond: magnitude(common) / (Math.PI * 2),
+      peakTangentialSpeed,
       totalSpeedKph: totalSpeedKph(initialVelocity),
       horizontalSpeedKph: horizontalSpeedKph(initialVelocity),
       verticalSpeedKph: verticalSpeedKph(initialVelocity),
       scale: tumbleScale(appliedProfile, initialVelocity),
+      coherentSpin: true,
       tunedAt: Date.now(),
     });
     tunedActivations += 1;
