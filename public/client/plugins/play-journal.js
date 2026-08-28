@@ -1,6 +1,6 @@
 export const manifest = {
   id: "play-journal",
-  version: "2.0.0",
+  version: "2.1.0",
   requires: ["cloudflare-session"],
 };
 
@@ -10,6 +10,8 @@ const KEY_IDS = {
   ArrowDown: 2,
   ArrowLeft: 3,
   ArrowRight: 4,
+  Space: 5,
+  KeyC: 6,
   KeyX: 7,
   KeyR: 8,
   KeyZ: 9,
@@ -84,6 +86,7 @@ export function encodeInputRecord(timeMs, input = {}) {
     Number(input.selectDelta) || 0,
     input.interactPressed ? 1 : 0,
     input.platePressed ? 1 : 0,
+    input.posePressed ? 1 : 0,
   ];
 }
 
@@ -98,15 +101,15 @@ function persistentInputSignature(input = {}) {
 }
 
 function header(epochMs) {
-  return ["EFJ", 2, epochMs, {
+  return ["EFJ", 3, epochMs, {
     clock: "client milliseconds from journal start",
-    keys: "1 up,2 down,3 left,4 right,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B",
+    keys: "1 up,2 down,3 left,4 right,5 space,6 C,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B",
     k: "[k,t,key,down] exact browser key transition",
-    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed] input sampled for server",
+    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed,posePressed] input sampled for server",
     n: "[n,t,index,id,name,bot,team,healthMax,armorMax] entity dictionary",
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
     c: `change=[entityIndex,bitmask,values...] bits: ${ENTITY_FIELDS.join(",")}`,
-    e: "[e,t,event,payload] authoritative game event",
+    e: "[e,t,event,payload] authoritative game event; ragdoll events include reason, body part and impact severity when available",
     m: "[m,t,name,data] journal/network/input marker",
   }];
 }
@@ -170,6 +173,7 @@ export async function setup(ctx) {
       || Number(input.selectDelta)
       || input.interactPressed
       || input.platePressed
+      || input.posePressed
     );
     if (signature === lastInputSignature && !impulse) return;
     lastInputSignature = signature;
@@ -286,6 +290,9 @@ export async function setup(ctx) {
   });
   ctx.events.on("input:touch", ({ control, down } = {}) => {
     append(["m", stamp(), "touch-input", { control: control ?? "", down: down ? 1 : 0 }]);
+  });
+  ctx.events.on("input:parkour-pose", ({ reason } = {}) => {
+    append(["m", stamp(), "parkour-pose-input", { reason: reason ?? "" }]);
   });
   ctx.events.on("input:reset", ({ reason } = {}) => append(["m", stamp(), "input-reset", reason ?? null]));
   ctx.events.on("network:input-sampled", ({ input }) => recordInput(input));
