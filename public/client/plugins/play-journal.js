@@ -1,6 +1,6 @@
 export const manifest = {
   id: "play-journal",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: ["cloudflare-session"],
 };
 
@@ -101,7 +101,7 @@ function persistentInputSignature(input = {}) {
 }
 
 function header(epochMs) {
-  return ["EFJ", 3, epochMs, {
+  return ["EFJ", 4, epochMs, {
     clock: "client milliseconds from journal start",
     keys: "1 up,2 down,3 left,4 right,5 space,6 C,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B",
     k: "[k,t,key,down] exact browser key transition",
@@ -110,7 +110,7 @@ function header(epochMs) {
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
     c: `change=[entityIndex,bitmask,values...] bits: ${ENTITY_FIELDS.join(",")}`,
     e: "[e,t,event,payload] authoritative game event; ragdoll events include reason, body part and impact severity when available",
-    m: "[m,t,name,data] journal/network/input marker",
+    m: "[m,t,name,data] journal/network/input/server lifecycle marker. Network markers preserve close code, reason, reconnect attempt, server bootId/matchId and fatal plugin/runtime errors.",
   }];
 }
 
@@ -139,6 +139,10 @@ export async function setup(ctx) {
     if (!enabled && !force) return;
     lines.push(JSON.stringify(record));
     updateUi();
+  }
+
+  function marker(name, data = null, options = {}) {
+    append(["m", stamp(), name, data], options);
   }
 
   function resetJournal() {
@@ -252,7 +256,7 @@ export async function setup(ctx) {
   }
 
   async function downloadJournal() {
-    append(["m", stamp(), "export", { records: Math.max(0, lines.length - 1) }], { force: true });
+    marker("export", { records: Math.max(0, lines.length - 1) }, { force: true });
     const text = `${lines.join("\n")}\n`;
     const { blob, extension } = await makeDownloadBlob(text);
     const date = new Date().toISOString().replace(/[:.]/g, "-");
@@ -268,10 +272,10 @@ export async function setup(ctx) {
   enabledInput?.addEventListener("change", () => {
     const next = Boolean(enabledInput.checked);
     if (next === enabled) return;
-    if (!next) append(["m", stamp(), "journal-off", null], { force: true });
+    if (!next) marker("journal-off", null, { force: true });
     enabled = next;
     localStorage.setItem(ENABLED_KEY, String(enabled));
-    if (enabled) append(["m", stamp(), "journal-on", null], { force: true });
+    if (enabled) marker("journal-on", null, { force: true });
     updateUi();
   });
 
@@ -288,18 +292,31 @@ export async function setup(ctx) {
     const key = KEY_IDS[code];
     if (key) append(["k", stamp(), key, down ? 1 : 0]);
   });
-  ctx.events.on("input:touch", ({ control, down } = {}) => {
-    append(["m", stamp(), "touch-input", { control: control ?? "", down: down ? 1 : 0 }]);
-  });
-  ctx.events.on("input:parkour-pose", ({ reason } = {}) => {
-    append(["m", stamp(), "parkour-pose-input", { reason: reason ?? "" }]);
-  });
-  ctx.events.on("input:reset", ({ reason } = {}) => append(["m", stamp(), "input-reset", reason ?? null]));
+  ctx.events.on("input:touch", ({ control, down } = {}) => marker("touch-input", { control: control ?? "", down: down ? 1 : 0 }));
+  ctx.events.on("input:parkour-pose", ({ reason } = {}) => marker("parkour-pose-input", { reason: reason ?? "" }));
+  ctx.events.on("input:reset", ({ reason } = {}) => marker("input-reset", reason ?? null));
   ctx.events.on("network:input-sampled", ({ input }) => recordInput(input));
-  ctx.events.on("network:connected", ({ room } = {}) => append(["m", stamp(), "connected", room ?? "public"]));
-  ctx.events.on("network:welcome", ({ playerId, team } = {}) => append(["m", stamp(), "welcome", { playerId, team }]));
-  ctx.events.on("network:disconnected", () => append(["m", stamp(), "disconnected", null]));
-  ctx.events.on("network:error", () => append(["m", stamp(), "network-error", null]));
+
+  ctx.events.on("network:connect-attempt", (data = {}) => marker("network-connect-attempt", data));
+  ctx.events.on("network:socket-open", (data = {}) => marker("network-socket-open", data));
+  ctx.events.on("network:connected", (data = {}) => marker("connected", data));
+  ctx.events.on("network:welcome", (data = {}) => marker("welcome", {
+    playerId: data.playerId ?? null,
+    team: data.team ?? null,
+    mode: data.mode ?? null,
+    resumed: data.resumed === true,
+    server: data.server ?? null,
+  }));
+  ctx.events.on("network:server-identity", (data = {}) => marker("server-identity", data));
+  ctx.events.on("network:reconnect-scheduled", (data = {}) => marker("network-reconnect-scheduled", data));
+  ctx.events.on("network:reconnected", (data = {}) => marker("reconnected", data));
+  ctx.events.on("network:disconnected", (data = {}) => marker("disconnected", data));
+  ctx.events.on("network:error", (data = {}) => marker("network-error", data));
+  ctx.events.on("network:protocol-error", (data = {}) => marker("network-protocol-error", data));
+  ctx.events.on("network:server-error", (data = {}) => marker("server-error", data));
+  ctx.events.on("network:match-identity-changed", (data = {}) => marker("match-identity-changed", data));
+  ctx.events.on("network:fatal-error", (data = {}) => marker("fatal-error", data, { force: true }));
+
   ctx.events.on("game:snapshot:raw", (snapshot) => {
     sawRawSnapshot = true;
     recordSnapshot(snapshot);
@@ -318,6 +335,7 @@ export async function setup(ctx) {
     },
     reset: resetJournal,
     download: downloadJournal,
+    marker: (name, data = null) => marker(name, data),
   });
 
   resetJournal();
