@@ -3,7 +3,6 @@ export const manifest = {
   requires: ["keyboard-input", "cloudflare-session", "speech-settings"],
 };
 
-const SPEECH_START_FALLBACK_MS = 550;
 const PARACHUTE_ACTION_DEBOUNCE_MS = 350;
 
 export async function setup(ctx) {
@@ -13,7 +12,6 @@ export async function setup(ctx) {
   const originalSample = input.sample.bind(input);
   let parachutePressed = false;
   let latestParachute = null;
-  let announcementGeneration = 0;
   let lastParachuteActionAt = -Infinity;
 
   function trigger(reason) {
@@ -44,7 +42,7 @@ export async function setup(ctx) {
     return live;
   }
 
-  function announceWithVoiceOver(text) {
+  function announceWithScreenReader(text) {
     const live = statusLiveRegion();
     live.textContent = "";
     requestAnimationFrame(() => {
@@ -54,27 +52,13 @@ export async function setup(ctx) {
 
   function announce(text) {
     if (!text) return;
-    const generation = ++announcementGeneration;
-    let started = false;
-    const utterance = speech.say(text, { interrupt: true });
-
-    if (!utterance) {
-      announceWithVoiceOver(text);
+    // When browser TTS is enabled, the shared speech service owns retries and
+    // fallback. Doing a second local watchdog here can produce duplicate speech.
+    if (speech.enabled) {
+      speech.say(text, { interrupt: true });
       return;
     }
-
-    utterance.addEventListener?.("start", () => {
-      started = true;
-    }, { once: true });
-    utterance.addEventListener?.("error", () => {
-      if (generation !== announcementGeneration || started) return;
-      announceWithVoiceOver(text);
-    }, { once: true });
-
-    setTimeout(() => {
-      if (generation !== announcementGeneration || started) return;
-      announceWithVoiceOver(text);
-    }, SPEECH_START_FALLBACK_MS);
+    announceWithScreenReader(text);
   }
 
   function flightStatusText() {
