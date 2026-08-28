@@ -77,6 +77,48 @@ export async function setup(ctx) {
     reconnectTimer = null;
   }
 
+  async function collectDiagnostics(trigger, details = {}) {
+    const room = desiredRoom;
+    if (!room) return null;
+    const started = performance.now();
+    const params = new URLSearchParams({
+      room,
+      mode: desiredMode,
+      entity: playerId || sessionId,
+    });
+    try {
+      const response = await fetch(`/api/diagnostics?${params.toString()}`, {
+        cache: "no-store",
+        headers: { Accept: "application/json" },
+      });
+      let diagnostics = null;
+      try { diagnostics = await response.json(); } catch {}
+      const packet = {
+        trigger,
+        details,
+        httpStatus: response.status,
+        ok: response.ok,
+        elapsedMs: Math.max(0, Math.round(performance.now() - started)),
+        diagnostics,
+        ...browserState(),
+      };
+      ctx.events.emit("network:diagnostics", packet);
+      return packet;
+    } catch (error) {
+      const packet = {
+        trigger,
+        details,
+        httpStatus: 0,
+        ok: false,
+        elapsedMs: Math.max(0, Math.round(performance.now() - started)),
+        error: error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+        ...browserState(),
+      };
+      ctx.events.emit("network:diagnostics", packet);
+      return packet;
+    }
+  }
+
   function handleFatal(data, context = {}) {
     if (fatalError) return;
     fatalError = {
@@ -99,6 +141,12 @@ export async function setup(ctx) {
     input.disable();
     clearReconnectTimer();
     ctx.events.emit("network:fatal-error", fatalError);
+    collectDiagnostics("fatal-error", {
+      code: fatalError.code,
+      category: fatalError.category,
+      pluginId: fatalError.pluginId,
+      phase: fatalError.phase,
+    });
   }
 
   function scheduleReconnect(trigger = "socket-close") {
@@ -240,7 +288,7 @@ export async function setup(ctx) {
       input.disable();
       const lifetimeMs = openedAt == null ? null : Math.max(0, Math.round(performance.now() - openedAt));
       const willReconnect = Boolean(desiredRoom && !fatalError);
-      ctx.events.emit("network:disconnected", {
+      const closeDetails = {
         room,
         mode: desiredMode,
         sequence,
@@ -251,19 +299,23 @@ export async function setup(ctx) {
         willReconnect,
         fatal: Boolean(fatalError),
         ...browserState(),
-      });
+      };
+      ctx.events.emit("network:disconnected", closeDetails);
+      collectDiagnostics("socket-close", closeDetails);
       if (willReconnect) scheduleReconnect(`close-${event.code || 0}`);
     });
 
     ws.addEventListener("error", () => {
       if (socket !== ws) return;
-      ctx.events.emit("network:error", {
+      const details = {
         room,
         mode: desiredMode,
         sequence,
         readyState: ws.readyState,
         ...browserState(),
-      });
+      };
+      ctx.events.emit("network:error", details);
+      collectDiagnostics("socket-error", details);
     });
   }
 
@@ -289,6 +341,7 @@ export async function setup(ctx) {
   ctx.services.provide("network", {
     connect,
     disconnect,
+    collectDiagnostics,
     get playerId() { return playerId; },
     get sessionId() { return sessionId; },
     get mode() { return desiredMode; },
