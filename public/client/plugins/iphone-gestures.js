@@ -3,7 +3,10 @@ export const manifest = {
   requires: ["keyboard-input"],
 };
 
+// Keep the same feel as Archipelago: a short drag starts walking and a
+// deliberate long drag turns the same movement into a run.
 const MOVE_DEAD_ZONE_PX = 26;
+const RUN_THRESHOLD_PX = 125;
 const TAP_MAX_MOVE_PX = 20;
 const TAP_MAX_DURATION_MS = 260;
 const DOUBLE_TAP_WINDOW_MS = 300;
@@ -26,6 +29,7 @@ export async function setup(ctx) {
   const tracked = new Map();
   let primaryId = null;
   let currentDirection = null;
+  let sprintHeld = false;
   let fireHeld = false;
   let sessionStartedAt = 0;
   let sessionStartX = 0;
@@ -34,6 +38,10 @@ export async function setup(ctx) {
   let multiTouchUsed = false;
   let pendingTapTimer = null;
   let pendingTap = null;
+
+  function gameActive() {
+    return !panel.hidden;
+  }
 
   function prevent(event) {
     if (event.cancelable) event.preventDefault();
@@ -52,6 +60,13 @@ export async function setup(ctx) {
     if (currentDirection) input.setVirtualControl?.(currentDirection, true);
   }
 
+  function setSprint(next) {
+    const value = Boolean(next);
+    if (sprintHeld === value) return;
+    sprintHeld = value;
+    input.setVirtualControl?.("sprint", value);
+  }
+
   function setFire(next) {
     const value = Boolean(next);
     if (fireHeld === value) return;
@@ -59,10 +74,15 @@ export async function setup(ctx) {
     input.setVirtualControl?.("fire", value);
   }
 
+  function releaseMovement() {
+    setDirection(null);
+    setSprint(false);
+  }
+
   function choosePrimary() {
     const next = tracked.values().next().value ?? null;
     primaryId = next?.id ?? null;
-    setDirection(null);
+    releaseMovement();
     if (next) {
       next.originX = next.x;
       next.originY = next.y;
@@ -72,7 +92,7 @@ export async function setup(ctx) {
   function updateMovement() {
     const primary = primaryId == null ? null : tracked.get(primaryId);
     if (!primary) {
-      setDirection(null);
+      releaseMovement();
       return;
     }
 
@@ -80,13 +100,16 @@ export async function setup(ctx) {
     const dy = primary.y - primary.originY;
     const move = Math.hypot(dx, dy);
     sessionMaxMove = Math.max(sessionMaxMove, distance(sessionStartX, sessionStartY, primary.x, primary.y));
+
     if (move < MOVE_DEAD_ZONE_PX) {
-      setDirection(null);
+      releaseMovement();
       return;
     }
 
     if (Math.abs(dy) >= Math.abs(dx)) setDirection(dy < 0 ? "forward" : "back");
     else setDirection(dx < 0 ? "left" : "right");
+
+    setSprint(move >= RUN_THRESHOLD_PX);
   }
 
   function dispatchJump() {
@@ -135,7 +158,7 @@ export async function setup(ctx) {
   }
 
   function finishSession(x, y, now) {
-    setDirection(null);
+    releaseMovement();
     setFire(false);
     const duration = now - sessionStartedAt;
     if (!multiTouchUsed
@@ -152,6 +175,8 @@ export async function setup(ctx) {
   function addChangedTouches(event) {
     let accepted = false;
     for (const touch of Array.from(event.changedTouches ?? [])) {
+      // Buttons and other controls always stay controls. Every other point on
+      // the screen becomes part of the game gesture surface while a match is visible.
       if (interactiveTarget(touch.target)) continue;
       const point = {
         id: touch.identifier,
@@ -199,7 +224,11 @@ export async function setup(ctx) {
     return { lastX, lastY, primaryEnded };
   }
 
-  panel.addEventListener("touchstart", (event) => {
+  // Capture gestures from the whole document, not just #game-panel. This is
+  // what makes every free part of the visible screen usable and also prevents
+  // an off-panel swipe from scrolling the page and carrying the controls away.
+  document.addEventListener("touchstart", (event) => {
+    if (!gameActive()) return;
     const hadTrackedTouches = tracked.size > 0;
     const accepted = addChangedTouches(event);
     if (!accepted && !hadTrackedTouches) return;
@@ -213,7 +242,7 @@ export async function setup(ctx) {
     updateMovement();
   }, { capture: true, passive: false });
 
-  panel.addEventListener("touchmove", (event) => {
+  document.addEventListener("touchmove", (event) => {
     if (!tracked.size) return;
     prevent(event);
     updateChangedTouches(event);
@@ -235,13 +264,13 @@ export async function setup(ctx) {
     updateMovement();
   }
 
-  panel.addEventListener("touchend", endTouches, { capture: true, passive: false });
-  panel.addEventListener("touchcancel", endTouches, { capture: true, passive: false });
+  document.addEventListener("touchend", endTouches, { capture: true, passive: false });
+  document.addEventListener("touchcancel", endTouches, { capture: true, passive: false });
 
   function reset() {
     tracked.clear();
     primaryId = null;
-    setDirection(null);
+    releaseMovement();
     setFire(false);
     cancelPendingTap();
     sessionStartedAt = 0;
@@ -250,6 +279,7 @@ export async function setup(ctx) {
   }
 
   window.addEventListener("blur", reset);
+  window.addEventListener("pagehide", reset);
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) reset();
   });
