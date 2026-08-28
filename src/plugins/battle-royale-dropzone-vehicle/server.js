@@ -3,13 +3,14 @@ export const DROPZONE_VEHICLE_OFFSET = 12;
 
 export const manifest = {
   id: "battle-royale-dropzone-vehicle",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: [
     "battle-royale-parachute",
     "battle-royale-vehicle-fleet",
     "battle-royale-vehicle",
     "rapier-physics",
     "entities",
+    "match-api",
   ],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
@@ -27,7 +28,10 @@ export async function setup(ctx) {
   const vehicles = ctx.services.get("vehicles");
   const physics = ctx.services.get("physics");
   const entities = ctx.services.get("entities");
-  const placedFor = new Set();
+  const matchApi = ctx.services.get("match-api");
+  const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
+  const assignedByPlayer = new Map();
+  const assignedVehicles = new Map();
 
   function groundCandidate(x, z, originY) {
     const hit = physics.raycastSupportWorld(
@@ -63,50 +67,94 @@ export async function setup(ctx) {
       ?? { x: x + DROPZONE_VEHICLE_OFFSET, y: 0, z };
   }
 
+  function candidateVehicle(entityId) {
+    const assigned = assignedByPlayer.get(entityId);
+    if (assigned) {
+      const state = vehicles.stateFor(assigned);
+      if (state && (!state.occupied || state.driverId === entityId)) return state;
+    }
+
+    const candidates = (vehicles.snapshot?.() ?? [])
+      .filter((vehicle) => vehicle.kind === "offroad")
+      // Leave the original primary jeep alone because it is also the legacy
+      // integration anchor. The seven fleet jeeps are safe to relocate.
+      .filter((vehicle) => vehicle.id !== vehicles.vehicleId)
+      .filter((vehicle) => !vehicle.occupied)
+      .filter((vehicle) => !assignedVehicles.has(vehicle.id))
+      .sort((a, b) => {
+        if (a.id === DROPZONE_VEHICLE_ID && b.id !== DROPZONE_VEHICLE_ID) return -1;
+        if (b.id === DROPZONE_VEHICLE_ID && a.id !== DROPZONE_VEHICLE_ID) return 1;
+        return String(a.id).localeCompare(String(b.id));
+      });
+    return candidates[0] ?? null;
+  }
+
+  function assignVehicle(entityId, vehicleId) {
+    const previous = assignedByPlayer.get(entityId);
+    if (previous && previous !== vehicleId) assignedVehicles.delete(previous);
+    assignedByPlayer.set(entityId, vehicleId);
+    assignedVehicles.set(vehicleId, entityId);
+  }
+
   function placeNear(entityId, landingPosition = null, now = Date.now()) {
     const entity = entities.get(entityId);
     if (!entity || entity.bot || entity.kind !== "human") return null;
-    if (placedFor.has(entityId)) return vehicles.stateFor(DROPZONE_VEHICLE_ID);
 
-    const vehicle = vehicles.stateFor(DROPZONE_VEHICLE_ID);
-    const body = physics.dynamicBody(DROPZONE_VEHICLE_ID);
+    const existingVehicleId = assignedByPlayer.get(entityId);
+    if (existingVehicleId) return vehicles.stateFor(existingVehicleId);
+
+    const vehicle = candidateVehicle(entityId);
+    const body = vehicle ? physics.dynamicBody(vehicle.id) : null;
     const transform = ctx.components.get(entityId, "Transform");
-    if (!vehicle || vehicle.occupied || !body || !transform) return null;
+    if (!vehicle || !body || !transform) return null;
 
     const landing = landingPosition ?? transform;
     const parking = chooseParkingPoint(landing, finite(transform.angle));
+    const bodyHeight = vehicle.kind === "supercar" ? 1.05 : 1.25;
     body.setTranslation({
       x: parking.x,
-      y: parking.y + 1.25,
+      y: parking.y + bodyHeight,
       z: parking.z,
     }, true);
     body.setLinvel({ x: 0, y: 0, z: 0 }, true);
     body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     body.wakeUp?.();
     physics.syncQueries?.();
-    placedFor.add(entityId);
+    assignVehicle(entityId, vehicle.id);
 
-    const state = vehicles.stateFor(DROPZONE_VEHICLE_ID);
+    const state = vehicles.stateFor(vehicle.id);
+    const distance = state ? distance2(landing, state) : distance2(landing, parking);
     ctx.events.emit("vehicle:dropzone-placed", {
       entityId,
-      vehicleId: DROPZONE_VEHICLE_ID,
+      vehicleId: vehicle.id,
+      vehicleKind: state?.kind ?? vehicle.kind,
+      vehicleName: state?.accessibleName ?? vehicle.accessibleName ?? "внедорожник",
       x: state?.x ?? parking.x,
-      y: state?.y ?? parking.y + 1.25,
+      y: state?.y ?? parking.y + bodyHeight,
       z: state?.z ?? parking.z,
-      distance: state ? distance2(landing, state) : distance2(landing, parking),
+      distance,
       now,
     });
     return state;
   }
 
-  function assertNear(position, maximumDistance = 18) {
-    const state = vehicles.stateFor(DROPZONE_VEHICLE_ID);
-    if (!state) throw new Error(`Dropzone vehicle not found: ${DROPZONE_VEHICLE_ID}`);
-    const distance = distance2(position, state);
-    if (distance > Number(maximumDistance)) {
-      throw new Error(`Dropzone vehicle is ${distance.toFixed(2)} m away, expected <= ${maximumDistance}`);
+  function assignedFor(entityId) {
+    const vehicleId = assignedByPlayer.get(entityId) ?? null;
+    return vehicleId ? vehicles.stateFor(vehicleId) : null;
+  }
+
+  function assertNear(position, maximumDistance = 18, entityId = null) {
+    const states = entityId && assignedByPlayer.has(entityId)
+      ? [assignedFor(entityId)].filter(Boolean)
+      : (vehicles.snapshot?.() ?? []).filter((vehicle) => vehicle.kind === "offroad");
+    const nearest = states
+      .map((vehicle) => ({ vehicle, distance: distance2(position, vehicle) }))
+      .sort((a, b) => a.distance - b.distance)[0] ?? null;
+    if (!nearest) throw new Error("No dropzone vehicle found");
+    if (nearest.distance > Number(maximumDistance)) {
+      throw new Error(`Dropzone vehicle is ${nearest.distance.toFixed(2)} m away, expected <= ${maximumDistance}`);
     }
-    return { vehicle: state, distance };
+    return nearest;
   }
 
   ctx.events.on("parachute:landed", ({ entityId, x, y, z, now }) => {
@@ -114,13 +162,29 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
-    placedFor.delete(entityId);
+    const vehicleId = assignedByPlayer.get(entityId);
+    if (vehicleId) assignedVehicles.delete(vehicleId);
+    assignedByPlayer.delete(entityId);
   });
+
+  matchApi.eventsForPlayer = (playerId, packets = []) => {
+    const selected = originalEventsForPlayer(playerId, packets);
+    const seen = new Set(selected);
+    for (const packet of packets) {
+      if (packet?.event !== "vehicle:dropzone-placed") continue;
+      if (packet?.payload?.entityId !== playerId) continue;
+      if (seen.has(packet)) continue;
+      seen.add(packet);
+      selected.push(packet);
+    }
+    return selected;
+  };
 
   ctx.services.provide("dropzone-vehicle", {
     vehicleId: DROPZONE_VEHICLE_ID,
     offset: DROPZONE_VEHICLE_OFFSET,
     placeNear,
+    assignedFor,
     assertNear,
   });
 }
