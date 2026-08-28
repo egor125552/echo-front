@@ -1,12 +1,14 @@
 export const EXPANDED_WORLD_HALF_SIZE = 1000;
 export const EXPANDED_WORLD_SIZE = EXPANDED_WORLD_HALF_SIZE * 2;
 export const EXPANDED_SPAWN_RADII = Object.freeze([180, 350, 520, 690, 860, 960]);
+export const EXPANDED_BOUNDARY_BOTTOM = -60;
+export const EXPANDED_BOUNDARY_HEIGHT = 500;
 const BOUNDARY_HALF_THICKNESS = 1;
 const SPAWNS_PER_RING = 20;
 
 export const manifest = {
   id: "battle-royale-world-expansion",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["map-test-arena", "rapier-physics"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -39,7 +41,7 @@ export async function setup(ctx) {
 
   physics.beginBatch?.();
   try {
-    // Remove only the original 400 m arena shell. The warehouse, stairs, doors,
+    // Remove only the original arena shell. The warehouse, stairs, doors,
     // crates and every other world collider remain untouched.
     for (let i = map.walls.length - 1; i >= 0; i -= 1) {
       const wall = map.walls[i];
@@ -71,7 +73,8 @@ export async function setup(ctx) {
       const enriched = {
         kind: "world-boundary",
         accessibleName: "граница мира",
-        height: 10,
+        y: EXPANDED_BOUNDARY_BOTTOM,
+        height: EXPANDED_BOUNDARY_HEIGHT,
         ...spec,
       };
       const collider = physics.createWall(enriched);
@@ -96,6 +99,9 @@ export async function setup(ctx) {
       spawnPointCount: EXPANDED_SPAWN_POINTS.length,
       furthestSpawnRadius: EXPANDED_SPAWN_RADII.at(-1),
       boundaryCount: map.walls.filter((wall) => wall?.kind === "world-boundary").length,
+      boundaryBottom: EXPANDED_BOUNDARY_BOTTOM,
+      boundaryHeight: EXPANDED_BOUNDARY_HEIGHT,
+      boundaryTop: EXPANDED_BOUNDARY_BOTTOM + EXPANDED_BOUNDARY_HEIGHT,
       hasGround: Boolean(map.groundCollider),
     };
   }
@@ -110,6 +116,12 @@ export async function setup(ctx) {
       throw new Error(`Expected four world boundaries, got ${state.boundaryCount}`);
     }
     if (!state.hasGround) throw new Error("Expanded world ground collider is missing");
+    if (state.boundaryTop < 300) {
+      throw new Error(`World boundary is too low for vehicle ejection: top=${state.boundaryTop}`);
+    }
+    if (state.boundaryBottom > -20) {
+      throw new Error(`World boundary does not extend far enough below ground: bottom=${state.boundaryBottom}`);
+    }
     if (state.furthestSpawnRadius >= state.halfSize) {
       throw new Error(`Spawn radius ${state.furthestSpawnRadius} reaches world boundary ${state.halfSize}`);
     }
@@ -120,5 +132,16 @@ export async function setup(ctx) {
     summary,
     assertExpanded,
     spawnPoints: EXPANDED_SPAWN_POINTS,
+    contains(x, z, margin = 0) {
+      const limit = Math.max(0, EXPANDED_WORLD_HALF_SIZE - Math.max(0, Number(margin) || 0));
+      return Math.abs(Number(x) || 0) <= limit && Math.abs(Number(z) || 0) <= limit;
+    },
+    clampInside(x, z, margin = 4) {
+      const limit = Math.max(0, EXPANDED_WORLD_HALF_SIZE - Math.max(0, Number(margin) || 0));
+      return {
+        x: Math.max(-limit, Math.min(limit, Number(x) || 0)),
+        z: Math.max(-limit, Math.min(limit, Number(z) || 0)),
+      };
+    },
   });
 }
