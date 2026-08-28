@@ -1,7 +1,6 @@
 import { ClientPluginHost } from "./core/plugin-host.js";
 import { echoFrontClientPreset } from "./presets/echo-front.js";
 
-const host = await new ClientPluginHost(echoFrontClientPreset).start();
 const playButton = document.querySelector("#play-button");
 const battleRoyaleButton = document.querySelector("#battle-royale-button");
 const gamePanel = document.querySelector("#game-panel");
@@ -14,7 +13,7 @@ function setButtonsDisabled(value) {
 }
 
 function fatalMessage(error = {}) {
-  if (error.pluginId) return `Ошибка в плагине ${error.pluginId}: ${error.message || "неизвестная ошибка"}`;
+  if (error.pluginId) return `Ошибка в плагине ${error.pluginId}: ${error.cause?.message || error.message || "неизвестная ошибка"}`;
   if (error.code === "MATCH_STATE_LOST") {
     return "Ошибка сервера: процесс текущего матча был перезапущен. Новый матч автоматически не создан.";
   }
@@ -22,6 +21,23 @@ function fatalMessage(error = {}) {
     return "Ошибка сервера: после переподключения обнаружен другой матч. Автоматическое переключение остановлено.";
   }
   return error.speech || `Ошибка сервера: ${error.message || "неизвестная ошибка"}`;
+}
+
+const candidateHost = new ClientPluginHost(echoFrontClientPreset);
+let host;
+try {
+  host = await candidateHost.start();
+} catch (error) {
+  const text = fatalMessage(error);
+  console.error(error);
+  setButtonsDisabled(false);
+  if (connection) {
+    connection.textContent = text;
+    connection.setAttribute("role", "alert");
+    connection.setAttribute("aria-live", "assertive");
+  }
+  try { candidateHost.services.get("speech")?.say?.(text, { interrupt: true }); } catch {}
+  throw error;
 }
 
 async function start(mode) {
