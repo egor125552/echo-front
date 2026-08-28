@@ -10,6 +10,7 @@ export function collectGameDiagnostics(game, { entityId = null } = {}) {
   const entitiesService = host.services.has("entities") ? host.services.get("entities") : null;
   const battleRoyale = host.services.has("battle-royale") ? host.services.get("battle-royale") : null;
   const botBrain = host.services.has("bot-brain") ? host.services.get("bot-brain") : null;
+  const physics = host.services.has("physics") ? host.services.get("physics") : null;
   const allEntities = entitiesService?.all ? entitiesService.all() : [];
   const selected = entityId ? allEntities.filter((entity) => entity.id === entityId) : allEntities;
 
@@ -22,6 +23,7 @@ export function collectGameDiagnostics(game, { entityId = null } = {}) {
     services: [...host.services.services.keys()].map((name) => ({ name, owner: host.services.owners.get(name) ?? null })),
     components: [...host.components.types].map(([name, type]) => ({ name, owner: type.owner ?? null, count: type.values.size })),
     eventQueueDepth: typeof game.pendingEventCount === "function" ? game.pendingEventCount() : null,
+    physics: physics?.stats ? safe(physics.stats()) : null,
     match: battleRoyale?.status ? safe(battleRoyale.status(Date.now())) : null,
     entities: selected.slice(0, ENGINE_DIAGNOSTICS_CONTROL.maxEntities).map((entity) => ({
       ...entity,
