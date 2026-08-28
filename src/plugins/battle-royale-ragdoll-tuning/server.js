@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -144,9 +144,9 @@ function speedForMode(mode, velocity) {
   return 0;
 }
 
-function tumbleScale(profile, options) {
+function tumbleScale(profile, velocity) {
   if (profile.speedMode === "none" || profile.scaleMaxExtra <= 0) return 1;
-  const speedKph = speedForMode(profile.speedMode, options?.velocity);
+  const speedKph = speedForMode(profile.speedMode, velocity);
   return 1 + clamp(
     (speedKph - profile.scaleStartKph) / profile.scaleSpanKph,
     0,
@@ -154,9 +154,9 @@ function tumbleScale(profile, options) {
   );
 }
 
-function tumbleFor(entityId, options, profile) {
+function tumbleFor(entityId, velocity, profile) {
   const sign = signFor(entityId);
-  const scale = tumbleScale(profile, options);
+  const scale = tumbleScale(profile, velocity);
   return {
     x: profile.x * sign * scale,
     y: profile.y * scale,
@@ -165,41 +165,40 @@ function tumbleFor(entityId, options, profile) {
 }
 
 export async function setup(ctx) {
-  const ragdoll = ctx.services.get("ragdoll");
   const physics = ctx.services.get("physics");
   const world = physics.world;
-  const originalActivate = ragdoll.activate.bind(ragdoll);
   const tuned = new Map();
   let profiles = freshProfiles();
   let tunedActivations = 0;
   let capturedBodyMismatches = 0;
+  const recentBodies = [];
 
-  ragdoll.activate = (entityId, options = {}, now = Date.now()) => {
-    const captured = [];
-    const originalCreateRigidBody = world.createRigidBody.bind(world);
-    world.createRigidBody = (descriptor) => {
-      const body = originalCreateRigidBody(descriptor);
-      captured.push(body);
-      return body;
-    };
-
-    let activated = false;
-    try {
-      activated = originalActivate(entityId, options, now);
-    } finally {
-      world.createRigidBody = originalCreateRigidBody;
+  // Capture real Rapier rigid bodies continuously. A ragdoll activation creates
+  // all 16 parts synchronously and emits ragdoll:started immediately afterwards,
+  // so the newest 16 bodies are exactly that ragdoll regardless of whether the
+  // activation originated inside the core plugin or through the public service.
+  const originalCreateRigidBody = world.createRigidBody.bind(world);
+  world.createRigidBody = (descriptor) => {
+    const body = originalCreateRigidBody(descriptor);
+    recentBodies.push(body);
+    if (recentBodies.length > EXPECTED_PARTS * 4) {
+      recentBodies.splice(0, recentBodies.length - EXPECTED_PARTS * 4);
     }
+    return body;
+  };
 
-    if (!activated || captured.length === 0) return activated;
+  function applyTuning(entityId, reason) {
+    const captured = recentBodies.slice(-EXPECTED_PARTS);
+    recentBodies.length = 0;
     if (captured.length !== EXPECTED_PARTS) {
       capturedBodyMismatches += 1;
-      return activated;
+      return false;
     }
 
-    const reason = String(options?.reason ?? "impact");
     const key = profileKey(reason);
     const appliedProfile = snapshotProfile(profiles[key]);
-    const common = tumbleFor(entityId, options, appliedProfile);
+    const initialVelocity = captured[0]?.linvel?.() ?? { x: 0, y: 0, z: 0 };
+    const common = tumbleFor(entityId, initialVelocity, appliedProfile);
 
     for (let index = 0; index < captured.length; index += 1) {
       const body = captured[index];
@@ -221,21 +220,24 @@ export async function setup(ctx) {
 
     tuned.set(entityId, {
       entityId,
-      reason,
+      reason: String(reason ?? "default"),
       profileKey: key,
       bodies: captured.length,
       profile: appliedProfile,
       tumble: common,
-      totalSpeedKph: totalSpeedKph(options?.velocity),
-      horizontalSpeedKph: horizontalSpeedKph(options?.velocity),
-      verticalSpeedKph: verticalSpeedKph(options?.velocity),
-      scale: tumbleScale(appliedProfile, options),
-      tunedAt: Number(now) || Date.now(),
+      totalSpeedKph: totalSpeedKph(initialVelocity),
+      horizontalSpeedKph: horizontalSpeedKph(initialVelocity),
+      verticalSpeedKph: verticalSpeedKph(initialVelocity),
+      scale: tumbleScale(appliedProfile, initialVelocity),
+      tunedAt: Date.now(),
     });
     tunedActivations += 1;
-    return activated;
-  };
+    return true;
+  }
 
+  ctx.events.on("ragdoll:started", ({ entityId, reason }) => {
+    applyTuning(entityId, reason);
+  });
   ctx.events.on("ragdoll:ended", ({ entityId }) => tuned.delete(entityId));
   ctx.events.on("entity:removed", ({ entityId }) => tuned.delete(entityId));
 
@@ -264,8 +266,6 @@ export async function setup(ctx) {
       profiles = freshProfiles();
       return snapshotProfiles(profiles);
     },
-
-    // Backward-compatible Engine Control helper used by the first vehicle-eject lab.
     configure(patch = {}) {
       const eject = profiles["vehicle-eject"];
       const globalPatch = {
