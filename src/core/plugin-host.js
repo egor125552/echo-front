@@ -2,6 +2,34 @@ import { EventBus } from "./event-bus.js";
 import { ServiceRegistry } from "./service-registry.js";
 import { ComponentRegistry } from "./component-registry.js";
 
+export class PluginExecutionError extends Error {
+  constructor(pluginId, phase, cause) {
+    const original = cause instanceof Error ? cause : new Error(String(cause));
+    super(`Plugin ${pluginId} failed during ${phase}: ${original.message}`, { cause: original });
+    this.name = "PluginExecutionError";
+    this.code = "PLUGIN_ERROR";
+    this.pluginId = pluginId;
+    this.phase = phase;
+    this.originalName = original.name || "Error";
+  }
+}
+
+export function asPluginExecutionError(pluginId, phase, error) {
+  if (error instanceof PluginExecutionError) return error;
+  return new PluginExecutionError(pluginId, phase, error);
+}
+
+export function describePluginError(error) {
+  if (!(error instanceof PluginExecutionError)) return null;
+  return {
+    code: error.code,
+    pluginId: error.pluginId,
+    phase: error.phase,
+    name: error.originalName,
+    message: error.cause instanceof Error ? error.cause.message : error.message,
+  };
+}
+
 function requireCapability(manifest, capability) {
   if (!(manifest.capabilities ?? []).includes(capability)) {
     throw new Error(`Plugin ${manifest.id} lacks capability ${capability}`);
@@ -15,7 +43,11 @@ function sortPlugins(plugins) {
   for (const plugin of plugins) {
     for (const dependency of plugin.manifest.requires ?? []) {
       if (!byId.has(dependency)) {
-        throw new Error(`Plugin ${plugin.manifest.id} requires missing plugin ${dependency}`);
+        throw new PluginExecutionError(
+          plugin.manifest.id,
+          "dependency-check",
+          new Error(`requires missing plugin ${dependency}`),
+        );
       }
     }
   }
@@ -26,7 +58,9 @@ function sortPlugins(plugins) {
 
   function visit(id) {
     if (permanent.has(id)) return;
-    if (temporary.has(id)) throw new Error(`Plugin dependency cycle at ${id}`);
+    if (temporary.has(id)) {
+      throw new PluginExecutionError(id, "dependency-check", new Error(`dependency cycle at ${id}`));
+    }
     temporary.add(id);
     const plugin = byId.get(id);
     for (const dependency of plugin.manifest.requires ?? []) visit(dependency);
@@ -37,6 +71,39 @@ function sortPlugins(plugins) {
 
   for (const id of byId.keys()) visit(id);
   return result;
+}
+
+function wrapMaybePromise(pluginId, phase, invoke) {
+  try {
+    const result = invoke();
+    if (result && typeof result.then === "function") {
+      return result.catch((error) => {
+        throw asPluginExecutionError(pluginId, phase, error);
+      });
+    }
+    return result;
+  } catch (error) {
+    throw asPluginExecutionError(pluginId, phase, error);
+  }
+}
+
+function wrapProvidedService(pluginId, serviceName, value) {
+  if (!value || (typeof value !== "object" && typeof value !== "function")) return value;
+  const wrappers = new Map();
+  return new Proxy(value, {
+    get(target, property, receiver) {
+      const member = Reflect.get(target, property, receiver);
+      if (typeof member !== "function") return member;
+      if (wrappers.has(property)) return wrappers.get(property);
+      const wrapped = (...args) => wrapMaybePromise(
+        pluginId,
+        `service:${serviceName}.${String(property)}`,
+        () => Reflect.apply(member, target, args),
+      );
+      wrappers.set(property, wrapped);
+      return wrapped;
+    },
+  });
 }
 
 export class PluginHost {
@@ -62,19 +129,28 @@ export class PluginHost {
       events: {
         on: (event, handler, options) => {
           requireCapability(manifest, "events.on");
-          const off = this.events.on(event, handler, options);
+          const wrapped = (payload) => wrapMaybePromise(
+            manifest.id,
+            `event:${event}`,
+            () => handler(payload),
+          );
+          const off = this.events.on(event, wrapped, options);
           this.cleanups.push(off);
           return off;
         },
         emit: (event, payload) => {
           requireCapability(manifest, "events.emit");
-          return this.events.emit(event, payload);
+          return wrapMaybePromise(
+            manifest.id,
+            `emit:${event}`,
+            () => this.events.emit(event, payload),
+          );
         },
       },
       services: {
         provide: (name, value) => {
           requireCapability(manifest, "services.provide");
-          return this.services.provide(name, value, manifest.id);
+          return this.services.provide(name, wrapProvidedService(manifest.id, name, value), manifest.id);
         },
         get: (name) => {
           requireCapability(manifest, "services.consume");
@@ -120,17 +196,23 @@ export class PluginHost {
 
   async start() {
     for (const plugin of this.plugins) {
-      if (typeof plugin.setup === "function") await plugin.setup(this.contextFor(plugin.manifest));
+      if (typeof plugin.setup === "function") {
+        await wrapMaybePromise(plugin.manifest.id, "setup", () => plugin.setup(this.contextFor(plugin.manifest)));
+      }
     }
     for (const plugin of this.plugins) {
-      if (typeof plugin.start === "function") await plugin.start(this.contextFor(plugin.manifest));
+      if (typeof plugin.start === "function") {
+        await wrapMaybePromise(plugin.manifest.id, "start", () => plugin.start(this.contextFor(plugin.manifest)));
+      }
     }
     return this;
   }
 
   async stop() {
     for (const plugin of [...this.plugins].reverse()) {
-      if (typeof plugin.stop === "function") await plugin.stop(this.contextFor(plugin.manifest));
+      if (typeof plugin.stop === "function") {
+        await wrapMaybePromise(plugin.manifest.id, "stop", () => plugin.stop(this.contextFor(plugin.manifest)));
+      }
     }
     for (const cleanup of this.cleanups.splice(0).reverse()) cleanup();
   }
