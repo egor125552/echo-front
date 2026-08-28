@@ -14,6 +14,8 @@ const SPORT_ENGINE_URL = "/audio/vehicles/ts3/engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
 const TRUCK_LOOP_START_SECONDS = 0.249818594;
 const TRUCK_LOOP_END_SECONDS = 1.827619048;
+const SPORT_LOOP_START_SECONDS = 0.210612245;
+const SPORT_LOOP_END_SECONDS = 0.950249433;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -145,9 +147,14 @@ export async function setup(ctx) {
         channel: ENGINE_CHANNEL,
         replace: true,
       });
-      if (profile === "truck" && engine?.source && truckEngineBuffer.duration > TRUCK_LOOP_END_SECONDS) {
-        engine.source.loopStart = TRUCK_LOOP_START_SECONDS;
-        engine.source.loopEnd = TRUCK_LOOP_END_SECONDS;
+      if (engine?.source) {
+        if (profile === "truck" && truckEngineBuffer.duration > TRUCK_LOOP_END_SECONDS) {
+          engine.source.loopStart = TRUCK_LOOP_START_SECONDS;
+          engine.source.loopEnd = TRUCK_LOOP_END_SECONDS;
+        } else if (profile === "sport" && sportEngineBuffer.duration > SPORT_LOOP_END_SECONDS) {
+          engine.source.loopStart = SPORT_LOOP_START_SECONDS;
+          engine.source.loopEnd = SPORT_LOOP_END_SECONDS;
+        }
       }
       currentVehicleId = vehicle.id;
       currentProfile = profile;
