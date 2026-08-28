@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-integration",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: [
     "match-api",
     "battle-royale-ragdoll",
@@ -9,11 +9,48 @@ export const manifest = {
     "movement",
     "battle-royale",
   ],
-  capabilities: ["services.consume", "components.read"],
+  capabilities: ["services.consume", "components.read", "events.emit"],
 };
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
+}
+
+const EJECTION_PROFILE = Object.freeze([
+  Object.freeze({ speedKph: 0, upward: 4.0, outward: 1.5 }),
+  Object.freeze({ speedKph: 15, upward: 6.0, outward: 2.0 }),
+  Object.freeze({ speedKph: 30, upward: 8.0, outward: 3.0 }),
+  Object.freeze({ speedKph: 50, upward: 16.0, outward: 5.0 }),
+  Object.freeze({ speedKph: 70, upward: 25.0, outward: 7.0 }),
+  Object.freeze({ speedKph: 80, upward: 30.0, outward: 8.0 }),
+  Object.freeze({ speedKph: 100, upward: 40.0, outward: 10.0 }),
+]);
+
+function profileValue(speedKph, field) {
+  const speed = Math.max(0, Number(speedKph) || 0);
+  if (speed <= EJECTION_PROFILE[0].speedKph) return EJECTION_PROFILE[0][field];
+  for (let index = 1; index < EJECTION_PROFILE.length; index += 1) {
+    const upper = EJECTION_PROFILE[index];
+    if (speed > upper.speedKph) continue;
+    const lower = EJECTION_PROFILE[index - 1];
+    const span = Math.max(0.001, upper.speedKph - lower.speedKph);
+    const t = clamp((speed - lower.speedKph) / span, 0, 1);
+    return lower[field] + (upper[field] - lower[field]) * t;
+  }
+  return EJECTION_PROFILE.at(-1)[field];
+}
+
+function ejectionVelocityDelta(speed, angle, input) {
+  const speedKph = Math.max(0, Number(speed) || 0) * 3.6;
+  const upward = profileValue(speedKph, "upward");
+  const outward = profileValue(speedKph, "outward");
+  const side = Number(input.strafe) < -0.15 ? -1 : 1;
+  const right = { x: Math.cos(angle), z: Math.sin(angle) };
+  return {
+    x: right.x * side * outward,
+    y: upward,
+    z: right.z * side * outward,
+  };
 }
 
 export async function setup(ctx) {
@@ -29,20 +66,6 @@ export async function setup(ctx) {
   const originalSnapshot = matchApi.snapshot.bind(matchApi);
   const originalSnapshotFor = matchApi.snapshotFor.bind(matchApi);
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
-
-  function ejectionVelocityDelta(speed, angle, input) {
-    const speedKph = Math.max(0, Number(speed) || 0) * 3.6;
-    const t = clamp((speedKph - 30) / 70, 0, 1);
-    const upward = 1.5 + 16.5 * t;
-    const outward = 1.5 + 3.5 * t;
-    const side = Number(input.strafe) < -0.15 ? -1 : 1;
-    const right = { x: Math.cos(angle), z: Math.sin(angle) };
-    return {
-      x: right.x * side * outward,
-      y: upward,
-      z: right.z * side * outward,
-    };
-  }
 
   function ejectFromVehicle(playerId, input, now) {
     const vehicle = typeof vehicles.vehicleForDriver === "function"
@@ -70,10 +93,23 @@ export async function setup(ctx) {
     }, now);
     if (!activated) return false;
 
-    // Give every ragdoll part the same velocity delta using real Rapier impulses.
-    // Each part receives impulse = its real mass * delta-v, so the joints do not
-    // have to catch up to a pelvis/chest that was kicked much harder than the limbs.
-    return Boolean(ragdollStability.applyVelocityDeltaToLatest(velocityDelta, 16));
+    // Every body receives impulse = its own real Rapier mass * desired delta-v.
+    // This creates a strong coherent launch without asking the joints to catch up
+    // to one pelvis/chest body that was kicked much harder than the limbs.
+    const applied = Boolean(ragdollStability.applyVelocityDeltaToLatest(velocityDelta, 16));
+    if (applied) {
+      ctx.events.emit("ragdoll:vehicle-eject", {
+        entityId: playerId,
+        vehicleId: vehicle.id ?? null,
+        vehicleKind: vehicle.kind ?? null,
+        speed,
+        speedKph: speed * 3.6,
+        upwardDelta: velocityDelta.y,
+        outwardDelta: Math.hypot(velocityDelta.x, velocityDelta.z),
+        now,
+      });
+    }
+    return applied;
   }
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
@@ -126,4 +162,6 @@ export async function setup(ctx) {
       turn: clamp(input.turn, -1, 1),
       sprint: Boolean(input.sprint),
     }, now);
+
+  ragdoll.ejectionProfile = EJECTION_PROFILE;
 }
