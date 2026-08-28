@@ -1,9 +1,10 @@
 export const manifest = {
   id: "battle-royale-ragdoll-integration",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "match-api",
     "battle-royale-ragdoll",
+    "battle-royale-ragdoll-stability",
     "battle-royale-vehicle",
     "movement",
     "battle-royale",
@@ -18,6 +19,7 @@ function clamp(value, minimum, maximum) {
 export async function setup(ctx) {
   const matchApi = ctx.services.get("match-api");
   const ragdoll = ctx.services.get("ragdoll");
+  const ragdollStability = ctx.services.get("ragdoll-stability");
   const vehicles = ctx.services.get("vehicles");
   const movement = ctx.services.get("movement");
   const battleRoyale = ctx.services.get("battle-royale");
@@ -28,6 +30,20 @@ export async function setup(ctx) {
   const originalSnapshotFor = matchApi.snapshotFor.bind(matchApi);
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
 
+  function ejectionVelocityDelta(speed, angle, input) {
+    const speedKph = Math.max(0, Number(speed) || 0) * 3.6;
+    const t = clamp((speedKph - 30) / 70, 0, 1);
+    const upward = 1.5 + 16.5 * t;
+    const outward = 1.5 + 3.5 * t;
+    const side = Number(input.strafe) < -0.15 ? -1 : 1;
+    const right = { x: Math.cos(angle), z: Math.sin(angle) };
+    return {
+      x: right.x * side * outward,
+      y: upward,
+      z: right.z * side * outward,
+    };
+  }
+
   function ejectFromVehicle(playerId, input, now) {
     const vehicle = vehicles.stateFor();
     if (!vehicle || vehicle.driverId !== playerId) return false;
@@ -36,14 +52,11 @@ export async function setup(ctx) {
 
     const linvel = vehicle.linvel ?? { x: 0, y: 0, z: 0 };
     const angle = Number(vehicle.angle) || 0;
-    const side = Number(input.strafe) < -0.15 ? -1 : 1;
-    const right = { x: Math.cos(angle), z: Math.sin(angle) };
-    const outward = 1.45 + Math.min(1.2, speed * 0.045);
-    const upward = 1.1 + Math.min(1.1, speed * 0.04);
+    const velocityDelta = ejectionVelocityDelta(speed, angle, input);
 
     if (!vehicles.exit(playerId, now, "jump-out")) return false;
     const transform = ctx.components.get(playerId, "Transform");
-    return ragdoll.activate(playerId, {
+    const activated = ragdoll.activate(playerId, {
       reason: "vehicle-eject",
       position: transform ? { x: transform.x, y: transform.y + 0.12, z: transform.z } : undefined,
       angle,
@@ -52,12 +65,13 @@ export async function setup(ctx) {
         y: Number(linvel.y) || 0,
         z: Number(linvel.z) || 0,
       },
-      impulse: {
-        x: right.x * side * outward,
-        y: upward,
-        z: right.z * side * outward,
-      },
     }, now);
+    if (!activated) return false;
+
+    // Give every ragdoll part the same velocity delta using real Rapier impulses.
+    // Each part receives impulse = its real mass * delta-v, so the joints do not
+    // have to catch up to a pelvis/chest that was kicked much harder than the limbs.
+    return Boolean(ragdollStability.applyVelocityDeltaToLatest(velocityDelta, 16));
   }
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
