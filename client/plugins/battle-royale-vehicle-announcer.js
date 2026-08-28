@@ -98,11 +98,11 @@ export async function setup(ctx) {
     }
     if (packet.event === "vehicle:nitro-stop" && payload.driverId === network.playerId) {
       const seconds = Math.max(1, Math.round(Number(payload.cooldownSeconds) || 10));
-      announce(`Нитро перезаряжается. ${seconds} секунд`, false);
+      announce(`Нитро перезаряжается. ${seconds} секунд`, true);
       return;
     }
     if (packet.event === "vehicle:nitro-ready" && payload.driverId === network.playerId) {
-      announce("Нитро готово", false);
+      announce("Нитро готово", true);
       return;
     }
     if (packet.event === "vehicle:impact" && payload.driverId === network.playerId) {
