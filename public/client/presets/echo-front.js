@@ -1,6 +1,7 @@
 import * as input from "../plugins/input.js";
 import * as network from "../plugins/network.js";
 import * as parachuteInput from "../plugins/parachute-input.js";
+import * as parkourInput from "../plugins/parkour-input.js";
 import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
@@ -31,6 +32,7 @@ export const echoFrontClientPreset = [
   input,
   network,
   parachuteInput,
+  parkourInput,
   iphoneGestures,
   journal,
   smoothing,
