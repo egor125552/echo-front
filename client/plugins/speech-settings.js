@@ -5,7 +5,9 @@ export const manifest = {
 
 const RATE_KEY = "echo-front.speech-rate";
 const ENABLED_KEY = "echo-front.speech-enabled";
-const INTERRUPT_RESTART_DELAY_MS = 28;
+const INTERRUPT_RESTART_DELAY_MS = 80;
+const START_WATCHDOG_MS = 350;
+const MAX_START_RETRIES = 1;
 
 function clampRate(value) {
   const number = Number(value);
@@ -24,6 +26,8 @@ export async function setup(ctx) {
   let enabled = localStorage.getItem(ENABLED_KEY) !== "false";
   let generation = 0;
   let pendingRestart = null;
+  let startWatchdog = null;
+  let activeUtterance = null;
 
   function syncUi() {
     if (rateInput) rateInput.value = String(rate);
@@ -43,9 +47,21 @@ export async function setup(ctx) {
     pendingRestart = null;
   }
 
+  function clearStartWatchdog() {
+    if (startWatchdog == null) return;
+    clearTimeout(startWatchdog);
+    startWatchdog = null;
+  }
+
+  function clearTimers() {
+    clearPendingRestart();
+    clearStartWatchdog();
+  }
+
   function stop() {
     generation += 1;
-    clearPendingRestart();
+    clearTimers();
+    activeUtterance = null;
     synth?.cancel?.();
   }
 
@@ -68,29 +84,74 @@ export async function setup(ctx) {
     }
   }
 
-  function say(text, { interrupt = false, rateOverride = null } = {}) {
-    if (!enabled || !synth || !text) return null;
+  function busy() {
+    return Boolean(activeUtterance || pendingRestart != null || synth?.speaking || synth?.pending);
+  }
+
+  function startRequest(text, rateOverride, requestGeneration, retry = 0) {
+    if (!enabled || !synth || requestGeneration !== generation) return null;
+
     const utterance = makeUtterance(text, rateOverride);
+    let started = false;
+    activeUtterance = utterance;
 
-    if (!interrupt) {
-      speakNow(utterance);
-      return utterance;
-    }
+    utterance.onstart = () => {
+      if (requestGeneration !== generation) return;
+      started = true;
+      clearStartWatchdog();
+    };
 
-    const requestGeneration = ++generation;
-    clearPendingRestart();
-    synth.cancel();
-    synth.resume?.();
+    const finish = () => {
+      if (requestGeneration !== generation) return;
+      clearStartWatchdog();
+      if (activeUtterance === utterance) activeUtterance = null;
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
 
-    // Safari can silently ignore speak() when it follows cancel() in the same task.
-    // Restart on the next short timer and discard stale interrupted requests.
-    pendingRestart = setTimeout(() => {
-      pendingRestart = null;
-      if (!enabled || requestGeneration !== generation) return;
-      speakNow(utterance);
-    }, INTERRUPT_RESTART_DELAY_MS);
+    speakNow(utterance);
+
+    startWatchdog = setTimeout(() => {
+      startWatchdog = null;
+      if (!enabled || requestGeneration !== generation || started) return;
+      if (activeUtterance === utterance) activeUtterance = null;
+      synth.cancel();
+      synth.resume?.();
+      if (retry < MAX_START_RETRIES) {
+        pendingRestart = setTimeout(() => {
+          pendingRestart = null;
+          startRequest(text, rateOverride, requestGeneration, retry + 1);
+        }, INTERRUPT_RESTART_DELAY_MS);
+      }
+    }, START_WATCHDOG_MS);
 
     return utterance;
+  }
+
+  function say(text, { interrupt = false, rateOverride = null } = {}) {
+    if (!enabled || !synth || !text) return null;
+
+    // Never build a browser speech queue. Secondary announcements are disposable:
+    // if speech is already busy, skip them instead of enqueueing them.
+    if (!interrupt) {
+      if (busy()) return null;
+      const requestGeneration = ++generation;
+      return startRequest(text, rateOverride, requestGeneration);
+    }
+
+    // Important announcements are latest-wins. Safari may ignore speak() immediately
+    // after cancel(), so restart after a short delay and retry once if onstart never fires.
+    const requestGeneration = ++generation;
+    clearTimers();
+    activeUtterance = null;
+    synth.cancel();
+    synth.resume?.();
+    pendingRestart = setTimeout(() => {
+      pendingRestart = null;
+      startRequest(text, rateOverride, requestGeneration);
+    }, INTERRUPT_RESTART_DELAY_MS);
+
+    return null;
   }
 
   rateInput?.addEventListener("input", () => {
