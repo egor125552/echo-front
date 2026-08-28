@@ -3,6 +3,7 @@ import * as physics from "../plugins/rapier-physics/server.js";
 import * as ragdollStability from "../plugins/battle-royale-ragdoll-stability/server.js";
 import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
+import * as worldExpansion from "../plugins/battle-royale-world-expansion/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
 import * as cratePhysics from "../plugins/battle-royale-crate-physics/server.js";
 import * as movement from "../plugins/movement/server.js";
@@ -35,6 +36,7 @@ import * as warehouseCombatFlow from "../plugins/battle-royale-bot-warehouse-com
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
+import * as vehicleFleet from "../plugins/battle-royale-vehicle-fleet/server.js";
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
@@ -51,6 +53,7 @@ export const battleRoyalePreset = [
   ragdollStability,
   liveCharacterQueries,
   map,
+  worldExpansion,
   groundNavigation,
   cratePhysics,
   movement,
@@ -83,6 +86,7 @@ export const battleRoyalePreset = [
   botObserver,
   botFill,
   vehicle,
+  vehicleFleet,
   ragdoll,
   matchApi,
   vehicleIntegration,
