@@ -12,77 +12,11 @@ const CRASH_RADIUS = 120;
 const TRUCK_ENGINE_URL = "/audio/vehicles/ts3/ts3_truck_engine.mp3";
 const SPORT_ENGINE_URL = "/audio/vehicles/ts3/ts3_sport_engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
-const ENGINE_LOOP_SECONDS = 1.6148;
-const ENGINE_CROSSFADE_SECONDS = 0.14;
-const SPORT_ENGINE_CROSSFADE_SECONDS = 0.075;
+const TRUCK_LOOP_START_SECONDS = 0.249818594;
+const TRUCK_LOOP_END_SECONDS = 1.827619048;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
-}
-
-function createSeamlessEngineLoop(context, sourceBuffer) {
-  const loopLength = Math.min(
-    sourceBuffer.length,
-    Math.floor(sourceBuffer.sampleRate * ENGINE_LOOP_SECONDS),
-  );
-  const availableOverlap = sourceBuffer.length - loopLength;
-  const crossfadeLength = Math.min(
-    Math.floor(sourceBuffer.sampleRate * ENGINE_CROSSFADE_SECONDS),
-    Math.floor(loopLength / 3),
-    availableOverlap,
-  );
-
-  if (loopLength < 2 || crossfadeLength < 2) return sourceBuffer;
-
-  const loopBuffer = context.createBuffer(
-    sourceBuffer.numberOfChannels,
-    loopLength,
-    sourceBuffer.sampleRate,
-  );
-
-  for (let channel = 0; channel < sourceBuffer.numberOfChannels; channel += 1) {
-    const input = sourceBuffer.getChannelData(channel);
-    const output = loopBuffer.getChannelData(channel);
-    output.set(input.subarray(0, loopLength));
-
-    for (let i = 0; i < crossfadeLength; i += 1) {
-      const mix = i / (crossfadeLength - 1);
-      output[i] = input[loopLength + i] * (1 - mix) + input[i] * mix;
-    }
-  }
-
-  return loopBuffer;
-}
-
-function createCyclicEngineLoop(context, sourceBuffer, crossfadeSeconds) {
-  const crossfadeLength = Math.min(
-    Math.floor(sourceBuffer.sampleRate * crossfadeSeconds),
-    Math.floor(sourceBuffer.length / 3),
-  );
-  const loopLength = sourceBuffer.length - crossfadeLength;
-  if (loopLength < 2 || crossfadeLength < 2) return sourceBuffer;
-
-  const loopBuffer = context.createBuffer(
-    sourceBuffer.numberOfChannels,
-    loopLength,
-    sourceBuffer.sampleRate,
-  );
-
-  for (let channel = 0; channel < sourceBuffer.numberOfChannels; channel += 1) {
-    const input = sourceBuffer.getChannelData(channel);
-    const output = loopBuffer.getChannelData(channel);
-    output.set(input.subarray(0, loopLength));
-
-    // Put the original tail at the beginning and blend it into the original head.
-    // The loop boundary is then between adjacent samples from the original recording:
-    // input[loopLength - 1] -> input[loopLength], instead of end-of-file -> start-of-file.
-    for (let i = 0; i < crossfadeLength; i += 1) {
-      const mix = i / (crossfadeLength - 1);
-      output[i] = input[loopLength + i] * (1 - mix) + input[i] * mix;
-    }
-  }
-
-  return loopBuffer;
 }
 
 function createCrashBuffer(context) {
@@ -104,17 +38,11 @@ function createCrashBuffer(context) {
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
-  const [rawTruckEngineBuffer, rawSportEngineBuffer, brakeBuffer] = await Promise.all([
+  const [truckEngineBuffer, sportEngineBuffer, brakeBuffer] = await Promise.all([
     audio.load(TRUCK_ENGINE_URL),
     audio.load(SPORT_ENGINE_URL),
     audio.load(BRAKE_URL),
   ]);
-  const truckEngineBuffer = createSeamlessEngineLoop(audio.context, rawTruckEngineBuffer);
-  const sportEngineBuffer = createCyclicEngineLoop(
-    audio.context,
-    rawSportEngineBuffer,
-    SPORT_ENGINE_CROSSFADE_SECONDS,
-  );
   const crashBuffer = createCrashBuffer(audio.context);
   let engine = null;
   let currentVehicleId = null;
@@ -217,6 +145,10 @@ export async function setup(ctx) {
         channel: ENGINE_CHANNEL,
         replace: true,
       });
+      if (profile === "truck" && engine?.source && truckEngineBuffer.duration > TRUCK_LOOP_END_SECONDS) {
+        engine.source.loopStart = TRUCK_LOOP_START_SECONDS;
+        engine.source.loopEnd = TRUCK_LOOP_END_SECONDS;
+      }
       currentVehicleId = vehicle.id;
       currentProfile = profile;
     }
