@@ -22,6 +22,10 @@ async function start(mode) {
   gamePanel.hidden = false;
 
   try {
+    // Prime browser TTS while this call still belongs to the user's click/tap.
+    // This matters on iOS/WebKit, where a later programmatic first utterance may
+    // otherwise be silently suppressed even though speechSynthesis exists.
+    host.services.get("speech")?.unlock?.("game-start");
     await host.services.get("audio").resume();
     host.services.get("network").connect("public", { mode });
     host.services.get("sound-pack").warmEssential().catch((error) => console.warn("Audio preload", error));
