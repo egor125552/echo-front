@@ -1,40 +1,34 @@
-const START = 2000014400000;
+const START = 2000014500000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 144,
+  id: 145,
   mode: "battle-royale",
-  room: "engine-lab-ragdoll-vehicle-hit-144",
+  room: "engine-lab-ragdoll-building-impact-145",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: {
     commands: [
       { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
-      { command: "service.call", args: { service: "ragdoll-tuning", method: "configureReason", arguments: ["vehicle-hit", {
-        linearDamping: 0.02, angularDamping: 0.028, headAngularDamping: 0.045, friction: 0.50,
-        x: 1.8, y: 0.08, z: 1.3, speedMode: "total",
-        scaleStartKph: 20, scaleSpanKph: 100, scaleMaxExtra: 0.9
+      { command: "service.call", args: { service: "ragdoll-tuning", method: "configureReason", arguments: ["building-impact", {
+        linearDamping: 0.024, angularDamping: 0.03, headAngularDamping: 0.045, friction: 0.50,
+        x: 1.9, y: 0.08, z: 1.35, speedMode: "total",
+        scaleStartKph: 12, scaleSpanKph: 45, scaleMaxExtra: 0.70
       }] } },
       { command: "entity.spawn", args: { spec: {
-        id: "driver-hit-144", kind: "human", name: "Hit Driver", bot: false,
-        team: 14401, health: 400, weapons: [], position: { x: 432.4, y: 1.1, z: -650, angle: 0 }
+        id: "building-hit-145", kind: "human", name: "Building Hit", bot: false,
+        team: 14501, health: 400, weapons: [], position: { x: 41.2, y: 0, z: 6, angle: 1.5707963267948966 }
       } } },
-      { command: "entity.spawn", args: { spec: {
-        id: "victim-hit-144", kind: "human", name: "Hit Victim", bot: false,
-        team: 14402, health: 400, weapons: [], position: { x: 430, y: 0, z: -658, angle: 0 }
-      } } },
-      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["driver-hit-144", { x: 432.4, y: 1.1, z: -650, angle: 0 }] } },
-      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["victim-hit-144", { x: 430, y: 0, z: -658, angle: 0 }] } },
+      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["building-hit-145", { x: 41.2, y: 0, z: 6, angle: 1.5707963267948966 }] } },
       { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 20 } },
-      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["driver-hit-144", START + 60, "br-supercar-2"] } },
-      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["driver-hit-144", { forward: 1 }] } },
-      { command: "game.step", args: { dt: 0.02, steps: 80, now: START + 80 } },
-      { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-supercar-2"] } },
-      { command: "service.call", args: { service: "fleet-pedestrian-ragdoll", method: "summary", arguments: [] } },
-      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["victim-hit-144"] } },
-      { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: ["victim-hit-144"] } },
-      { command: "service.call", args: { service: "ragdoll-stability", method: "assertStable", arguments: [{ maxSpread: 8, maxSpeed: 100 }] } }
+      { command: "service.call", args: { service: "movement", method: "setInput", arguments: ["building-hit-145", { forward: 1, sprint: true }] } },
+      { command: "service.call", args: { service: "jump", method: "request", arguments: ["building-hit-145"] } },
+      { command: "game.step", args: { dt: 0.02, steps: 45, now: START + 80 } },
+      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["building-hit-145"] } },
+      { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: ["building-hit-145"] } },
+      { command: "service.call", args: { service: "parkour-ragdoll", method: "summary", arguments: [] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "assertStable", arguments: [{ maxSpread: 8, maxSpeed: 80 }] } }
     ]
   },
-  requestedAt: "2026-08-28T20:58:00Z"
+  requestedAt: "2026-08-28T21:01:00Z"
 });
