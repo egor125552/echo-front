@@ -3,7 +3,7 @@ export const ENTITY_INTEREST_RADIUS = 125;
 
 export const manifest = {
   id: "match-api",
-  version: "2.3.0",
+  version: "2.4.0",
   requires: [
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat",
@@ -345,6 +345,7 @@ export async function setup(ctx) {
       if (globalEvents.has(packet.event)) return true;
       if (packet.event === "feedback:sound") return payload.recipientId === playerId;
       if (packet.event === "movement:blocked") return payload.recipientId === playerId;
+      if (packet.event.startsWith("ragdoll:")) return payload.entityId === playerId;
       if (packet.event === "battle-royale:zone-damage") return payload.entityId === playerId;
       if (packet.event.startsWith("armor:")) return payload.entityId === playerId;
       if (packet.event === "weapon:selected" || packet.event === "weapon:unlocked") return payload.entityId === playerId;
