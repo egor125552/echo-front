@@ -1,47 +1,39 @@
-const START = 2000010400000;
-const STEP_SECONDS = 0.05;
-const STEP_COUNT = 24;
+const START = 2000011200000;
+const DT = 0.1;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 104,
+  id: 112,
   mode: "battle-royale",
-  room: "engine-lab-real-landing-jeep-104",
+  room: "engine-lab-catapult-ragdoll-112",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: {
     commands: [
       { command: "entity.spawn", args: { spec: {
-        id: "landing-driver-104",
+        id: "catapult-driver-112",
         kind: "human",
-        name: "Real Landing Driver",
+        name: "Catapult Driver",
         bot: false,
-        team: 100401,
+        team: 11201,
         health: 200,
         weapons: [],
-        position: { x: 320, y: 0, z: 360, angle: 0 }
+        position: { x: -90, y: 0, z: 520, angle: 0 }
       } } },
-      { command: "service.call", args: { service: "parachute", method: "launch", arguments: [
-        "landing-driver-104", { altitude: 8, x: 320, z: 360, angle: 0 }, START + 25
-      ] } },
-      ...Array.from({ length: STEP_COUNT }, (_, index) => ({
+      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["catapult-driver-112", START + 10, "br-supercar-1"] } },
+      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["catapult-driver-112", { forward: 1, strafe: 0, sprint: false, fireHeld: true }] } },
+      ...Array.from({ length: 20 }, (_, index) => ({
         command: "service.call",
-        args: {
-          service: "match-api",
-          method: "step",
-          arguments: [STEP_SECONDS, START + 50 + index * 50],
-        },
+        args: { service: "vehicles", method: "tickPhysics", arguments: [DT, START + 20 + index * 100] },
       })),
-      { command: "service.call", args: { service: "parachute", method: "stateFor", arguments: ["landing-driver-104"] } },
-      { command: "service.call", args: { service: "dropzone-vehicle", method: "assignedFor", arguments: ["landing-driver-104"] } },
-      { command: "service.call", args: { service: "dropzone-vehicle", method: "assertNear", arguments: [
-        { x: 320, y: 0, z: 360 }, 18, "landing-driver-104"
-      ] } },
-      { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: [
-        "landing-driver-104", START + 1400
-      ] } },
-      { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } }
+      { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-supercar-1"] } },
+      { command: "service.call", args: { service: "ragdoll", method: "ejectFromVehicle", arguments: ["catapult-driver-112", { strafe: 1 }, START + 2050] } },
+      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["catapult-driver-112"] } },
+      { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: ["catapult-driver-112"] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "summary", arguments: [] } },
+      { command: "service.call", args: { service: "match-api", method: "step", arguments: [0.05, START + 2100] } },
+      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["catapult-driver-112"] } }
     ]
   },
-  requestedAt: "2026-08-28T11:45:00Z"
+  requestedAt: "2026-08-28T12:55:00Z"
 });
