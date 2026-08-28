@@ -1,8 +1,8 @@
 export const manifest = {
   id: "battle-royale-ragdoll-self-collision",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["battle-royale-ragdoll-stability"],
-  capabilities: ["services.consume"],
+  capabilities: ["services.consume", "events.emit"],
 };
 
 export async function setup(ctx) {
