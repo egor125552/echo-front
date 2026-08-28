@@ -14,6 +14,7 @@ const SPORT_ENGINE_URL = "/audio/vehicles/ts3/ts3_sport_engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
 const ENGINE_LOOP_SECONDS = 1.6148;
 const ENGINE_CROSSFADE_SECONDS = 0.14;
+const SPORT_ENGINE_CROSSFADE_SECONDS = 0.075;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -53,6 +54,37 @@ function createSeamlessEngineLoop(context, sourceBuffer) {
   return loopBuffer;
 }
 
+function createCyclicEngineLoop(context, sourceBuffer, crossfadeSeconds) {
+  const crossfadeLength = Math.min(
+    Math.floor(sourceBuffer.sampleRate * crossfadeSeconds),
+    Math.floor(sourceBuffer.length / 3),
+  );
+  const loopLength = sourceBuffer.length - crossfadeLength;
+  if (loopLength < 2 || crossfadeLength < 2) return sourceBuffer;
+
+  const loopBuffer = context.createBuffer(
+    sourceBuffer.numberOfChannels,
+    loopLength,
+    sourceBuffer.sampleRate,
+  );
+
+  for (let channel = 0; channel < sourceBuffer.numberOfChannels; channel += 1) {
+    const input = sourceBuffer.getChannelData(channel);
+    const output = loopBuffer.getChannelData(channel);
+    output.set(input.subarray(0, loopLength));
+
+    // Put the original tail at the beginning and blend it into the original head.
+    // The loop boundary is then between adjacent samples from the original recording:
+    // input[loopLength - 1] -> input[loopLength], instead of end-of-file -> start-of-file.
+    for (let i = 0; i < crossfadeLength; i += 1) {
+      const mix = i / (crossfadeLength - 1);
+      output[i] = input[loopLength + i] * (1 - mix) + input[i] * mix;
+    }
+  }
+
+  return loopBuffer;
+}
+
 function createCrashBuffer(context) {
   const duration = 0.55;
   const length = Math.max(1, Math.floor(context.sampleRate * duration));
@@ -72,12 +104,17 @@ function createCrashBuffer(context) {
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
-  const [rawTruckEngineBuffer, sportEngineBuffer, brakeBuffer] = await Promise.all([
+  const [rawTruckEngineBuffer, rawSportEngineBuffer, brakeBuffer] = await Promise.all([
     audio.load(TRUCK_ENGINE_URL),
     audio.load(SPORT_ENGINE_URL),
     audio.load(BRAKE_URL),
   ]);
   const truckEngineBuffer = createSeamlessEngineLoop(audio.context, rawTruckEngineBuffer);
+  const sportEngineBuffer = createCyclicEngineLoop(
+    audio.context,
+    rawSportEngineBuffer,
+    SPORT_ENGINE_CROSSFADE_SECONDS,
+  );
   const crashBuffer = createCrashBuffer(audio.context);
   let engine = null;
   let currentVehicleId = null;
