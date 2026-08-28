@@ -38,12 +38,14 @@ import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
 import * as vehicleFleet from "../plugins/battle-royale-vehicle-fleet/server.js";
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
+import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/server.js";
 import * as parachuteDynamics from "../plugins/battle-royale-parachute-dynamics/server.js";
 import * as parachuteRapierFlight from "../plugins/battle-royale-parachute-rapier-flight/server.js";
+import * as worldSafety from "../plugins/battle-royale-world-safety/server.js";
 import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js";
 import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integration/server.js";
 import * as navigation from "../plugins/battle-royale-navigation/index.js";
@@ -90,12 +92,14 @@ export const battleRoyalePreset = [
   vehicle,
   vehicleFleet,
   ragdoll,
+  ragdollTuning,
   matchApi,
   vehicleIntegration,
   parachuteIntegration,
   parachuteCanopy,
   parachuteDynamics,
   parachuteRapierFlight,
+  worldSafety,
   botParachute,
   ragdollIntegration,
   navigation,
