@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-integration",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "match-api",
     "battle-royale-ragdoll",
@@ -45,7 +45,9 @@ export async function setup(ctx) {
   }
 
   function ejectFromVehicle(playerId, input, now) {
-    const vehicle = vehicles.stateFor();
+    const vehicle = typeof vehicles.vehicleForDriver === "function"
+      ? vehicles.vehicleForDriver(playerId)
+      : vehicles.stateFor();
     if (!vehicle || vehicle.driverId !== playerId) return false;
     const speed = Math.max(0, Number(vehicle.speed) || 0);
     if (speed < Number(ragdoll.constants?.vehicleEjectSpeed ?? 3.5)) return false;
