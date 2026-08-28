@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-fleet-pedestrian-ragdoll",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "battle-royale-vehicle-fleet",
     "battle-royale-ragdoll",
@@ -27,7 +27,26 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const world = physics.world;
   const primaryId = vehicles.vehicleId;
+  const characterColliderOwners = new Map();
   let detectedHits = 0;
+  let contactCandidates = 0;
+
+  // Rapier itself intentionally exposes colliders without gameplay entity ids.
+  // Track ownership at the same creation boundary used by the core ragdoll plugin,
+  // so every fleet chassis can resolve a real contact back to the pedestrian.
+  const originalCreateCharacter = physics.createCharacter.bind(physics);
+  physics.createCharacter = (entityId, position) => {
+    const entry = originalCreateCharacter(entityId, position);
+    if (entry?.collider) characterColliderOwners.set(entry.collider.handle, entityId);
+    return entry;
+  };
+  const originalRemoveCharacter = physics.removeCharacter.bind(physics);
+  physics.removeCharacter = (entityId) => {
+    for (const [handle, owner] of characterColliderOwners) {
+      if (owner === entityId) characterColliderOwners.delete(handle);
+    }
+    return originalRemoveCharacter(entityId);
+  };
 
   function detectFleetPedestrianHits(now) {
     const fleet = typeof vehicles.snapshot === "function" ? vehicles.snapshot() : [];
@@ -42,7 +61,8 @@ export async function setup(ctx) {
 
       const hitIds = new Set();
       world.contactPairsWith(chassisCollider, (other) => {
-        const entityId = physics.entityIdForCollider?.(other);
+        contactCandidates += 1;
+        const entityId = characterColliderOwners.get(other.handle);
         if (!entityId || entityId === vehicle.driverId || ragdoll.isActive(entityId)) return;
         const entity = entities.get(entityId);
         if (!entity?.alive || entity.bot) return;
@@ -92,7 +112,11 @@ export async function setup(ctx) {
 
   ctx.services.provide("fleet-pedestrian-ragdoll", {
     summary() {
-      return { detectedHits };
+      return {
+        detectedHits,
+        contactCandidates,
+        trackedCharacters: characterColliderOwners.size,
+      };
     },
   });
 }
