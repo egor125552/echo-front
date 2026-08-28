@@ -32,7 +32,11 @@ export function describePluginError(error) {
 
 function requireCapability(manifest, capability) {
   if (!(manifest.capabilities ?? []).includes(capability)) {
-    throw new Error(`Plugin ${manifest.id} lacks capability ${capability}`);
+    throw new PluginExecutionError(
+      manifest.id,
+      "capability-check",
+      new Error(`missing declared capability ${capability}`),
+    );
   }
 }
 
@@ -87,25 +91,6 @@ function wrapMaybePromise(pluginId, phase, invoke) {
   }
 }
 
-function wrapProvidedService(pluginId, serviceName, value) {
-  if (!value || (typeof value !== "object" && typeof value !== "function")) return value;
-  const wrappers = new Map();
-  return new Proxy(value, {
-    get(target, property, receiver) {
-      const member = Reflect.get(target, property, receiver);
-      if (typeof member !== "function") return member;
-      if (wrappers.has(property)) return wrappers.get(property);
-      const wrapped = (...args) => wrapMaybePromise(
-        pluginId,
-        `service:${serviceName}.${String(property)}`,
-        () => Reflect.apply(member, target, args),
-      );
-      wrappers.set(property, wrapped);
-      return wrapped;
-    },
-  });
-}
-
 export class PluginHost {
   constructor({ plugins = [], config = {} } = {}) {
     this.plugins = sortPlugins(plugins);
@@ -150,7 +135,11 @@ export class PluginHost {
       services: {
         provide: (name, value) => {
           requireCapability(manifest, "services.provide");
-          return this.services.provide(name, wrapProvidedService(manifest.id, name, value), manifest.id);
+          // Keep the exact service object. Several gameplay plugins use object
+          // identity and mutable method replacement for integration. Proxying
+          // services here changed game behavior, so attribution stays on plugin
+          // lifecycle/event boundaries instead of altering runtime semantics.
+          return this.services.provide(name, value, manifest.id);
         },
         get: (name) => {
           requireCapability(manifest, "services.consume");
