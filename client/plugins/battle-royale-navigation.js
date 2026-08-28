@@ -1,10 +1,11 @@
 export const manifest = {
   id: "battle-royale-navigation-client",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "keyboard-input",
     "cloudflare-session",
     "spatial-audio-web",
+    "speech-settings",
   ],
 };
 
@@ -14,6 +15,7 @@ const PING_ROLLOFF = 0.08;
 const PING_MIN_INTERVAL_MS = 135;
 const PING_MAX_INTERVAL_MS = 820;
 const PING_DISTANCE_FOR_SLOWEST = 24;
+const TERMINAL_EVENT_GRACE_MS = 750;
 
 function createPingBuffer(context) {
   const duration = 0.052;
@@ -46,10 +48,16 @@ function pingInterval(distance) {
   );
 }
 
+function roundedMeters(value) {
+  return Math.max(0, Math.round(Number(value) || 0));
+}
+
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const network = ctx.services.get("network");
   const audio = ctx.services.get("audio");
+  const speech = ctx.services.get("speech");
+  const live = document.querySelector("#announcer");
   const originalSample = input.sample.bind(input);
   const pingBuffer = createPingBuffer(audio.context);
 
@@ -59,6 +67,19 @@ export async function setup(ctx) {
   let latestSelf = null;
   let connected = Boolean(network.connected);
   let pingTimer = null;
+  let lastSelectedId = null;
+  let lastActiveId = null;
+  let terminalEventAt = -Infinity;
+
+  function announce(text, { interrupt = true } = {}) {
+    if (!text) return;
+    if (live) {
+      live.textContent = "";
+      requestAnimationFrame(() => { live.textContent = text; });
+    }
+    // speech-settings is deliberately latest-wins and never builds a TTS queue.
+    speech.say(text, { interrupt });
+  }
 
   input.sample = () => {
     const sampled = originalSample();
@@ -134,6 +155,17 @@ export async function setup(ctx) {
     schedulePing(pingInterval(distance));
   }
 
+  function resetNavigationState() {
+    navigationNextPressed = false;
+    navigationTogglePressed = false;
+    latestNavigation = null;
+    latestSelf = null;
+    lastSelectedId = null;
+    lastActiveId = null;
+    terminalEventAt = -Infinity;
+    clearPingTimer();
+  }
+
   ctx.events.on("network:connected", () => {
     connected = true;
     schedulePing(0);
@@ -144,23 +176,72 @@ export async function setup(ctx) {
   });
   ctx.events.on("network:disconnected", () => {
     connected = false;
-    navigationNextPressed = false;
-    navigationTogglePressed = false;
-    latestNavigation = null;
-    latestSelf = null;
-    clearPingTimer();
+    resetNavigationState();
   });
 
   ctx.events.on("game:snapshot", (snapshot) => {
     if (snapshot?.mode !== "battle-royale") {
-      latestNavigation = null;
-      latestSelf = null;
+      resetNavigationState();
       return;
     }
-    const wasActive = Boolean(latestNavigation?.active);
-    latestNavigation = snapshot.navigation ?? null;
+
+    const previousActive = Boolean(latestNavigation?.active);
+    const nextNavigation = snapshot.navigation ?? null;
+    const selected = nextNavigation?.selected ?? null;
+    const activeTarget = nextNavigation?.target ?? null;
+    const selectedId = selected?.id ?? null;
+    const activeId = nextNavigation?.active ? activeTarget?.id ?? null : null;
+
+    latestNavigation = nextNavigation;
     latestSelf = snapshot?.entities?.find((entity) => entity.id === network.playerId) ?? null;
-    if (!wasActive && latestNavigation?.active) schedulePing(0);
+
+    // Selection speech follows the same snapshot that drives the audible beacon.
+    // If the beacon state arrived, this announcement path necessarily arrived too.
+    if (selectedId && selectedId !== lastSelectedId) {
+      announce(`${selected.name || "Цель"}. ${roundedMeters(selected.distance)} метров. Enter — выбрать.`);
+    }
+
+    if (activeId && activeId !== lastActiveId) {
+      const distance = Number.isFinite(Number(nextNavigation?.remainingDistance))
+        ? nextNavigation.remainingDistance
+        : activeTarget?.distance;
+      announce(`Маршрут: ${activeTarget?.name || "цель"}. ${roundedMeters(distance)} метров.`);
+      schedulePing(0);
+    } else if (previousActive && !nextNavigation?.active) {
+      if (performance.now() - terminalEventAt > TERMINAL_EVENT_GRACE_MS) {
+        announce("Навигация выключена.");
+      }
+    }
+
+    lastSelectedId = selectedId;
+    lastActiveId = activeId;
+  });
+
+  ctx.events.on("game:event", (packet) => {
+    const payload = packet?.payload ?? {};
+    if (payload.entityId !== network.playerId) return;
+
+    // Selection/start are intentionally snapshot-driven above. These terminal
+    // events keep the more specific messages while retaining snapshot fallback.
+    if (packet.event === "navigation:stopped") {
+      terminalEventAt = performance.now();
+      announce("Навигация выключена.");
+      return;
+    }
+    if (packet.event === "navigation:reached") {
+      terminalEventAt = performance.now();
+      announce(`Цель достигнута: ${payload.targetName || "цель"}.`);
+      return;
+    }
+    if (packet.event === "navigation:unavailable") {
+      terminalEventAt = performance.now();
+      announce("Цель навигации недоступна.");
+      return;
+    }
+    if (packet.event === "vehicle:dropzone-placed") {
+      const name = payload.vehicleName || "Внедорожник";
+      announce(`${name} рядом с местом посадки. ${roundedMeters(payload.distance)} метров.`, { interrupt: false });
+    }
   });
 
   if (connected) schedulePing(PING_MAX_INTERVAL_MS);
