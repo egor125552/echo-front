@@ -40,21 +40,21 @@ const SUPERCAR = Object.freeze({
   chassis: { hx: 1.9, hy: 0.28, hz: 0.86, mass: 1050, ballastMass: 300 },
   friction: 0.82,
   restitution: 0.04,
-  linearDamping: 0.018,
+  linearDamping: 0.012,
   angularDamping: 0.17,
   wheels: {
     frontX: -1.55, rearX: 1.48, y: -0.22, z: 0.92,
     rest: 0.22, radius: 0.36, stiffness: 44, compression: 5.8, relaxation: 6.8,
     travel: 0.24, maxForce: 30_000, frictionSlip: 3.1, sideStiffness: 5.4,
   },
-  engineForce: 4200,
-  reverseForce: 1800,
-  nitroForce: 12_000,
-  nitroBurst: 2.8,
-  nitroCooldown: 9,
-  serviceBrake: 26,
-  handBrake: 62,
-  parkBrake: 12,
+  engineForce: 5600,
+  reverseForce: 2200,
+  nitroForce: 20_000,
+  nitroBurst: 3.2,
+  nitroCooldown: 8,
+  serviceBrake: 36,
+  handBrake: 70,
+  parkBrake: 14,
   maxSteer: 0.38,
   highSpeedSteer: 0.13,
 });
@@ -437,7 +437,6 @@ export async function setup(ctx) {
       && entry.input.throttle > 0.08
       && !entry.input.handbrake
     );
-
     if (entry.nitroActive) {
       if (!requested) {
         stopExtraNitro(entry, now);
@@ -657,7 +656,6 @@ export async function setup(ctx) {
       for (const entry of extras.values()) finishExtraSubstep(entry, now);
       return result;
     };
-
     try {
       originalTickPhysics(safeDt, now);
     } finally {
