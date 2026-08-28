@@ -1,5 +1,8 @@
-export const BUILDING_IMPACT_MIN_SPEED = 4.35;
-export const AIRBORNE_BUILDING_IMPACT_MIN_SPEED = 3.7;
+export const BUILDING_IMPACT_MIN_SPEED = 6.5;
+export const AIRBORNE_BUILDING_IMPACT_MIN_SPEED = 4.35;
+export const AIRBORNE_BUILDING_MIN_TOTAL_SPEED = 5.0;
+export const AIRBORNE_BUILDING_MIN_HEAD_ON = 0.5;
+export const AIRBORNE_BUILDING_DROP_SPEED = 4.4;
 export const VEHICLE_CRASH_MIN_SPEED = 9.5;
 export const VEHICLE_CRASH_MIN_DELTA = 6.5;
 export const PARKOUR_FLIP_SPEED = 8.8;
@@ -7,7 +10,7 @@ export const PARKOUR_TUCK_SPEED = 4.2;
 
 export const manifest = {
   id: "battle-royale-parkour-ragdoll",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "match-api",
     "battle-royale",
@@ -73,6 +76,60 @@ function movementVelocity(transform, input = {}) {
   };
 }
 
+function collisionHeadOn(normal, velocity, lostFraction) {
+  const horizontalSpeed = magnitude2(velocity.x, velocity.z);
+  const normalLength = magnitude2(normal?.x, normal?.z);
+  if (horizontalSpeed < 0.01 || normalLength < 0.01) return clamp(lostFraction, 0, 1);
+  return clamp(Math.abs(
+    ((Number(velocity.x) || 0) * (Number(normal.x) || 0)
+      + (Number(velocity.z) || 0) * (Number(normal.z) || 0))
+      / (horizontalSpeed * normalLength)
+  ), 0, 1);
+}
+
+function adaptiveBuildingImpact({ kind, velocity, lostFraction, normal }) {
+  const horizontalSpeed = magnitude2(velocity.x, velocity.z);
+  const verticalSpeed = Number(velocity.y) || 0;
+  const descendingSpeed = Math.max(0, -verticalSpeed);
+  const totalSpeed = Math.hypot(horizontalSpeed, verticalSpeed);
+  const blockedSpeed = horizontalSpeed * clamp(lostFraction, 0, 1);
+  const headOn = collisionHeadOn(normal, velocity, lostFraction);
+  const impactSpeed = Math.hypot(blockedSpeed, descendingSpeed * 0.75);
+
+  if (kind === "building-stair") {
+    const hardStairLanding = descendingSpeed >= 3.2
+      && totalSpeed >= 4.6
+      && impactSpeed >= 3.8;
+    return {
+      shouldFall: hardStairLanding,
+      impactSpeed,
+      blockedSpeed,
+      totalSpeed,
+      verticalSpeed,
+      descendingSpeed,
+      headOn,
+      mode: hardStairLanding ? "airborne-stair-crash" : "airborne-stair-brace",
+    };
+  }
+
+  const hardLaunch = blockedSpeed >= AIRBORNE_BUILDING_IMPACT_MIN_SPEED
+    && totalSpeed >= AIRBORNE_BUILDING_MIN_TOTAL_SPEED;
+  const hardDrop = descendingSpeed >= AIRBORNE_BUILDING_DROP_SPEED
+    && blockedSpeed >= 2.4;
+  const badAngle = headOn >= AIRBORNE_BUILDING_MIN_HEAD_ON;
+  const shouldFall = badAngle && (hardLaunch || hardDrop);
+  return {
+    shouldFall,
+    impactSpeed,
+    blockedSpeed,
+    totalSpeed,
+    verticalSpeed,
+    descendingSpeed,
+    headOn,
+    mode: shouldFall ? (hardDrop ? "airborne-drop-crash" : "airborne-wall-crash") : "airborne-brace",
+  };
+}
+
 function parkourOmega(transform, input = {}) {
   const axes = basis(transform?.angle);
   const forward = clamp(input.forward, -1, 1);
@@ -120,6 +177,8 @@ export async function setup(ctx) {
   const pendingBuildingImpacts = new Map();
   const pendingVehicleImpacts = new Map();
   let parkourPoses = 0;
+  let buildingContacts = 0;
+  let buildingBraces = 0;
   let buildingFalls = 0;
   let crashEjections = 0;
 
@@ -203,6 +262,7 @@ export async function setup(ctx) {
       spinRate: Math.hypot(omega.x, omega.y, omega.z),
       parts: bodies.length,
       coherentSpin: spun,
+      velocity,
       x: transform.x,
       y: transform.y,
       z: transform.z,
@@ -216,6 +276,11 @@ export async function setup(ctx) {
     const entity = entities.get(entityId);
     const input = ctx.components.get(entityId, "Input") ?? {};
     const jumpState = jump.stateFor(entityId);
+    const velocity = jumpState ? {
+      x: Number(jumpState.velocityX) || 0,
+      y: Number(ctx.components.get(entityId, "Transform")?.verticalVelocity) || 0,
+      z: Number(jumpState.velocityZ) || 0,
+    } : movementVelocity(ctx.components.get(entityId, "Transform"), input);
     const result = originalPhysicsMove(entityId, dx, dz, dy);
 
     if (!battleRoyale.isActive()
@@ -229,22 +294,46 @@ export async function setup(ctx) {
     const collision = result.collisions?.find((entry) => hardBuildingCollision(entry, Boolean(jumpState)));
     if (!collision) return result;
 
+    buildingContacts += 1;
     const along = ((Number(result.x) || 0) * dx + (Number(result.z) || 0) * dz) / attempted;
     const lostDistance = Math.max(0, attempted - Math.max(0, along));
-    const requestedSpeed = input.sprint ? 5.4 : 3.25;
-    const impactSpeed = requestedSpeed * clamp(lostDistance / attempted, 0, 1);
-    const threshold = jumpState ? AIRBORNE_BUILDING_IMPACT_MIN_SPEED : BUILDING_IMPACT_MIN_SPEED;
-    if (impactSpeed < threshold) return result;
+    const lostFraction = clamp(lostDistance / attempted, 0, 1);
+    const kind = String(collision.worldObject?.kind ?? "building-obstacle");
+
+    // Grounded characters brace against walls and doors instead of collapsing.
+    // A normal on-foot sprint tops out below BUILDING_IMPACT_MIN_SPEED anyway, but
+    // the explicit airborne requirement makes the intended behavior unambiguous.
+    if (!jumpState) {
+      if (magnitude2(velocity.x, velocity.z) * lostFraction >= 2.5) buildingBraces += 1;
+      return result;
+    }
+
+    const adaptive = adaptiveBuildingImpact({
+      kind,
+      velocity,
+      lostFraction,
+      normal: collision.normal ?? null,
+    });
+    if (!adaptive.shouldFall) {
+      if (adaptive.blockedSpeed >= 1.5 || adaptive.descendingSpeed >= 2.5) buildingBraces += 1;
+      return result;
+    }
 
     const current = pendingBuildingImpacts.get(entityId);
-    if (!current || impactSpeed > current.impactSpeed) {
+    if (!current || adaptive.impactSpeed > current.impactSpeed) {
       pendingBuildingImpacts.set(entityId, {
         entityId,
-        impactSpeed,
-        kind: String(collision.worldObject?.kind ?? "building-obstacle"),
+        impactSpeed: adaptive.impactSpeed,
+        blockedSpeed: adaptive.blockedSpeed,
+        totalSpeed: adaptive.totalSpeed,
+        verticalSpeed: adaptive.verticalSpeed,
+        headOn: adaptive.headOn,
+        mode: adaptive.mode,
+        velocity,
+        kind,
         objectId: collision.worldObject?.doorId ?? collision.worldObject?.id ?? null,
         normal: collision.normal ?? null,
-        airborne: Boolean(jumpState),
+        airborne: true,
       });
     }
     return result;
@@ -272,33 +361,36 @@ export async function setup(ctx) {
     for (const impact of pendingBuildingImpacts.values()) {
       const entity = entities.get(impact.entityId);
       const transform = ctx.components.get(impact.entityId, "Transform");
-      const input = ctx.components.get(impact.entityId, "Input") ?? {};
       if (!entity?.alive || entity.bot || !transform || ragdoll.isActive(impact.entityId) || vehicles.isDriving(impact.entityId)) continue;
 
-      const velocity = movementVelocity(transform, input);
       const activated = ragdoll.activate(impact.entityId, {
         reason: "building-impact",
         position: { x: transform.x, y: transform.y + 0.04, z: transform.z },
         angle: transform.angle,
-        velocity,
+        velocity: impact.velocity,
       }, now);
       if (!activated) continue;
 
       const normal = impact.normal;
       if (normal) {
         stability.applyVelocityDeltaToLatest({
-          x: (Number(normal.x) || 0) * Math.min(2.4, impact.impactSpeed * 0.28),
-          y: 0.45 + Math.min(0.9, impact.impactSpeed * 0.08),
-          z: (Number(normal.z) || 0) * Math.min(2.4, impact.impactSpeed * 0.28),
+          x: (Number(normal.x) || 0) * Math.min(2.4, impact.impactSpeed * 0.24),
+          y: 0.25 + Math.min(0.75, impact.impactSpeed * 0.07),
+          z: (Number(normal.z) || 0) * Math.min(2.4, impact.impactSpeed * 0.24),
         }, 16);
       }
       buildingFalls += 1;
       ctx.events.emit("ragdoll:building-impact", {
         entityId: impact.entityId,
         impactSpeed: impact.impactSpeed,
+        blockedSpeed: impact.blockedSpeed,
+        totalSpeed: impact.totalSpeed,
+        verticalSpeed: impact.verticalSpeed,
+        headOn: impact.headOn,
+        mode: impact.mode,
         kind: impact.kind,
         objectId: impact.objectId,
-        airborne: impact.airborne,
+        airborne: true,
         x: transform.x,
         y: transform.y,
         z: transform.z,
@@ -378,11 +470,16 @@ export async function setup(ctx) {
     summary() {
       return {
         parkourPoses,
+        buildingContacts,
+        buildingBraces,
         buildingFalls,
         crashEjections,
         thresholds: {
           buildingImpactMinSpeed: BUILDING_IMPACT_MIN_SPEED,
           airborneBuildingImpactMinSpeed: AIRBORNE_BUILDING_IMPACT_MIN_SPEED,
+          airborneBuildingMinTotalSpeed: AIRBORNE_BUILDING_MIN_TOTAL_SPEED,
+          airborneBuildingMinHeadOn: AIRBORNE_BUILDING_MIN_HEAD_ON,
+          airborneBuildingDropSpeed: AIRBORNE_BUILDING_DROP_SPEED,
           vehicleCrashMinSpeed: VEHICLE_CRASH_MIN_SPEED,
           vehicleCrashMinDelta: VEHICLE_CRASH_MIN_DELTA,
           parkourFlipSpeed: PARKOUR_FLIP_SPEED,
