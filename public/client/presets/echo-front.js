@@ -4,6 +4,7 @@ import * as parachuteInput from "../plugins/parachute-input.js";
 import * as parkourInput from "../plugins/parkour-input.js";
 import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as journal from "../plugins/play-journal.js";
+import * as networkDiagnosticsJournal from "../plugins/network-diagnostics-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
@@ -35,6 +36,7 @@ export const echoFrontClientPreset = [
   parkourInput,
   iphoneGestures,
   journal,
+  networkDiagnosticsJournal,
   smoothing,
   speechSettings,
   spatialAudio,
