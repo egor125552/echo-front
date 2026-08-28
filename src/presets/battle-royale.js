@@ -1,6 +1,7 @@
 import * as entities from "../plugins/entities/server.js";
 import * as physics from "../plugins/rapier-physics/server.js";
 import * as ragdollStability from "../plugins/battle-royale-ragdoll-stability/server.js";
+import * as ragdollSelfCollision from "../plugins/battle-royale-ragdoll-self-collision/server.js";
 import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
 import * as worldExpansion from "../plugins/battle-royale-world-expansion/server.js";
@@ -55,6 +56,7 @@ export const battleRoyalePreset = [
   entities,
   physics,
   ragdollStability,
+  ragdollSelfCollision,
   liveCharacterQueries,
   map,
   worldExpansion,
