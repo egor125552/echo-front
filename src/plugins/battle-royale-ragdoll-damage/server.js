@@ -22,9 +22,9 @@ function damageForSeverity(severity) {
 
   // Severe impacts rise progressively instead of being hard-capped at 15 HP.
   // This keeps high falls and major head/torso impacts meaningfully dangerous.
-  if (s < 20) return Math.round(15 + (s - 14) * (10 / 6));; // 15..25
-  if (s < 30) return Math.round(25 + (s - 20) * 2);         // 25..45
-  if (s < 40) return Math.round(45 + (s - 30) * 2.5);       // 45..70
+  if (s < 20) return Math.round(15 + (s - 14) * (10 / 6)); // 15..25
+  if (s < 30) return Math.round(25 + (s - 20) * 2);        // 25..45
+  if (s < 40) return Math.round(45 + (s - 30) * 2.5);      // 45..70
   return 100;
 }
 
