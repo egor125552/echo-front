@@ -5,14 +5,37 @@ export const manifest = {
 
 const RATE_KEY = "echo-front.speech-rate";
 const ENABLED_KEY = "echo-front.speech-enabled";
-const INTERRUPT_RESTART_DELAY_MS = 80;
-const START_WATCHDOG_MS = 350;
+const INTERRUPT_RESTART_DELAY_MS = 100;
+const START_WATCHDOG_MS = 900;
 const MAX_START_RETRIES = 1;
+const FALLBACK_LIVE_ID = "speech-fallback-live";
 
 function clampRate(value) {
   const number = Number(value);
   if (!Number.isFinite(number)) return 1.7;
   return Math.max(0.7, Math.min(2.5, Math.round(number * 10) / 10));
+}
+
+function normalizedLang(value) {
+  return String(value ?? "").replace(/_/g, "-").toLowerCase();
+}
+
+function isIOSFamily() {
+  const ua = navigator.userAgent || "";
+  return /iPhone|iPad|iPod/i.test(ua)
+    || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function voiceScore(voice) {
+  const lang = normalizedLang(voice?.lang);
+  if (!lang.startsWith("ru")) return -Infinity;
+  let score = 0;
+  if (lang === "ru-ru") score += 100;
+  else if (lang.startsWith("ru-")) score += 80;
+  else score += 60;
+  if (voice?.localService) score += 10;
+  if (voice?.default) score += 4;
+  return score;
 }
 
 export async function setup(ctx) {
@@ -28,6 +51,40 @@ export async function setup(ctx) {
   let pendingRestart = null;
   let startWatchdog = null;
   let activeUtterance = null;
+  let voices = [];
+  let primed = false;
+  let fallbackSequence = 0;
+
+  function fallbackLiveRegion() {
+    let live = document.getElementById(FALLBACK_LIVE_ID);
+    if (live) return live;
+    live = document.createElement("p");
+    live.id = FALLBACK_LIVE_ID;
+    live.className = "sr-only";
+    live.setAttribute("role", "status");
+    live.setAttribute("aria-live", "off");
+    live.setAttribute("aria-atomic", "true");
+    document.body.appendChild(live);
+    return live;
+  }
+
+  function silenceFallback() {
+    const live = fallbackLiveRegion();
+    live.setAttribute("aria-live", "off");
+  }
+
+  function screenReaderFallback(text, { interrupt = false, reason = "fallback" } = {}) {
+    if (!text) return;
+    const live = fallbackLiveRegion();
+    const sequence = ++fallbackSequence;
+    live.setAttribute("aria-live", interrupt ? "assertive" : "polite");
+    live.textContent = "";
+    requestAnimationFrame(() => {
+      if (sequence !== fallbackSequence) return;
+      live.textContent = String(text);
+    });
+    ctx.events.emit("speech:fallback", { text: String(text), interrupt, reason });
+  }
 
   function syncUi() {
     if (rateInput) rateInput.value = String(rate);
@@ -36,9 +93,30 @@ export async function setup(ctx) {
     ctx.events.emit("speech:settings-changed", { rate, enabled });
   }
 
+  function refreshVoices() {
+    voices = synth?.getVoices?.() ?? [];
+    ctx.events.emit("speech:voices-changed", {
+      count: voices.length,
+      russian: voices.filter((voice) => normalizedLang(voice.lang).startsWith("ru")).length,
+    });
+    return voices;
+  }
+
   function russianVoice() {
-    const voices = synth?.getVoices?.() ?? [];
-    return voices.find((voice) => /^ru(?:-|_)/i.test(voice.lang)) ?? null;
+    // Apple WebKit often produces better/more reliable language selection when
+    // only utterance.lang is set and the platform chooses its own system voice.
+    if (isIOSFamily()) return null;
+    if (!voices.length) refreshVoices();
+    let selected = null;
+    let selectedScore = -Infinity;
+    for (const voice of voices) {
+      const score = voiceScore(voice);
+      if (score > selectedScore) {
+        selected = voice;
+        selectedScore = score;
+      }
+    }
+    return selectedScore > -Infinity ? selected : null;
   }
 
   function clearPendingRestart() {
@@ -63,6 +141,7 @@ export async function setup(ctx) {
     clearTimers();
     activeUtterance = null;
     synth?.cancel?.();
+    silenceFallback();
   }
 
   function makeUtterance(text, rateOverride = null) {
@@ -75,12 +154,14 @@ export async function setup(ctx) {
   }
 
   function speakNow(utterance) {
-    if (!enabled || !synth || !utterance) return;
+    if (!enabled || !synth || !utterance) return false;
     try {
       synth.resume?.();
       synth.speak(utterance);
+      return true;
     } catch (error) {
       console.warn("Speech synthesis failed", error);
+      return false;
     }
   }
 
@@ -88,70 +169,139 @@ export async function setup(ctx) {
     return Boolean(activeUtterance || pendingRestart != null || synth?.speaking || synth?.pending);
   }
 
-  function startRequest(text, rateOverride, requestGeneration, retry = 0) {
-    if (!enabled || !synth || requestGeneration !== generation) return null;
+  function finishAsFallback(text, interrupt, reason, requestGeneration) {
+    if (requestGeneration !== generation) return;
+    clearTimers();
+    activeUtterance = null;
+    try { synth?.cancel?.(); } catch {}
+    screenReaderFallback(text, { interrupt, reason });
+  }
+
+  function startRequest(text, rateOverride, requestGeneration, interrupt, retry = 0) {
+    if (requestGeneration !== generation) return null;
+    if (!enabled) {
+      screenReaderFallback(text, { interrupt, reason: "browser-speech-disabled" });
+      return null;
+    }
+    if (!synth || typeof SpeechSynthesisUtterance === "undefined") {
+      screenReaderFallback(text, { interrupt, reason: "speech-synthesis-unavailable" });
+      return null;
+    }
 
     const utterance = makeUtterance(text, rateOverride);
     let started = false;
+    let finished = false;
     activeUtterance = utterance;
+    silenceFallback();
 
     utterance.onstart = () => {
       if (requestGeneration !== generation) return;
       started = true;
       clearStartWatchdog();
+      ctx.events.emit("speech:started", { text: String(text), retry });
     };
 
-    const finish = () => {
+    utterance.onend = () => {
       if (requestGeneration !== generation) return;
+      finished = true;
       clearStartWatchdog();
       if (activeUtterance === utterance) activeUtterance = null;
+      ctx.events.emit("speech:ended", { text: String(text) });
     };
-    utterance.onend = finish;
-    utterance.onerror = finish;
 
-    speakNow(utterance);
+    utterance.onerror = (event) => {
+      if (requestGeneration !== generation || finished) return;
+      clearStartWatchdog();
+      if (activeUtterance === utterance) activeUtterance = null;
+      const error = String(event?.error ?? "speech-error");
+      if (!started && retry < MAX_START_RETRIES && !/canceled|interrupted/i.test(error)) {
+        try { synth.cancel(); } catch {}
+        pendingRestart = setTimeout(() => {
+          pendingRestart = null;
+          startRequest(text, rateOverride, requestGeneration, interrupt, retry + 1);
+        }, INTERRUPT_RESTART_DELAY_MS);
+        return;
+      }
+      if (!started && !/canceled|interrupted/i.test(error)) {
+        finishAsFallback(text, interrupt, `speech-error:${error}`, requestGeneration);
+      }
+    };
+
+    if (!speakNow(utterance)) {
+      finishAsFallback(text, interrupt, "speak-threw", requestGeneration);
+      return null;
+    }
 
     startWatchdog = setTimeout(() => {
       startWatchdog = null;
-      if (!enabled || requestGeneration !== generation || started) return;
+      if (requestGeneration !== generation || started || finished) return;
       if (activeUtterance === utterance) activeUtterance = null;
-      synth.cancel();
-      synth.resume?.();
+      try { synth.cancel(); } catch {}
+      try { synth.resume?.(); } catch {}
       if (retry < MAX_START_RETRIES) {
         pendingRestart = setTimeout(() => {
           pendingRestart = null;
-          startRequest(text, rateOverride, requestGeneration, retry + 1);
+          startRequest(text, rateOverride, requestGeneration, interrupt, retry + 1);
         }, INTERRUPT_RESTART_DELAY_MS);
+        return;
       }
+      finishAsFallback(text, interrupt, "start-timeout", requestGeneration);
     }, START_WATCHDOG_MS);
 
     return utterance;
   }
 
   function say(text, { interrupt = false, rateOverride = null } = {}) {
-    if (!enabled || !synth || !text) return null;
+    if (!text) return null;
 
-    // Never build a browser speech queue. Secondary announcements are disposable:
-    // if speech is already busy, skip them instead of enqueueing them.
-    if (!interrupt) {
-      if (busy()) return null;
-      const requestGeneration = ++generation;
-      return startRequest(text, rateOverride, requestGeneration);
+    if (!enabled || !synth || typeof SpeechSynthesisUtterance === "undefined") {
+      screenReaderFallback(text, {
+        interrupt,
+        reason: enabled ? "speech-synthesis-unavailable" : "browser-speech-disabled",
+      });
+      return null;
     }
 
-    // Important announcements are latest-wins. Safari may ignore speak() immediately
-    // after cancel(), so restart after a short delay and retry once if onstart never fires.
+    // Secondary announcements are disposable: don't build a delayed browser queue.
+    if (!interrupt && busy()) return null;
+
+    if (!interrupt) {
+      const requestGeneration = ++generation;
+      return startRequest(text, rateOverride, requestGeneration, false);
+    }
+
+    // Important announcements are latest-wins. Safari/WebKit may ignore speak()
+    // immediately after cancel(), so restart after a short delay.
     const requestGeneration = ++generation;
     clearTimers();
     activeUtterance = null;
-    synth.cancel();
-    synth.resume?.();
+    silenceFallback();
+    try { synth.cancel(); } catch {}
+    try { synth.resume?.(); } catch {}
     pendingRestart = setTimeout(() => {
       pendingRestart = null;
-      startRequest(text, rateOverride, requestGeneration);
+      startRequest(text, rateOverride, requestGeneration, true);
     }, INTERRUPT_RESTART_DELAY_MS);
-
     return null;
+  }
+
+  function unlockFromGesture(reason = "user-gesture") {
+    if (!synth || typeof SpeechSynthesisUtterance === "undefined") return false;
+    refreshVoices();
+    try { synth.resume?.(); } catch {}
+    if (primed) return true;
+    try {
+      const unlockUtterance = new SpeechSynthesisUtterance("");
+      unlockUtterance.lang = "ru-RU";
+      unlockUtterance.volume = 0;
+      synth.speak(unlockUtterance);
+      primed = true;
+      ctx.events.emit("speech:primed", { reason });
+      return true;
+    } catch (error) {
+      ctx.events.emit("speech:prime-failed", { reason, error: String(error?.message ?? error) });
+      return false;
+    }
   }
 
   rateInput?.addEventListener("input", () => {
@@ -168,17 +318,38 @@ export async function setup(ctx) {
   });
 
   testButton?.addEventListener("click", () => {
+    unlockFromGesture("speech-test");
     say("Проверка игровой озвучки. Скорость речи настроена.", { interrupt: true });
   });
+
+  if (synth) {
+    refreshVoices();
+    synth.addEventListener?.("voiceschanged", refreshVoices);
+    setTimeout(refreshVoices, 250);
+    setTimeout(refreshVoices, 1000);
+  }
+
+  // Capture the first genuine gesture before game events start arriving. This is
+  // especially important on iOS, where the first speech request may otherwise be
+  // silently suppressed even though the API exists.
+  const primeOnGesture = () => unlockFromGesture("captured-gesture");
+  window.addEventListener("pointerdown", primeOnGesture, { capture: true, passive: true });
+  window.addEventListener("touchstart", primeOnGesture, { capture: true, passive: true });
+  window.addEventListener("keydown", primeOnGesture, { capture: true });
+  window.addEventListener("click", primeOnGesture, { capture: true, passive: true });
 
   ctx.services.provide("speech", {
     say,
     stop,
+    unlock: unlockFromGesture,
     get rate() {
       return rate;
     },
     get enabled() {
       return enabled;
+    },
+    get available() {
+      return Boolean(synth && typeof SpeechSynthesisUtterance !== "undefined");
     },
   });
 
