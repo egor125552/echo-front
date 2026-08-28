@@ -3,7 +3,7 @@ name: Engine Command
 on:
   push:
     branches:
-      - main
+      - engine-control
       - stability-restart-hardening
     paths:
       - src/config/engine-command-request.js
@@ -20,6 +20,38 @@ jobs:
           node-version: 22
       - run: npm install
 
+      - name: Verify plugin failure attribution
+        run: |
+          node --input-type=module <<'NODE'
+          import { PluginHost, PluginExecutionError } from './src/core/plugin-host.js';
+
+          const brokenCapability = {
+            manifest: { id: 'broken-capability-test', requires: [], capabilities: [] },
+            setup(ctx) { ctx.services.provide('should-not-register', {}); },
+          };
+          try {
+            await new PluginHost({ plugins: [brokenCapability] }).start();
+            throw new Error('Expected missing capability to fail');
+          } catch (error) {
+            if (!(error instanceof PluginExecutionError)) throw error;
+            if (error.pluginId !== 'broken-capability-test') throw new Error(`Wrong plugin attribution: ${error.pluginId}`);
+            if (error.phase !== 'capability-check') throw new Error(`Wrong phase: ${error.phase}`);
+          }
+
+          const brokenDependency = {
+            manifest: { id: 'broken-dependency-test', requires: ['missing-plugin'], capabilities: [] },
+          };
+          try {
+            new PluginHost({ plugins: [brokenDependency] });
+            throw new Error('Expected missing dependency to fail');
+          } catch (error) {
+            if (!(error instanceof PluginExecutionError)) throw error;
+            if (error.pluginId !== 'broken-dependency-test') throw new Error(`Wrong dependency attribution: ${error.pluginId}`);
+            if (error.phase !== 'dependency-check') throw new Error(`Wrong dependency phase: ${error.phase}`);
+          }
+          console.log('Plugin attribution checks passed.');
+          NODE
+
       - name: Read compiled request
         id: request
         run: |
@@ -27,11 +59,15 @@ jobs:
           COMMAND=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.command)))')
           REPEAT=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.repeat ?? 1)))')
           FRAME_EVERY=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.frameEvery ?? 1)))')
+          ROOM=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.room ?? "public")))')
+          MODE=$(node -e 'import("./src/config/engine-command-request.js").then(m => process.stdout.write(String(m.ENGINE_COMMAND_REQUEST.mode ?? "tdm")))')
           echo "id=$ID" >> "$GITHUB_OUTPUT"
           echo "command=$COMMAND" >> "$GITHUB_OUTPUT"
           echo "repeat=$REPEAT" >> "$GITHUB_OUTPUT"
           echo "frame_every=$FRAME_EVERY" >> "$GITHUB_OUTPUT"
-          echo "Request $ID: $COMMAND repeat=$REPEAT frameEvery=$FRAME_EVERY"
+          echo "room=$ROOM" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Request $ID: $COMMAND repeat=$REPEAT frameEvery=$FRAME_EVERY room=$ROOM mode=$MODE"
 
       - name: No request yet
         if: steps.request.outputs.id == '0'
@@ -42,7 +78,7 @@ jobs:
         env:
           REQUEST_ID: ${{ steps.request.outputs.id }}
         run: |
-          timeout 120s npx wrangler dev --port 8787 > /tmp/echo-front-engine-control.log 2>&1 &
+          setsid timeout 120s npx wrangler dev --port 8787 > /tmp/echo-front-engine-control.log 2>&1 &
           echo $! > /tmp/echo-front-engine-control.pid
           for i in {1..40}; do
             BODY=$(curl --max-time 3 --silent --show-error http://127.0.0.1:8787/api/health || true)
@@ -115,6 +151,55 @@ jobs:
             rm -f "$TMP"
           done
 
+      - name: Verify active match restart is fail-closed
+        if: steps.request.outputs.id != '0'
+        env:
+          REQUEST_ID: ${{ steps.request.outputs.id }}
+          ROOM: ${{ steps.request.outputs.room }}
+          MODE: ${{ steps.request.outputs.mode }}
+        run: |
+          PRE=$(curl --max-time 10 --silent --show-error --get \
+            --data-urlencode "room=$ROOM" \
+            --data-urlencode "mode=$MODE" \
+            http://127.0.0.1:8787/api/diagnostics)
+          echo "$PRE" | jq -e '.roomActive == true and .lifecycle.status == "active"' > /dev/null
+          OLD_BOOT=$(echo "$PRE" | jq -r '.bootId')
+          OLD_MATCH=$(echo "$PRE" | jq -r '.lifecycle.matchId')
+          echo "Before restart: boot=$OLD_BOOT match=$OLD_MATCH"
+
+          PID=$(cat /tmp/echo-front-engine-control.pid)
+          kill -- -"$PID" 2>/dev/null || true
+          for i in {1..20}; do
+            if ! curl --max-time 1 --silent http://127.0.0.1:8787/api/health > /dev/null 2>&1; then break; fi
+            sleep 0.25
+          done
+
+          setsid timeout 120s npx wrangler dev --port 8787 > /tmp/echo-front-engine-control-restart.log 2>&1 &
+          echo $! > /tmp/echo-front-engine-control-restart.pid
+          for i in {1..40}; do
+            BODY=$(curl --max-time 3 --silent --show-error http://127.0.0.1:8787/api/health || true)
+            ENABLED=$(printf '%s' "$BODY" | jq -r '.engineControlEnabled // false')
+            LOCAL_ID=$(printf '%s' "$BODY" | jq -r '.engineCommandRequestId // 0')
+            if [ "$ENABLED" = "true" ] && [ "$LOCAL_ID" = "$REQUEST_ID" ]; then break; fi
+            sleep 1
+          done
+
+          POST=$(curl --max-time 10 --silent --show-error --get \
+            --data-urlencode "room=$ROOM" \
+            --data-urlencode "mode=$MODE" \
+            http://127.0.0.1:8787/api/diagnostics)
+          echo "$POST" | jq -c '{roomActive,bootId,lifecycle:{status:.lifecycle.status,previousBootId:.lifecycle.previousBootId,matchId:.lifecycle.matchId,lastHealthyAt:.lifecycle.lastHealthyAt},fatalError:{code:.fatalError.code,category:.fatalError.category,previousBootId:.fatalError.previousBootId,matchId:.fatalError.matchId}}'
+          echo "$POST" | jq -e \
+            --arg oldBoot "$OLD_BOOT" \
+            --arg oldMatch "$OLD_MATCH" \
+            '.roomActive == false
+             and .lifecycle.status == "fatal"
+             and .fatalError.code == "MATCH_STATE_LOST"
+             and .fatalError.previousBootId == $oldBoot
+             and .fatalError.matchId == $oldMatch
+             and .bootId != $oldBoot' > /dev/null
+          echo "Restart correctly refused to create a replacement match."
+
       - uses: actions/upload-artifact@v4
         if: always() && steps.request.outputs.id != '0'
         with:
@@ -127,7 +212,9 @@ jobs:
 
       - name: Show focused Worker log on failure
         if: failure() && steps.request.outputs.id != '0'
-        run: cat /tmp/echo-front-engine-control.log || true
+        run: |
+          cat /tmp/echo-front-engine-control.log || true
+          cat /tmp/echo-front-engine-control-restart.log || true
 
       - name: Summary
         if: always() && steps.request.outputs.id != '0'
@@ -137,6 +224,8 @@ jobs:
           echo "Command: ${{ steps.request.outputs.command }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Repeat: ${{ steps.request.outputs.repeat }}" >> "$GITHUB_STEP_SUMMARY"
           echo "Frame every: ${{ steps.request.outputs.frame_every }} iterations" >> "$GITHUB_STEP_SUMMARY"
+          echo "Room: ${{ steps.request.outputs.room }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Mode: ${{ steps.request.outputs.mode }}" >> "$GITHUB_STEP_SUMMARY"
           if [ -s engine-command-frames.jsonl ]; then
             echo "Frames captured: $(wc -l < engine-command-frames.jsonl)" >> "$GITHUB_STEP_SUMMARY"
           fi
