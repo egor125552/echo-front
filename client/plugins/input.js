@@ -52,6 +52,7 @@ export function sampleInputState(pressed, touch = {}, flags = {}) {
 export async function setup(ctx) {
   const pressed = new Set();
   const touch = { forward: false, back: false, left: false, right: false, sprint: false, fireHeld: false };
+  const virtual = { forward: false, back: false, left: false, right: false, sprint: false, fireHeld: false };
   let enabled = false;
   let firePressed = false;
   let reload = false;
@@ -104,6 +105,59 @@ export async function setup(ctx) {
     notifyChanged(`touch:${control}:${down ? "down" : "up"}`);
   }
 
+  function setVirtualDirection(control, down) {
+    if (!enabled || !(control in opposite)) return false;
+    const next = Boolean(down);
+    const previous = virtual[control];
+    const oppositeControl = opposite[control];
+    const oppositeWasDown = Boolean(virtual[oppositeControl]);
+    if (next) virtual[oppositeControl] = false;
+    virtual[control] = next;
+    if (previous === next && !oppositeWasDown) return true;
+    if (oppositeWasDown) emitTouch(oppositeControl, false);
+    emitTouch(control, next);
+    notifyChanged(`virtual:${control}:${next ? "down" : "up"}`);
+    return true;
+  }
+
+  function setVirtualFire(down) {
+    if (!enabled) return false;
+    const next = Boolean(down);
+    if (virtual.fireHeld === next) return true;
+    virtual.fireHeld = next;
+    if (next) {
+      firePressed = true;
+      ctx.events.emit("input:fire-start", {});
+    } else {
+      ctx.events.emit("input:fire-stop", {});
+    }
+    notifyChanged(`virtual:fire:${next ? "down" : "up"}`);
+    return true;
+  }
+
+  function setVirtualSprint(down) {
+    if (!enabled) return false;
+    const next = Boolean(down);
+    if (virtual.sprint === next) return true;
+    virtual.sprint = next;
+    emitTouch("sprint", next);
+    notifyChanged(`virtual:sprint:${next ? "down" : "up"}`);
+    return true;
+  }
+
+  function triggerVirtualAction(action) {
+    if (!enabled) return false;
+    if (action === "reload") reload = true;
+    else if (action === "weapon-prev") selectDelta = -1;
+    else if (action === "weapon-next") selectDelta = 1;
+    else if (action === "armor-plate") platePressed = true;
+    else if (action === "interact") interactPressed = true;
+    else return false;
+    emitTouch(action, true);
+    notifyChanged(`virtual:${action}`);
+    return true;
+  }
+
   function clearTouchMovement() {
     let changed = false;
     for (const control of ["forward", "back", "left", "right"]) {
@@ -118,19 +172,34 @@ export async function setup(ctx) {
     }
   }
 
+  function clearVirtualMovement() {
+    let changed = false;
+    for (const control of ["forward", "back", "left", "right"]) {
+      if (!virtual[control]) continue;
+      virtual[control] = false;
+      emitTouch(control, false);
+      changed = true;
+    }
+    if (changed) notifyChanged("virtual:stop");
+    return changed;
+  }
+
   function stopFireIfNeeded() {
     const keyboardFire = pressed.delete("KeyX");
     const touchFire = touch.fireHeld;
+    const virtualFire = virtual.fireHeld;
     touch.fireHeld = false;
-    if ((keyboardFire || touchFire) && enabled) ctx.events.emit("input:fire-stop", {});
-    return keyboardFire || touchFire;
+    virtual.fireHeld = false;
+    if ((keyboardFire || touchFire || virtualFire) && enabled) ctx.events.emit("input:fire-stop", {});
+    return keyboardFire || touchFire || virtualFire;
   }
 
   function resetPressed(reason) {
-    const hadState = pressed.size > 0 || Object.values(touch).some(Boolean);
+    const hadState = pressed.size > 0 || Object.values(touch).some(Boolean) || Object.values(virtual).some(Boolean);
     stopFireIfNeeded();
     pressed.clear();
     for (const key of Object.keys(touch)) touch[key] = false;
+    for (const key of Object.keys(virtual)) virtual[key] = false;
     firePressed = false;
     reload = false;
     selectDelta = 0;
@@ -294,8 +363,24 @@ export async function setup(ctx) {
   ctx.services.provide("input", {
     enable() { enabled = true; },
     disable() { resetPressed("disabled"); enabled = false; },
+    setVirtualControl(control, down) {
+      if (control in opposite) return setVirtualDirection(control, down);
+      if (control === "fire") return setVirtualFire(down);
+      if (control === "sprint") return setVirtualSprint(down);
+      return false;
+    },
+    clearVirtualMovement,
+    triggerVirtualAction,
     sample() {
-      const sample = sampleInputState(pressed, touch, {
+      const mergedTouch = {
+        forward: touch.forward || virtual.forward,
+        back: touch.back || virtual.back,
+        left: touch.left || virtual.left,
+        right: touch.right || virtual.right,
+        sprint: touch.sprint || virtual.sprint,
+        fireHeld: touch.fireHeld || virtual.fireHeld,
+      };
+      const sample = sampleInputState(pressed, mergedTouch, {
         firePressed, reload, selectDelta, platePressed, interactPressed,
       });
       firePressed = false;
