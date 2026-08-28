@@ -1,9 +1,9 @@
-const START = 2000014300000;
+const START = 2000014400000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 143,
+  id: 144,
   mode: "battle-royale",
-  room: "engine-lab-ragdoll-vehicle-hit-143",
+  room: "engine-lab-ragdoll-vehicle-hit-144",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -16,25 +16,25 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         scaleStartKph: 20, scaleSpanKph: 100, scaleMaxExtra: 0.9
       }] } },
       { command: "entity.spawn", args: { spec: {
-        id: "driver-hit-143", kind: "human", name: "Hit Driver", bot: false,
-        team: 14301, health: 400, weapons: [], position: { x: 432.4, y: 1.1, z: -650, angle: 0 }
+        id: "driver-hit-144", kind: "human", name: "Hit Driver", bot: false,
+        team: 14401, health: 400, weapons: [], position: { x: 432.4, y: 1.1, z: -650, angle: 0 }
       } } },
       { command: "entity.spawn", args: { spec: {
-        id: "victim-hit-143", kind: "human", name: "Hit Victim", bot: false,
-        team: 14302, health: 400, weapons: [], position: { x: 430, y: 0, z: -658, angle: 0 }
+        id: "victim-hit-144", kind: "human", name: "Hit Victim", bot: false,
+        team: 14402, health: 400, weapons: [], position: { x: 430, y: 0, z: -658, angle: 0 }
       } } },
-      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["driver-hit-143", { x: 432.4, y: 1.1, z: -650, angle: 0 }] } },
-      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["victim-hit-143", { x: 430, y: 0, z: -658, angle: 0 }] } },
+      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["driver-hit-144", { x: 432.4, y: 1.1, z: -650, angle: 0 }] } },
+      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["victim-hit-144", { x: 430, y: 0, z: -658, angle: 0 }] } },
       { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 20 } },
-      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["driver-hit-143", START + 60, "br-supercar-2"] } },
-      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["driver-hit-143", { forward: 1 }] } },
+      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["driver-hit-144", START + 60, "br-supercar-2"] } },
+      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["driver-hit-144", { forward: 1 }] } },
       { command: "game.step", args: { dt: 0.02, steps: 80, now: START + 80 } },
       { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-supercar-2"] } },
       { command: "service.call", args: { service: "fleet-pedestrian-ragdoll", method: "summary", arguments: [] } },
-      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["victim-hit-143"] } },
-      { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: ["victim-hit-143"] } },
+      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["victim-hit-144"] } },
+      { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: ["victim-hit-144"] } },
       { command: "service.call", args: { service: "ragdoll-stability", method: "assertStable", arguments: [{ maxSpread: 8, maxSpeed: 100 }] } }
     ]
   },
-  requestedAt: "2026-08-28T20:52:00Z"
+  requestedAt: "2026-08-28T20:58:00Z"
 });
