@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-vehicle-announcer",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["cloudflare-session", "speech-settings"],
 };
 
@@ -66,7 +66,7 @@ export async function setup(ctx) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });
     }
-    // speech-settings is latest-wins for important announcements; no TTS queue.
+    // Important announcements are latest-wins; speech-settings never builds a queue.
     speech.say(text, { interrupt });
   }
 
@@ -134,8 +134,8 @@ export async function setup(ctx) {
       drivingVehicleName = vehicleName(drivenVehicle);
       announcedVehicleId = drivenVehicle.id;
 
-      // Snapshot fallback: if vehicle:entered was lost, the spoken name and controls
-      // still come from the exact vehicle state the audio system sees.
+      // Snapshot fallback: if vehicle:entered was lost, speak from the same fleet
+      // state that drives vehicle audio. Event delivery is not required.
       if (announcedDrivingVehicleId !== drivenVehicle.id) {
         announcedDrivingVehicleId = drivenVehicle.id;
         announceEntered(drivingVehicleName);
@@ -172,12 +172,14 @@ export async function setup(ctx) {
   ctx.events.on("game:event", (packet) => {
     const payload = packet.payload ?? {};
     if (packet.event === "vehicle:entered" && payload.entityId === network.playerId) {
+      const eventVehicleId = payload.vehicleId ?? null;
+      const alreadySpoken = Boolean(eventVehicleId && announcedDrivingVehicleId === eventVehicleId);
       drivingVehicleName = String(payload.vehicleName ?? "").trim()
         || (payload.vehicleKind === "supercar" ? "суперкар" : "внедорожник");
-      announcedVehicleId = payload.vehicleId ?? announcedVehicleId;
-      announcedDrivingVehicleId = payload.vehicleId ?? announcedDrivingVehicleId;
-      resetNitroTracking(payload.vehicleId ?? null);
-      announceEntered(drivingVehicleName);
+      announcedVehicleId = eventVehicleId ?? announcedVehicleId;
+      announcedDrivingVehicleId = eventVehicleId ?? announcedDrivingVehicleId;
+      resetNitroTracking(eventVehicleId);
+      if (!alreadySpoken) announceEntered(drivingVehicleName);
       return;
     }
     if (packet.event === "vehicle:exited" && payload.entityId === network.playerId) {
@@ -189,28 +191,33 @@ export async function setup(ctx) {
       return;
     }
     if (packet.event === "vehicle:nitro-start" && payload.driverId === network.playerId) {
+      const alreadySpoken = nitroInitialized && lastNitroActive;
       nitroInitialized = true;
       lastNitroActive = true;
       lastNitroReady = false;
       lastNitroCooling = false;
-      announce("Нитро", true);
+      if (!alreadySpoken) announce("Нитро", true);
       return;
     }
     if (packet.event === "vehicle:nitro-stop" && payload.driverId === network.playerId) {
+      const alreadySpoken = nitroInitialized && !lastNitroActive && lastNitroCooling;
       nitroInitialized = true;
       lastNitroActive = false;
       lastNitroReady = false;
       lastNitroCooling = true;
-      const seconds = Math.max(1, Math.round(Number(payload.cooldownSeconds) || 10));
-      announce(`Нитро перезаряжается. ${seconds} секунд`, true);
+      if (!alreadySpoken) {
+        const seconds = Math.max(1, Math.round(Number(payload.cooldownSeconds) || 10));
+        announce(`Нитро перезаряжается. ${seconds} секунд`, true);
+      }
       return;
     }
     if (packet.event === "vehicle:nitro-ready" && payload.driverId === network.playerId) {
+      const alreadySpoken = nitroInitialized && lastNitroReady;
       nitroInitialized = true;
       lastNitroActive = false;
       lastNitroReady = true;
       lastNitroCooling = false;
-      announce("Нитро готово", true);
+      if (!alreadySpoken) announce("Нитро готово", true);
       return;
     }
     if (packet.event === "vehicle:impact" && payload.driverId === network.playerId) {
