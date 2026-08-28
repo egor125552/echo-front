@@ -8,7 +8,7 @@ export const JUMP_MIN_LANDING_TIME_MS = 120;
 
 export const manifest = {
   id: "battle-royale-jump",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["movement", "rapier-physics", "entities"],
   capabilities: [
     "services.consume", "services.provide",
@@ -47,6 +47,25 @@ export async function setup(ctx) {
     if (!entityId) return false;
     pending.add(entityId);
     return true;
+  }
+
+  function summary(entityId) {
+    const transform = ctx.components.get(entityId, "Transform");
+    if (!transform) return null;
+    const state = active.get(entityId) ?? null;
+    return {
+      entityId,
+      x: Number(transform.x) || 0,
+      y: Number(transform.y) || 0,
+      z: Number(transform.z) || 0,
+      grounded: Boolean(transform.grounded),
+      verticalVelocity: Number(transform.verticalVelocity) || 0,
+      active: Boolean(state),
+      startedAt: state?.startedAt ?? null,
+      startY: state?.startY ?? null,
+      apexY: state?.apexY ?? null,
+      rise: state ? Math.max(0, state.apexY - state.startY) : null,
+    };
   }
 
   movement.setInput = (entityId, input = {}) => {
@@ -135,9 +154,42 @@ export async function setup(ctx) {
 
   ctx.services.provide("jump", {
     request,
+    summary,
     stateFor(entityId) {
       const state = active.get(entityId);
       return state ? { ...state } : null;
+    },
+    assertState(entityId, expected = {}) {
+      const state = summary(entityId);
+      if (!state) throw new Error(`Jump entity not found: ${entityId}`);
+      if (expected.active !== undefined && state.active !== Boolean(expected.active)) {
+        throw new Error(`Expected jump active=${Boolean(expected.active)}, got ${state.active}`);
+      }
+      if (expected.grounded !== undefined && state.grounded !== Boolean(expected.grounded)) {
+        throw new Error(`Expected grounded=${Boolean(expected.grounded)}, got ${state.grounded}`);
+      }
+      if (Number.isFinite(expected.minY) && state.y < Number(expected.minY)) {
+        throw new Error(`Expected y >= ${expected.minY}, got ${state.y}`);
+      }
+      if (Number.isFinite(expected.maxY) && state.y > Number(expected.maxY)) {
+        throw new Error(`Expected y <= ${expected.maxY}, got ${state.y}`);
+      }
+      if (Number.isFinite(expected.minVerticalVelocity)
+        && state.verticalVelocity < Number(expected.minVerticalVelocity)) {
+        throw new Error(
+          `Expected verticalVelocity >= ${expected.minVerticalVelocity}, got ${state.verticalVelocity}`,
+        );
+      }
+      if (Number.isFinite(expected.maxVerticalVelocity)
+        && state.verticalVelocity > Number(expected.maxVerticalVelocity)) {
+        throw new Error(
+          `Expected verticalVelocity <= ${expected.maxVerticalVelocity}, got ${state.verticalVelocity}`,
+        );
+      }
+      if (Number.isFinite(expected.minRise) && Number(state.rise ?? 0) < Number(expected.minRise)) {
+        throw new Error(`Expected rise >= ${expected.minRise}, got ${state.rise}`);
+      }
+      return state;
     },
     constants: Object.freeze({
       height: JUMP_HEIGHT,
