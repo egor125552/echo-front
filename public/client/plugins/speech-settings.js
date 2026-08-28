@@ -7,8 +7,9 @@ const RATE_KEY = "echo-front.speech-rate";
 const ENABLED_KEY = "echo-front.speech-enabled";
 const VOICE_KEY = "echo-front.speech-voice";
 const INTERRUPT_RESTART_DELAY_MS = 120;
-const START_WATCHDOG_MS = 1400;
-const MAX_START_RETRIES = 2;
+const START_WATCHDOG_MS = 900;
+const PENDING_GRACE_MS = 3000;
+const MAX_START_RETRIES = 1;
 const VOICE_REFRESH_DELAYS_MS = [0, 100, 500, 1500];
 
 function clampRate(value) {
@@ -157,10 +158,8 @@ export async function setup(ctx) {
     if (previous && russian.some((voice) => voiceId(voice) === previous)) {
       select.value = previous;
     } else {
-      if (previous) {
-        selectedVoiceId = "";
-        localStorage.removeItem(VOICE_KEY);
-      }
+      // Chrome and some Android engines can return an empty voice list during startup.
+      // Keep the stored preference so voiceschanged can restore it when the list arrives.
       select.value = "";
     }
   }
@@ -297,7 +296,30 @@ export async function setup(ctx) {
     refreshVoices("before-speak");
     const utterance = makeUtterance(text, rateOverride);
     let started = false;
+    let pendingGraceUsed = false;
     activeUtterance = utterance;
+
+    function armStartWatchdog(delay) {
+      clearStartWatchdog();
+      startWatchdog = setTimeout(() => {
+        startWatchdog = null;
+        if (!enabled || requestGeneration !== generation || started) return;
+        if (synth?.speaking) {
+          started = true;
+          primed = true;
+          report("watchdog-speaking", { retry });
+          return;
+        }
+        if (synth?.pending && !pendingGraceUsed) {
+          pendingGraceUsed = true;
+          report("watchdog-pending", { retry });
+          armStartWatchdog(PENDING_GRACE_MS);
+          return;
+        }
+        report("start-timeout", { retry });
+        retryOrFallback(text, rateOverride, requestGeneration, retry, "start-timeout");
+      }, delay);
+    }
 
     utterance.onstart = () => {
       if (requestGeneration !== generation) return;
@@ -329,19 +351,7 @@ export async function setup(ctx) {
       return utterance;
     }
 
-    startWatchdog = setTimeout(() => {
-      startWatchdog = null;
-      if (!enabled || requestGeneration !== generation || started) return;
-      if (synth?.speaking) {
-        started = true;
-        primed = true;
-        report("watchdog-speaking", { retry });
-        return;
-      }
-      report("start-timeout", { retry });
-      retryOrFallback(text, rateOverride, requestGeneration, retry, "start-timeout");
-    }, START_WATCHDOG_MS);
-
+    armStartWatchdog(START_WATCHDOG_MS);
     return utterance;
   }
 
