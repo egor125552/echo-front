@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-stability",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -18,9 +18,9 @@ function magnitude(v) {
   return Math.hypot(Number(v?.x) || 0, Number(v?.y) || 0, Number(v?.z) || 0);
 }
 
-function packedCollisionGroups(groupId) {
+function packedCollisionGroups(groupId, selfCollisionEnabled = false) {
   const membership = (1 << groupId) & 0xffff;
-  const filter = (0xffff ^ membership) & 0xffff;
+  const filter = selfCollisionEnabled ? 0xffff : (0xffff ^ membership) & 0xffff;
   return (((membership << 16) | filter) >>> 0);
 }
 
@@ -34,6 +34,7 @@ export async function setup(ctx) {
 
   let sequence = 0;
   let latestGroupId = null;
+  let selfCollisionEnabled = false;
   const history = [];
 
   function allocateGroup() {
@@ -42,7 +43,7 @@ export async function setup(ctx) {
     const group = {
       id,
       sequence: ++sequence,
-      mask: packedCollisionGroups(id),
+      mask: packedCollisionGroups(id, selfCollisionEnabled),
       bodies: new Map(),
       peakSpread: 0,
       peakSpeed: 0,
@@ -71,6 +72,24 @@ export async function setup(ctx) {
     for (let i = 0; i < body.numColliders(); i += 1) {
       body.collider(i)?.setCollisionGroups(group.mask);
     }
+    return true;
+  }
+
+  function refreshGroupMask(group) {
+    group.mask = packedCollisionGroups(group.id, selfCollisionEnabled);
+    for (const body of group.bodies.values()) {
+      for (let i = 0; i < body.numColliders(); i += 1) {
+        body.collider(i)?.setCollisionGroups(group.mask);
+      }
+    }
+  }
+
+  function setSelfCollisionEnabled(enabled) {
+    const next = Boolean(enabled);
+    if (selfCollisionEnabled === next) return false;
+    selfCollisionEnabled = next;
+    for (const group of groups.values()) refreshGroupMask(group);
+    ctx.events.emit("ragdoll:self-collision-changed", { enabled: selfCollisionEnabled });
     return true;
   }
 
@@ -257,6 +276,7 @@ export async function setup(ctx) {
   function summary() {
     const active = [...groups.values()].map(currentGroupSummary);
     return {
+      selfCollisionEnabled,
       activeGroups: active.length,
       groupedBodies: active.reduce((sum, group) => sum + group.bodies, 0),
       active,
@@ -280,11 +300,18 @@ export async function setup(ctx) {
       if (record.peakSpeed > maxSpeed) {
         throw new Error(`Ragdoll group ${record.id} speed ${record.peakSpeed.toFixed(3)}m/s exceeds ${maxSpeed}m/s`);
       }
-      if (Number(record.intraGroupContacts) > 0) {
+      if (!selfCollisionEnabled && Number(record.intraGroupContacts) > 0) {
         throw new Error(`Ragdoll group ${record.id} still has ${record.intraGroupContacts} self contacts`);
       }
     }
-    return { ok: true, groups: snapshots.length, records: records.length, maxSpread, maxSpeed };
+    return {
+      ok: true,
+      groups: snapshots.length,
+      records: records.length,
+      maxSpread,
+      maxSpeed,
+      selfCollisionEnabled,
+    };
   }
 
   ctx.services.provide("ragdoll-stability", {
@@ -292,5 +319,7 @@ export async function setup(ctx) {
     resetDiagnostics,
     summary,
     assertStable,
+    setSelfCollisionEnabled,
+    isSelfCollisionEnabled() { return selfCollisionEnabled; },
   });
 }
