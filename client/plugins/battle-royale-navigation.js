@@ -109,6 +109,7 @@ export async function setup(ctx) {
     if (!connected) return;
     if (code === "KeyM") navigationNextPressed = true;
     if (code === "Enter") navigationTogglePressed = true;
+    void audio.resume();
     ctx.events.emit("input:changed", { reason: `navigation:${code}` });
   }
 
@@ -177,6 +178,11 @@ export async function setup(ctx) {
 
     if (packet.event === "navigation:unavailable") {
       announce("Цель навигации недоступна.", true);
+      return;
+    }
+
+    if (packet.event === "vehicle:dropzone-placed") {
+      announce(`Машина поставлена рядом с местом посадки. ${roundedMeters(payload.distance)} метров.`, false);
     }
   });
 
@@ -185,8 +191,8 @@ export async function setup(ctx) {
     const checkpoint = latestNavigation.checkpoint;
     const position = {
       x: Number(checkpoint.x) || 0,
-      // Navigation is intentionally a horizontal guidance aid. Keeping the ping
-      // at listener height makes it usable during parachuting as well as on foot.
+      // This is horizontal guidance. Keep the beacon at listener height so it is
+      // useful on foot, in a vehicle and while descending under a parachute.
       y: Number(latestSelf?.y) || 0,
       z: Number(checkpoint.z) || 0,
     };
