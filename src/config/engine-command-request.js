@@ -1,9 +1,9 @@
-const START = 2000012000000;
+const START = 2000012100000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 120,
+  id: 121,
   mode: "battle-royale",
-  room: "engine-lab-ragdoll-energy-120",
+  room: "engine-lab-parkour-pose-121",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -15,45 +15,53 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         arguments: [START]
       } },
       { command: "entity.spawn", args: { spec: {
-        id: "launch-test-120",
+        id: "parkour-test-121",
         kind: "human",
-        name: "Launch Test",
-        bot: true,
-        team: 12001,
+        name: "Parkour Test",
+        bot: false,
+        team: 12101,
         health: 400,
         weapons: [],
-        position: { x: 300, y: 2, z: 300, angle: 0 }
+        position: { x: 300, y: 0, z: 300, angle: 0 }
       } } },
       { command: "service.call", args: {
-        service: "ragdoll",
-        method: "activate",
-        arguments: [
-          "launch-test-120",
-          { reason: "vehicle-eject", position: { x: 300, y: 2, z: 300 }, angle: 0, velocity: { x: 0, y: 0, z: 0 } }
-        ]
+        service: "movement",
+        method: "setInput",
+        arguments: ["parkour-test-121", { forward: 1, strafe: -1, sprint: true }]
       } },
       { command: "service.call", args: {
-        service: "ragdoll-stability",
-        method: "applyVelocityDeltaToLatest",
-        arguments: [{ x: 180, y: 400, z: -120 }]
+        service: "jump",
+        method: "request",
+        arguments: ["parkour-test-121"]
       } },
-      { command: "game.step", args: { dt: 0.02, steps: 5, now: START + 20 } },
+      { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 20 } },
       { command: "service.call", args: {
-        service: "ragdoll-stability",
+        service: "jump",
+        method: "assertState",
+        arguments: ["parkour-test-121", { active: true, minY: 0.05 }]
+      } },
+      { command: "service.call", args: {
+        service: "parkour-ragdoll",
+        method: "enterPose",
+        arguments: ["parkour-test-121", { forward: 1, strafe: -1, sprint: true }, START + 70]
+      } },
+      { command: "game.step", args: { dt: 0.02, steps: 10, now: START + 80 } },
+      { command: "service.call", args: {
+        service: "parkour-ragdoll",
         method: "summary",
         arguments: []
       } },
       { command: "service.call", args: {
-        service: "ragdoll-stability",
-        method: "assertStable",
-        arguments: [{ maxSpread: 12, maxSpeed: 500 }]
-      } },
-      { command: "service.call", args: {
         service: "ragdoll",
         method: "stateFor",
-        arguments: ["launch-test-120"]
+        arguments: ["parkour-test-121"]
+      } },
+      { command: "service.call", args: {
+        service: "ragdoll-stability",
+        method: "assertStable",
+        arguments: [{ maxSpread: 8, maxSpeed: 100 }]
       } }
     ]
   },
-  requestedAt: "2026-08-28T15:27:00Z"
+  requestedAt: "2026-08-28T15:40:00Z"
 });
