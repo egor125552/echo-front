@@ -90,7 +90,7 @@ export async function setup(ctx) {
 
   window.addEventListener("keyup", (event) => {
     if (!connected) return;
-    if (event.code === "KeyM" || event.code === "Enter") return;
+    if (event.code !== "KeyM" && event.code !== "Enter") return;
     event.preventDefault();
   }, { capture: true, passive: false });
 
