@@ -21,7 +21,7 @@ import * as botController from "../plugins/bot-controller/server.js";
 import * as botNavigation from "../plugins/bot-navigation/server.js";
 import * as botLoadouts from "../plugins/battle-royale-bot-loadouts/server.js";
 import * as spatialGrid from "../plugins/battle-royale-spatial-grid/server.js";
-import * as botPerception from "../plugins/battle-royale-bot-perception/server.js";
+import * as botPerception from "../plugins/bot-perception/server.js";
 import * as battleRoyale from "../plugins/battle-royale/server.js";
 import * as parachute from "../plugins/battle-royale-parachute/server.js";
 import * as botInterest from "../plugins/battle-royale-bot-interest/server.js";
@@ -49,6 +49,7 @@ import * as parachuteRapierFlight from "../plugins/battle-royale-parachute-rapie
 import * as worldSafety from "../plugins/battle-royale-world-safety/server.js";
 import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js";
 import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integration/server.js";
+import * as parkourRagdoll from "../plugins/battle-royale-parkour-ragdoll/server.js";
 import * as navigation from "../plugins/battle-royale-navigation/index.js";
 import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/server.js";
 
@@ -104,6 +105,7 @@ export const battleRoyalePreset = [
   worldSafety,
   botParachute,
   ragdollIntegration,
+  parkourRagdoll,
   navigation,
   dropzoneVehicle,
 ];
