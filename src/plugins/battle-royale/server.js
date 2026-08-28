@@ -1,14 +1,14 @@
 export const DEPLOYMENT_DURATION_MS = 0;
-export const INITIAL_ZONE_RADIUS = 360;
+export const INITIAL_ZONE_RADIUS = 1450;
 export const FINAL_ZONE_RADIUS = 35;
-export const ZONE_GRACE_MS = 45_000;
-export const ZONE_SHRINK_MS = 9 * 60_000;
+export const ZONE_GRACE_MS = 3 * 60_000;
+export const ZONE_SHRINK_MS = 20 * 60_000;
 export const ZONE_DAMAGE_PER_SECOND = 12;
 export const REMAINING_THRESHOLDS = [75, 50, 25, 10, 5, 2, 1];
 
 export const manifest = {
   id: "battle-royale",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities", "health", "movement", "map-test-arena"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
