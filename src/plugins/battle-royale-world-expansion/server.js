@@ -2,13 +2,13 @@ export const EXPANDED_WORLD_HALF_SIZE = 1000;
 export const EXPANDED_WORLD_SIZE = EXPANDED_WORLD_HALF_SIZE * 2;
 export const EXPANDED_SPAWN_RADII = Object.freeze([180, 350, 520, 690, 860, 960]);
 export const EXPANDED_BOUNDARY_BOTTOM = -60;
-export const EXPANDED_BOUNDARY_HEIGHT = 500;
+export const EXPANDED_BOUNDARY_HEIGHT = 700;
 const BOUNDARY_HALF_THICKNESS = 1;
 const SPAWNS_PER_RING = 20;
 
 export const manifest = {
   id: "battle-royale-world-expansion",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["map-test-arena", "rapier-physics"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -41,8 +41,6 @@ export async function setup(ctx) {
 
   physics.beginBatch?.();
   try {
-    // Remove only the original arena shell. The warehouse, stairs, doors,
-    // crates and every other world collider remain untouched.
     for (let i = map.walls.length - 1; i >= 0; i -= 1) {
       const wall = map.walls[i];
       if (wall?.kind !== "world-boundary") continue;
@@ -116,8 +114,8 @@ export async function setup(ctx) {
       throw new Error(`Expected four world boundaries, got ${state.boundaryCount}`);
     }
     if (!state.hasGround) throw new Error("Expanded world ground collider is missing");
-    if (state.boundaryTop < 300) {
-      throw new Error(`World boundary is too low for vehicle ejection: top=${state.boundaryTop}`);
+    if (state.boundaryTop < 550) {
+      throw new Error(`World boundary must exceed parachute launch altitude: top=${state.boundaryTop}`);
     }
     if (state.boundaryBottom > -20) {
       throw new Error(`World boundary does not extend far enough below ground: bottom=${state.boundaryBottom}`);
