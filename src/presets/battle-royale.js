@@ -1,5 +1,6 @@
 import * as entities from "../plugins/entities/server.js";
 import * as physics from "../plugins/rapier-physics/server.js";
+import * as ragdollStability from "../plugins/battle-royale-ragdoll-stability/server.js";
 import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
@@ -45,6 +46,7 @@ import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integratio
 export const battleRoyalePreset = [
   entities,
   physics,
+  ragdollStability,
   liveCharacterQueries,
   map,
   groundNavigation,
