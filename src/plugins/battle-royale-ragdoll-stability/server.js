@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-stability",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -34,7 +34,10 @@ export async function setup(ctx) {
 
   let sequence = 0;
   let latestGroupId = null;
-  let selfCollisionEnabled = false;
+  // Realism mode: non-adjacent parts of the same ragdoll may physically contact.
+  // Connected parts still rely on the ragdoll joint descriptors to suppress
+  // contacts where the joint itself would otherwise fight the solver.
+  let selfCollisionEnabled = true;
   const history = [];
 
   function allocateGroup() {
