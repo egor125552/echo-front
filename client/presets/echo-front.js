@@ -22,6 +22,7 @@ import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js"
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
+import * as navigationAnnouncer from "../plugins/battle-royale-navigation-announcer.js";
 import * as parachuteAnnouncer from "../plugins/parachute-announcer.js";
 import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js";
 
@@ -50,6 +51,7 @@ export const echoFrontClientPreset = [
   lowHealthAudio,
   hud,
   announcer,
+  navigationAnnouncer,
   parachuteAnnouncer,
   vehicleAnnouncer,
 ];
