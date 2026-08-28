@@ -6,6 +6,7 @@ import * as map from "../plugins/battle-royale-map/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
 import * as cratePhysics from "../plugins/battle-royale-crate-physics/server.js";
 import * as movement from "../plugins/movement/server.js";
+import * as jump from "../plugins/battle-royale-jump/server.js";
 import * as teams from "../plugins/teams/server.js";
 import * as health from "../plugins/health/server.js";
 import * as ragdollDamage from "../plugins/battle-royale-ragdoll-damage/server.js";
@@ -53,6 +54,7 @@ export const battleRoyalePreset = [
   groundNavigation,
   cratePhysics,
   movement,
+  jump,
   teams,
   health,
   ragdollDamage,
