@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - stability-restart-hardening
     paths:
       - src/config/engine-command-request.js
       - .github/workflows/engine-command.yml
