@@ -1,30 +1,71 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
 
 const EXPECTED_PARTS = 16;
+const REASONS = Object.freeze([
+  "vehicle-eject",
+  "vehicle-crash",
+  "vehicle-hit",
+  "high-fall",
+  "building-impact",
+  "parkour-pose",
+  "death",
+  "default",
+]);
+const SPEED_MODES = new Set(["none", "horizontal", "vertical", "total"]);
 
-const DEFAULT_TUNING = Object.freeze({
+const BASE_PHYSICS = Object.freeze({
   linearDamping: 0.02,
   angularDamping: 0.02,
   headAngularDamping: 0.03,
   friction: 0.38,
-  vehicleEjectX: 4.8,
-  vehicleEjectY: 0.55,
-  vehicleEjectZ: 3.8,
-  vehicleEjectScaleStartKph: 10,
-  vehicleEjectScaleSpanKph: 70,
-  vehicleEjectScaleMaxExtra: 2.5,
 });
 
-const COMMON_TUMBLE = Object.freeze({
-  "vehicle-hit": Object.freeze({ x: 2.2, y: 0.28, z: 1.65 }),
-  "high-fall": Object.freeze({ x: 1.65, y: 0.22, z: 1.28 }),
-  death: Object.freeze({ x: 0.55, y: 0.10, z: 0.42 }),
-  default: Object.freeze({ x: 0.70, y: 0.12, z: 0.54 }),
+const DEFAULT_PROFILES = Object.freeze({
+  "vehicle-eject": Object.freeze({
+    ...BASE_PHYSICS,
+    x: 4.8, y: 0.55, z: 3.8,
+    speedMode: "horizontal", scaleStartKph: 10, scaleSpanKph: 70, scaleMaxExtra: 2.5,
+  }),
+  "vehicle-crash": Object.freeze({
+    ...BASE_PHYSICS,
+    x: 0.70, y: 0.12, z: 0.54,
+    speedMode: "none", scaleStartKph: 0, scaleSpanKph: 100, scaleMaxExtra: 0,
+  }),
+  "vehicle-hit": Object.freeze({
+    ...BASE_PHYSICS,
+    x: 2.2, y: 0.28, z: 1.65,
+    speedMode: "total", scaleStartKph: 15, scaleSpanKph: 95, scaleMaxExtra: 1.8,
+  }),
+  "high-fall": Object.freeze({
+    ...BASE_PHYSICS,
+    x: 1.65, y: 0.22, z: 1.28,
+    speedMode: "total", scaleStartKph: 25, scaleSpanKph: 100, scaleMaxExtra: 1.6,
+  }),
+  "building-impact": Object.freeze({
+    ...BASE_PHYSICS,
+    x: 0.70, y: 0.12, z: 0.54,
+    speedMode: "none", scaleStartKph: 0, scaleSpanKph: 100, scaleMaxExtra: 0,
+  }),
+  "parkour-pose": Object.freeze({
+    ...BASE_PHYSICS,
+    x: 0.70, y: 0.12, z: 0.54,
+    speedMode: "none", scaleStartKph: 0, scaleSpanKph: 100, scaleMaxExtra: 0,
+  }),
+  death: Object.freeze({
+    ...BASE_PHYSICS,
+    x: 0.55, y: 0.10, z: 0.42,
+    speedMode: "none", scaleStartKph: 0, scaleSpanKph: 100, scaleMaxExtra: 0,
+  }),
+  default: Object.freeze({
+    ...BASE_PHYSICS,
+    x: 0.70, y: 0.12, z: 0.54,
+    speedMode: "none", scaleStartKph: 0, scaleSpanKph: 100, scaleMaxExtra: 0,
+  }),
 });
 
 function clamp(value, minimum, maximum) {
@@ -43,6 +84,14 @@ function horizontalSpeedKph(vector) {
   return Math.hypot(Number(vector?.x) || 0, Number(vector?.z) || 0) * 3.6;
 }
 
+function verticalSpeedKph(vector) {
+  return Math.abs(Number(vector?.y) || 0) * 3.6;
+}
+
+function totalSpeedKph(vector) {
+  return magnitude(vector) * 3.6;
+}
+
 function signFor(value) {
   const text = String(value ?? "ragdoll");
   let hash = 0;
@@ -52,76 +101,66 @@ function signFor(value) {
   return (hash & 1) === 0 ? 1 : -1;
 }
 
-function normalizeTuning(patch = {}, base = DEFAULT_TUNING) {
+function profileKey(reason) {
+  const value = String(reason ?? "default");
+  return Object.hasOwn(DEFAULT_PROFILES, value) ? value : "default";
+}
+
+function normalizeProfile(patch = {}, base = DEFAULT_PROFILES.default) {
+  const requestedMode = String(patch.speedMode ?? base.speedMode ?? "none");
   return {
-    linearDamping: clamp(patch.linearDamping ?? base.linearDamping, 0, 0.12),
-    angularDamping: clamp(patch.angularDamping ?? base.angularDamping, 0, 0.2),
-    headAngularDamping: clamp(patch.headAngularDamping ?? base.headAngularDamping, 0, 0.25),
-    friction: clamp(patch.friction ?? base.friction, 0.15, 1.0),
-    vehicleEjectX: clamp(patch.vehicleEjectX ?? base.vehicleEjectX, 0.5, 10),
-    vehicleEjectY: clamp(patch.vehicleEjectY ?? base.vehicleEjectY, 0, 2),
-    vehicleEjectZ: clamp(patch.vehicleEjectZ ?? base.vehicleEjectZ, 0.5, 10),
-    vehicleEjectScaleStartKph: clamp(
-      patch.vehicleEjectScaleStartKph ?? base.vehicleEjectScaleStartKph,
-      0,
-      120,
-    ),
-    vehicleEjectScaleSpanKph: clamp(
-      patch.vehicleEjectScaleSpanKph ?? base.vehicleEjectScaleSpanKph,
-      20,
-      240,
-    ),
-    vehicleEjectScaleMaxExtra: clamp(
-      patch.vehicleEjectScaleMaxExtra ?? base.vehicleEjectScaleMaxExtra,
-      0,
-      3,
-    ),
+    linearDamping: clamp(patch.linearDamping ?? base.linearDamping, 0, 0.15),
+    angularDamping: clamp(patch.angularDamping ?? base.angularDamping, 0, 0.25),
+    headAngularDamping: clamp(patch.headAngularDamping ?? base.headAngularDamping, 0, 0.30),
+    friction: clamp(patch.friction ?? base.friction, 0.12, 1.0),
+    x: clamp(patch.x ?? base.x, 0, 12),
+    y: clamp(patch.y ?? base.y, 0, 3),
+    z: clamp(patch.z ?? base.z, 0, 12),
+    speedMode: SPEED_MODES.has(requestedMode) ? requestedMode : base.speedMode,
+    scaleStartKph: clamp(patch.scaleStartKph ?? base.scaleStartKph, 0, 180),
+    scaleSpanKph: clamp(patch.scaleSpanKph ?? base.scaleSpanKph, 20, 320),
+    scaleMaxExtra: clamp(patch.scaleMaxExtra ?? base.scaleMaxExtra, 0, 3),
   };
 }
 
-function tuningSnapshot(tuning) {
-  return { ...tuning };
+function freshProfiles() {
+  return Object.fromEntries(
+    REASONS.map((reason) => [reason, normalizeProfile({}, DEFAULT_PROFILES[reason])]),
+  );
 }
 
-function tumbleScale(reason, options, tuning) {
-  if (reason === "vehicle-eject") {
-    const speedKph = horizontalSpeedKph(options?.velocity);
-    return 1 + clamp(
-      (speedKph - tuning.vehicleEjectScaleStartKph) / tuning.vehicleEjectScaleSpanKph,
-      0,
-      tuning.vehicleEjectScaleMaxExtra,
-    );
-  }
-
-  const speedKph = magnitude(options?.velocity) * 3.6;
-  if (reason === "vehicle-hit") {
-    return 1 + clamp((speedKph - 15) / 95, 0, 1.8);
-  }
-  if (reason === "high-fall") {
-    return 1 + clamp((speedKph - 25) / 100, 0, 1.6);
-  }
-  return 1;
+function snapshotProfile(profile) {
+  return { ...profile };
 }
 
-function tumbleBase(reason, tuning) {
-  if (reason === "vehicle-eject") {
-    return {
-      x: tuning.vehicleEjectX,
-      y: tuning.vehicleEjectY,
-      z: tuning.vehicleEjectZ,
-    };
-  }
-  return COMMON_TUMBLE[reason] ?? COMMON_TUMBLE.default;
+function snapshotProfiles(profiles) {
+  return Object.fromEntries(REASONS.map((reason) => [reason, snapshotProfile(profiles[reason])]));
 }
 
-function tumbleFor(reason, entityId, options, tuning) {
-  const base = tumbleBase(reason, tuning);
+function speedForMode(mode, velocity) {
+  if (mode === "horizontal") return horizontalSpeedKph(velocity);
+  if (mode === "vertical") return verticalSpeedKph(velocity);
+  if (mode === "total") return totalSpeedKph(velocity);
+  return 0;
+}
+
+function tumbleScale(profile, options) {
+  if (profile.speedMode === "none" || profile.scaleMaxExtra <= 0) return 1;
+  const speedKph = speedForMode(profile.speedMode, options?.velocity);
+  return 1 + clamp(
+    (speedKph - profile.scaleStartKph) / profile.scaleSpanKph,
+    0,
+    profile.scaleMaxExtra,
+  );
+}
+
+function tumbleFor(entityId, options, profile) {
   const sign = signFor(entityId);
-  const scale = tumbleScale(reason, options, tuning);
+  const scale = tumbleScale(profile, options);
   return {
-    x: base.x * sign * scale,
-    y: base.y * scale,
-    z: base.z * -sign * scale,
+    x: profile.x * sign * scale,
+    y: profile.y * scale,
+    z: profile.z * -sign * scale,
   };
 }
 
@@ -131,7 +170,7 @@ export async function setup(ctx) {
   const world = physics.world;
   const originalActivate = ragdoll.activate.bind(ragdoll);
   const tuned = new Map();
-  let currentTuning = normalizeTuning();
+  let profiles = freshProfiles();
   let tunedActivations = 0;
   let capturedBodyMismatches = 0;
 
@@ -157,15 +196,17 @@ export async function setup(ctx) {
       return activated;
     }
 
-    const appliedTuning = tuningSnapshot(currentTuning);
     const reason = String(options?.reason ?? "impact");
-    const common = tumbleFor(reason, entityId, options, appliedTuning);
+    const key = profileKey(reason);
+    const appliedProfile = snapshotProfile(profiles[key]);
+    const common = tumbleFor(entityId, options, appliedProfile);
+
     for (let index = 0; index < captured.length; index += 1) {
       const body = captured[index];
-      body.setLinearDamping(appliedTuning.linearDamping);
+      body.setLinearDamping(appliedProfile.linearDamping);
       body.setAngularDamping(index === 3
-        ? appliedTuning.headAngularDamping
-        : appliedTuning.angularDamping);
+        ? appliedProfile.headAngularDamping
+        : appliedProfile.angularDamping);
 
       const angular = body.angvel();
       body.setAngvel({
@@ -175,17 +216,20 @@ export async function setup(ctx) {
       }, true);
 
       const collider = body.collider?.(0);
-      collider?.setFriction?.(appliedTuning.friction);
+      collider?.setFriction?.(appliedProfile.friction);
     }
 
     tuned.set(entityId, {
       entityId,
       reason,
+      profileKey: key,
       bodies: captured.length,
-      ...appliedTuning,
+      profile: appliedProfile,
       tumble: common,
-      speedKph: magnitude(options?.velocity) * 3.6,
+      totalSpeedKph: totalSpeedKph(options?.velocity),
       horizontalSpeedKph: horizontalSpeedKph(options?.velocity),
+      verticalSpeedKph: verticalSpeedKph(options?.velocity),
+      scale: tumbleScale(appliedProfile, options),
       tunedAt: Number(now) || Date.now(),
     });
     tunedActivations += 1;
@@ -196,27 +240,70 @@ export async function setup(ctx) {
   ctx.events.on("entity:removed", ({ entityId }) => tuned.delete(entityId));
 
   ctx.services.provide("ragdoll-tuning", {
-    configure(patch = {}) {
-      currentTuning = normalizeTuning(patch, currentTuning);
-      return tuningSnapshot(currentTuning);
+    reasons() {
+      return [...REASONS];
+    },
+    configureReason(reason, patch = {}) {
+      const key = profileKey(reason);
+      profiles[key] = normalizeProfile(patch, profiles[key]);
+      return { reason: key, profile: snapshotProfile(profiles[key]) };
+    },
+    resetReason(reason) {
+      const key = profileKey(reason);
+      profiles[key] = normalizeProfile({}, DEFAULT_PROFILES[key]);
+      return { reason: key, profile: snapshotProfile(profiles[key]) };
+    },
+    currentReason(reason) {
+      const key = profileKey(reason);
+      return { reason: key, profile: snapshotProfile(profiles[key]) };
+    },
+    profiles() {
+      return snapshotProfiles(profiles);
     },
     reset() {
-      currentTuning = normalizeTuning();
-      return tuningSnapshot(currentTuning);
+      profiles = freshProfiles();
+      return snapshotProfiles(profiles);
+    },
+
+    // Backward-compatible Engine Control helper used by the first vehicle-eject lab.
+    configure(patch = {}) {
+      const eject = profiles["vehicle-eject"];
+      const globalPatch = {
+        linearDamping: patch.linearDamping,
+        angularDamping: patch.angularDamping,
+        headAngularDamping: patch.headAngularDamping,
+        friction: patch.friction,
+      };
+      for (const reason of REASONS) {
+        profiles[reason] = normalizeProfile(globalPatch, profiles[reason]);
+      }
+      profiles["vehicle-eject"] = normalizeProfile({
+        x: patch.vehicleEjectX,
+        y: patch.vehicleEjectY,
+        z: patch.vehicleEjectZ,
+        scaleStartKph: patch.vehicleEjectScaleStartKph,
+        scaleSpanKph: patch.vehicleEjectScaleSpanKph,
+        scaleMaxExtra: patch.vehicleEjectScaleMaxExtra,
+      }, eject);
+      return snapshotProfiles(profiles);
     },
     current() {
-      return tuningSnapshot(currentTuning);
+      return snapshotProfiles(profiles);
     },
     stateFor(entityId) {
       const state = tuned.get(entityId);
-      return state ? { ...state, tumble: { ...state.tumble } } : null;
+      return state ? {
+        ...state,
+        profile: { ...state.profile },
+        tumble: { ...state.tumble },
+      } : null;
     },
     summary() {
       return {
         activeTuned: tuned.size,
         tunedActivations,
         capturedBodyMismatches,
-        ...tuningSnapshot(currentTuning),
+        profiles: snapshotProfiles(profiles),
       };
     },
   });
