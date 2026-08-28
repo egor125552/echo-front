@@ -1,22 +1,22 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
 
 const EXPECTED_PARTS = 16;
-const LINEAR_DAMPING = 0.03;
-const ANGULAR_DAMPING = 0.035;
-const HEAD_ANGULAR_DAMPING = 0.05;
-const RAGDOLL_FRICTION = 0.48;
+const LINEAR_DAMPING = 0.02;
+const ANGULAR_DAMPING = 0.02;
+const HEAD_ANGULAR_DAMPING = 0.03;
+const RAGDOLL_FRICTION = 0.38;
 
 const COMMON_TUMBLE = Object.freeze({
-  "vehicle-eject": Object.freeze({ x: 3.0, y: 0.38, z: 2.4 }),
-  "vehicle-hit": Object.freeze({ x: 1.55, y: 0.20, z: 1.12 }),
-  "high-fall": Object.freeze({ x: 1.15, y: 0.16, z: 0.88 }),
-  death: Object.freeze({ x: 0.45, y: 0.08, z: 0.34 }),
-  default: Object.freeze({ x: 0.55, y: 0.10, z: 0.42 }),
+  "vehicle-eject": Object.freeze({ x: 4.8, y: 0.55, z: 3.8 }),
+  "vehicle-hit": Object.freeze({ x: 2.2, y: 0.28, z: 1.65 }),
+  "high-fall": Object.freeze({ x: 1.65, y: 0.22, z: 1.28 }),
+  death: Object.freeze({ x: 0.55, y: 0.10, z: 0.42 }),
+  default: Object.freeze({ x: 0.70, y: 0.12, z: 0.54 }),
 });
 
 function clamp(value, minimum, maximum) {
@@ -43,13 +43,13 @@ function signFor(value) {
 function tumbleScale(reason, options) {
   const speedKph = magnitude(options?.velocity) * 3.6;
   if (reason === "vehicle-eject") {
-    return 1 + clamp((speedKph - 25) / 100, 0, 2.2);
+    return 1 + clamp((speedKph - 10) / 70, 0, 2.5);
   }
   if (reason === "vehicle-hit") {
-    return 1 + clamp((speedKph - 20) / 120, 0, 1.4);
+    return 1 + clamp((speedKph - 15) / 95, 0, 1.8);
   }
   if (reason === "high-fall") {
-    return 1 + clamp((speedKph - 35) / 130, 0, 1.2);
+    return 1 + clamp((speedKph - 25) / 100, 0, 1.6);
   }
   return 1;
 }
