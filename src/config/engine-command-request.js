@@ -1,9 +1,9 @@
-const START = 2000012700000;
+const START = 2000012800000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 127,
+  id: 128,
   mode: "battle-royale",
-  room: "engine-lab-warehouse-crash-127",
+  room: "engine-lab-adaptive-wall-ground-128",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -11,21 +11,22 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
     commands: [
       { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
       { command: "entity.spawn", args: { spec: {
-        id: "crash-test-127", kind: "human", name: "Warehouse Crash Test", bot: false,
-        team: 12701, health: 1000, weapons: [], position: { x: 94, y: 0, z: 24, angle: 0 }
+        id: "ground-wall-test-128",
+        kind: "human",
+        name: "Ground Wall Test",
+        bot: false,
+        team: 12801,
+        health: 400,
+        weapons: [],
+        position: { x: 43.2, y: 0, z: 0, angle: 0 }
       } } },
-      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["crash-test-127", { x: 94, y: 0, z: 24, angle: 0 }] } },
+      { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["ground-wall-test-128", { x: 43.2, y: 0, z: 0, angle: 0 }] } },
       { command: "game.step", args: { dt: 0.02, steps: 1, now: START + 20 } },
-      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["crash-test-127", START + 50, "br-jeep-1"] } },
-      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["crash-test-127", { forward: 1, strafe: -1, fireHeld: true }] } },
-      { command: "game.step", args: { dt: 0.02, steps: 50, now: START + 60 } },
-      { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["crash-test-127", { forward: 1, strafe: 0, fireHeld: true }] } },
-      { command: "game.step", args: { dt: 0.02, steps: 150 } },
-      { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-jeep-1"] } },
+      { command: "service.call", args: { service: "movement", method: "setInput", arguments: ["ground-wall-test-128", { strafe: 1, sprint: true }] } },
+      { command: "game.step", args: { dt: 0.02, steps: 25, now: START + 40 } },
       { command: "service.call", args: { service: "parkour-ragdoll", method: "summary", arguments: [] } },
-      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["crash-test-127"] } },
-      { command: "service.call", args: { service: "ragdoll-stability", method: "assertStable", arguments: [{ maxSpread: 10, maxSpeed: 100 }] } }
+      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["ground-wall-test-128"] } }
     ]
   },
-  requestedAt: "2026-08-28T16:13:00Z"
+  requestedAt: "2026-08-28T16:35:00Z"
 });
