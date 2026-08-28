@@ -1,13 +1,13 @@
 export const manifest = {
   id: "battle-royale-fleet-pedestrian-ragdoll",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "battle-royale-vehicle-fleet",
     "battle-royale-ragdoll",
     "rapier-physics",
     "entities",
   ],
-  capabilities: ["services.consume", "events.emit"],
+  capabilities: ["services.consume", "services.provide", "events.emit"],
 };
 
 const VEHICLE_PEDESTRIAN_HIT_SPEED = 3.0;
@@ -90,7 +90,7 @@ export async function setup(ctx) {
     return result;
   };
 
-  ctx.services.provide?.("fleet-pedestrian-ragdoll", {
+  ctx.services.provide("fleet-pedestrian-ragdoll", {
     summary() {
       return { detectedHits };
     },
