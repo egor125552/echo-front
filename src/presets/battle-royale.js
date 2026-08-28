@@ -46,6 +46,8 @@ import * as parachuteDynamics from "../plugins/battle-royale-parachute-dynamics/
 import * as parachuteRapierFlight from "../plugins/battle-royale-parachute-rapier-flight/server.js";
 import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js";
 import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integration/server.js";
+import * as navigation from "../plugins/battle-royale-navigation/server.js";
+import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -96,4 +98,6 @@ export const battleRoyalePreset = [
   parachuteRapierFlight,
   botParachute,
   ragdollIntegration,
+  navigation,
+  dropzoneVehicle,
 ];
