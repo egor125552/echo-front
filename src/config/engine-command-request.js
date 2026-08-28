@@ -1,53 +1,87 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 90,
+  id: 91,
   mode: "battle-royale",
-  room: "engine-lab-ragdoll-20kg-90",
+  room: "engine-lab-ragdoll-stability-91",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: {
     commands: [
-      { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [2000009000000] } },
+      { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [2000009100000] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "resetDiagnostics", arguments: [] } },
+
+      // First: the real gameplay path. Nitro the real Rapier jeep, then eject.
       { command: "entity.spawn", args: { spec: {
-        id: "ragdoll-20kg-driver-90",
+        id: "stability-driver-91",
         kind: "test-human",
-        name: "20 kg Ragdoll Throw Probe",
+        name: "Ragdoll Stability Driver",
         bot: false,
-        team: 99900,
+        team: 99910,
         health: 200,
         weapons: [],
         position: { x: 94, y: 0, z: 24, angle: 0 }
       } } },
-      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["ragdoll-20kg-driver-90", 2000009000100] } },
-
-      // Clear inherited handbrake state, then use the real four-wheel Rapier nitro.
+      { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["stability-driver-91", 2000009100100] } },
       { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: [
-        "ragdoll-20kg-driver-90", { forward: 0, strafe: 0, sprint: false, fireHeld: false }
+        "stability-driver-91", { forward: 0, strafe: 0, sprint: false, fireHeld: false }
       ] } },
       { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: [
-        "ragdoll-20kg-driver-90", { forward: 1, strafe: 0, sprint: false, fireHeld: true }
+        "stability-driver-91", { forward: 1, strafe: 0, sprint: false, fireHeld: true }
       ] } },
-      { command: "game.step", args: { dt: 0.05, steps: 50, now: 2000009000200 } },
+      { command: "game.step", args: { dt: 0.05, steps: 70, now: 2000009100200 } },
       { command: "service.call", args: { service: "vehicles", method: "summary", arguments: [] } },
-      { command: "service.call", args: { service: "ragdoll", method: "summary", arguments: [] } },
-
-      // Jump out at speed. This uses the real vehicle velocity plus the existing
-      // side/up impulse. With a 20 kg proportional ragdoll the same impulse should
-      // produce a much larger velocity change than the former 69.4 kg body.
       { command: "service.call", args: { service: "ragdoll", method: "ejectFromVehicle", arguments: [
-        "ragdoll-20kg-driver-90", { forward: 1, strafe: -1, sprint: false }, 2000009002750
+        "stability-driver-91", { forward: 1, strafe: -1, sprint: false }, 2000009103750
       ] } },
-      { command: "game.step", args: { dt: 0.05, steps: 2, now: 2000009002800 } },
-      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["ragdoll-20kg-driver-90"] } },
-      { command: "service.call", args: { service: "ragdoll", method: "summary", arguments: [] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "summary", arguments: [] } },
+      { command: "game.step", args: { dt: 0.05, steps: 240, now: 2000009103800 } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "summary", arguments: [] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "assertStable", arguments: [
+        { maxSpread: 8, maxSpeed: 180 }
+      ] } },
 
-      // Keep solving long enough to prove the lighter body remains a real Rapier
-      // ragdoll rather than disappearing or becoming non-finite immediately.
-      { command: "game.step", args: { dt: 0.05, steps: 16, now: 2000009002950 } },
-      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: ["ragdoll-20kg-driver-90"] } },
-      { command: "service.call", args: { service: "ragdoll", method: "summary", arguments: [] } },
-      { command: "entity.inspect", args: { entityId: "ragdoll-20kg-driver-90" } }
+      // Then three independent high-energy ragdolls. They use the same real
+      // Rapier bodies/joints and land under gravity for another long solver run.
+      { command: "entity.spawn", args: { spec: {
+        id: "stability-a-91", kind: "test-human", name: "Stability A", bot: false,
+        team: 99911, health: 200, weapons: [], position: { x: -120, y: 0, z: -80, angle: 0 }
+      } } },
+      { command: "service.call", args: { service: "ragdoll", method: "activate", arguments: [
+        "stability-a-91", { reason: "stress", position: { x: -120, y: 45, z: -80 }, velocity: { x: 28, y: 2, z: 6 } }, 2000009116000
+      ] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "applyVelocityDeltaToLatest", arguments: [
+        { x: 5, y: 18, z: 0 }, 16
+      ] } },
+
+      { command: "entity.spawn", args: { spec: {
+        id: "stability-b-91", kind: "test-human", name: "Stability B", bot: false,
+        team: 99912, health: 200, weapons: [], position: { x: -40, y: 0, z: -160, angle: 0.7 }
+      } } },
+      { command: "service.call", args: { service: "ragdoll", method: "activate", arguments: [
+        "stability-b-91", { reason: "stress", position: { x: -40, y: 55, z: -160 }, angle: 0.7, velocity: { x: -20, y: -4, z: 20 } }, 2000009116100
+      ] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "applyVelocityDeltaToLatest", arguments: [
+        { x: -4, y: 18, z: 3 }, 16
+      ] } },
+
+      { command: "entity.spawn", args: { spec: {
+        id: "stability-c-91", kind: "test-human", name: "Stability C", bot: false,
+        team: 99913, health: 200, weapons: [], position: { x: 120, y: 0, z: 100, angle: -0.5 }
+      } } },
+      { command: "service.call", args: { service: "ragdoll", method: "activate", arguments: [
+        "stability-c-91", { reason: "stress", position: { x: 120, y: 50, z: 100 }, angle: -0.5, velocity: { x: 25, y: -8, z: -16 } }, 2000009116200
+      ] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "applyVelocityDeltaToLatest", arguments: [
+        { x: 5, y: 18, z: -2 }, 16
+      ] } },
+
+      { command: "service.call", args: { service: "ragdoll-stability", method: "summary", arguments: [] } },
+      { command: "game.step", args: { dt: 0.05, steps: 300, now: 2000009116300 } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "summary", arguments: [] } },
+      { command: "service.call", args: { service: "ragdoll-stability", method: "assertStable", arguments: [
+        { maxSpread: 8, maxSpeed: 180 }
+      ] } }
     ]
   },
-  requestedAt: "2026-08-27T21:58:00Z"
+  requestedAt: "2026-08-28T05:55:00Z"
 });
