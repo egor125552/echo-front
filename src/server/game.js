@@ -41,6 +41,11 @@ const FORWARDED_EVENTS = new Set([
   "loot:picked",
 ]);
 
+function shouldForwardEvent(eventName) {
+  const name = String(eventName ?? "");
+  return FORWARDED_EVENTS.has(name) || name.startsWith("navigation:");
+}
+
 export function normalizeGameMode(value) {
   return value === "battle-royale" || value === "br" ? "battle-royale" : "tdm";
 }
@@ -51,7 +56,7 @@ export async function createEchoFrontGame({ mode = "tdm" } = {}) {
   const host = await new PluginHost({ plugins: preset }).start();
   const events = [];
   host.events.on("*", (packet) => {
-    if (!FORWARDED_EVENTS.has(packet.event)) return;
+    if (!shouldForwardEvent(packet.event)) return;
     events.push(packet);
     if (events.length > 2400) events.shift();
   });
