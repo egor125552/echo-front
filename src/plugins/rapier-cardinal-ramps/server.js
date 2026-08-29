@@ -1,16 +1,33 @@
 export const manifest = {
   id: "rapier-cardinal-ramps",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume"],
 };
 
-const MAX_STEP_RISE = 0.22;
-const MIN_STEP_DEPTH = 0.38;
-
 function finite(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function multiplyQuaternion(a, b) {
+  return {
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+  };
+}
+
+function axisQuaternion(axis, angle) {
+  const half = angle / 2;
+  const sine = Math.sin(half);
+  return {
+    x: axis.x * sine,
+    y: axis.y * sine,
+    z: axis.z * sine,
+    w: Math.cos(half),
+  };
 }
 
 export async function setup(ctx) {
@@ -23,51 +40,40 @@ export async function setup(ctx) {
       return originalCreateRamp(spec);
     }
 
-    // Rapier's legacy helper is an X-axis slope. For Z-axis stairs we build
-    // physical steps. Their height must fit CharacterController autostep AND
-    // their tread must be wide enough for the controller to stand on. The old
-    // implementation only checked height, which could create tiny treads that
-    // were descendable but impossible to climb from the bottom.
-    const run = Math.max(0.2, Math.abs(finite(spec.run, 4)));
+    const run = Math.max(0.01, Math.abs(finite(spec.run, 4)));
     const rise = Math.max(0, finite(spec.rise));
     const width = Math.max(0.4, Math.abs(finite(spec.width, 2)));
-    const minimumStepsForRise = Math.max(1, Math.ceil(rise / MAX_STEP_RISE));
-    const maximumStepsForDepth = Math.max(1, Math.floor(run / MIN_STEP_DEPTH));
-    if (minimumStepsForRise > maximumStepsForDepth) {
-      throw new Error(
-        `Cardinal stair is too steep for walkable steps: rise=${rise.toFixed(2)} run=${run.toFixed(2)}`,
-      );
-    }
-    const steps = minimumStepsForRise;
-    const stepDepth = run / steps;
-    const startZ = finite(spec.z) - run / 2;
-    let firstCollider = null;
+    const thickness = Math.max(0.04, Math.abs(finite(spec.thickness, 0.2)));
+    const slopeAngle = Math.atan2(rise, run);
 
-    for (let index = 0; index < steps; index += 1) {
-      const order = direction === "south" ? index : steps - index - 1;
-      const height = rise * ((order + 1) / steps);
-      const z = startZ + stepDepth * (index + 0.5);
-      const collider = physics.createWall({
-        ...spec,
-        kind: spec.kind ?? "building-stair",
-        x: finite(spec.x),
-        y: finite(spec.y),
-        z,
-        hx: width / 2,
-        hz: stepDepth / 2 + 0.012,
-        height: Math.max(0.04, height),
-        run,
-        rise,
-        width,
-        risesToward: direction,
-        rampStep: index + 1,
-        rampSteps: steps,
-        stepRise: rise / steps,
-        stepDepth,
-      });
-      if (!firstCollider) firstCollider = collider;
-    }
+    // Build the already proven east-rising Rapier slope, then yaw the entire
+    // collider into the requested north/south direction. This gives the
+    // CharacterController one continuous walkable surface instead of relying
+    // on autostep heuristics for a stack of tiny cuboids.
+    const collider = originalCreateRamp({
+      ...spec,
+      run,
+      rise,
+      width,
+      thickness,
+      risesToward: "east",
+      cardinalRisesToward: direction,
+    });
+    if (!collider) return collider;
 
-    return firstCollider;
+    const yaw = direction === "north" ? Math.PI / 2 : -Math.PI / 2;
+    const yawRotation = axisQuaternion({ x: 0, y: 1, z: 0 }, yaw);
+    const slopeRotation = axisQuaternion({ x: 0, y: 0, z: 1 }, slopeAngle);
+    collider.setRotation(multiplyQuaternion(yawRotation, slopeRotation));
+
+    const base = collider.translation();
+    const horizontalNormalOffset = Math.sin(slopeAngle) * thickness / 2;
+    collider.setTranslation({
+      x: finite(spec.x),
+      y: base.y,
+      z: finite(spec.z) + (direction === "south" ? horizontalNormalOffset : -horizontalNormalOffset),
+    });
+    physics.syncQueries?.();
+    return collider;
   };
 }
