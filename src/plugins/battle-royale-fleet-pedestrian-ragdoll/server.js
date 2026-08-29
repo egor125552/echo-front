@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-fleet-pedestrian-ragdoll",
-  version: "1.3.0",
+  version: "1.3.1",
   requires: [
     "battle-royale-vehicle-fleet",
     "battle-royale-ragdoll",
@@ -114,6 +114,7 @@ export async function setup(ctx) {
 
       for (const entityId of hitIds) {
         const entity = entities.get(entityId);
+        const wasBot = Boolean(entity?.bot);
         const activated = ragdoll.activate(entityId, {
           reason: "vehicle-hit",
           vehicleId: vehicle.id,
@@ -134,12 +135,12 @@ export async function setup(ctx) {
 
         lastVehicleHitAt.set(hitKey(vehicle.id, entityId), now);
         detectedHits += 1;
-        if (entity?.bot) botHits += 1;
+        if (wasBot) botHits += 1;
         else playerHits += 1;
         peakDetectedImpactSpeed = Math.max(peakDetectedImpactSpeed, impactSpeed);
         ctx.events.emit("ragdoll:fleet-vehicle-hit", {
           entityId,
-          bot: Boolean(entity?.bot),
+          bot: wasBot,
           vehicleId: vehicle.id,
           vehicleKind: vehicle.kind,
           driverId: vehicle.driverId ?? null,
