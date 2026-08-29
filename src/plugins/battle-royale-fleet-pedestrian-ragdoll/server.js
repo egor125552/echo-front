@@ -1,11 +1,12 @@
 export const manifest = {
   id: "battle-royale-fleet-pedestrian-ragdoll",
-  version: "1.3.3",
+  version: "1.3.4",
   requires: [
     "battle-royale-vehicle-fleet",
     "battle-royale-ragdoll",
     "rapier-physics",
     "entities",
+    "bot-controller",
   ],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -38,6 +39,7 @@ export async function setup(ctx) {
   const ragdoll = ctx.services.get("ragdoll");
   const physics = ctx.services.get("physics");
   const entities = ctx.services.get("entities");
+  const bots = ctx.services.get("bots");
   const world = physics.world;
   const characterColliderOwners = new Map();
   const lastVehicleHitAt = new Map();
@@ -116,7 +118,7 @@ export async function setup(ctx) {
 
       for (const entityId of hitIds) {
         const entityBefore = entities.get(entityId);
-        const botBefore = Boolean(entityBefore?.bot);
+        const wasBot = Boolean(bots.isBot(entityId));
         const activated = ragdoll.activate(entityId, {
           reason: "vehicle-hit",
           vehicleId: vehicle.id,
@@ -137,8 +139,9 @@ export async function setup(ctx) {
         lastHit = {
           entityId,
           entityName: entityBefore?.name ?? null,
-          botBefore,
-          botAfter: Boolean(entityAfter?.bot),
+          isBot: wasBot,
+          entityBotBefore: Boolean(entityBefore?.bot),
+          entityBotAfter: Boolean(entityAfter?.bot),
           aliveBefore: Boolean(entityBefore?.alive),
           aliveAfter: Boolean(entityAfter?.alive),
           vehicleId: vehicle.id,
@@ -154,12 +157,12 @@ export async function setup(ctx) {
 
         lastVehicleHitAt.set(hitKey(vehicle.id, entityId), now);
         detectedHits += 1;
-        if (botBefore) botHits += 1;
+        if (wasBot) botHits += 1;
         else playerHits += 1;
         peakDetectedImpactSpeed = Math.max(peakDetectedImpactSpeed, impactSpeed);
         ctx.events.emit("ragdoll:fleet-vehicle-hit", {
           entityId,
-          bot: botBefore,
+          bot: wasBot,
           vehicleId: vehicle.id,
           vehicleKind: vehicle.kind,
           driverId: impactDriverId,
