@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -17,6 +17,7 @@ export const manifest = {
 };
 
 const MIN_FACE_DISTANCE = 0.2;
+const AUTO_GUIDE_FORWARD_THRESHOLD = 0.08;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -48,7 +49,10 @@ export async function setup(ctx) {
   const ragdoll = ctx.services.get("ragdoll");
   const entities = ctx.services.get("entities");
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
+  const originalStep = matchApi.step.bind(matchApi);
   const lastResult = new Map();
+  const trackedPlayers = new Set();
+  const autoGuideStats = new Map();
 
   function emitFor(playerId, event, payload = {}) {
     ctx.events.emit(event, { entityId: playerId, ...payload });
@@ -88,13 +92,21 @@ export async function setup(ctx) {
     return result;
   }
 
-  function face(playerId, now = Date.now()) {
+  function navigationControlAvailable(playerId) {
     const entity = entities.get(playerId);
     const transform = ctx.components.get(playerId, "Transform");
-    if (!entity?.alive || !transform) return unavailable(playerId, "player-unavailable", now);
-    if (vehicles.isDriving?.(playerId)) return unavailable(playerId, "driving", now);
-    if (parachute.stateFor?.(playerId)?.airborne) return unavailable(playerId, "airborne", now);
-    if (ragdoll.isActive?.(playerId)) return unavailable(playerId, "ragdoll", now);
+    if (!entity?.alive || entity.bot || !transform) return { ok: false, reason: "player-unavailable", transform };
+    if (vehicles.isDriving?.(playerId)) return { ok: false, reason: "driving", transform };
+    if (parachute.stateFor?.(playerId)?.airborne) return { ok: false, reason: "airborne", transform };
+    if (ragdoll.isActive?.(playerId)) return { ok: false, reason: "ragdoll", transform };
+    return { ok: true, transform };
+  }
+
+  function face(playerId, now = Date.now()) {
+    trackedPlayers.add(playerId);
+    const available = navigationControlAvailable(playerId);
+    if (!available.ok) return unavailable(playerId, available.reason, now);
+    const transform = available.transform;
 
     const resolved = targetAndPointFor(playerId);
     if (!resolved.target || !resolved.facePoint) return unavailable(playerId, "no-target", now);
@@ -125,9 +137,54 @@ export async function setup(ctx) {
     return result;
   }
 
+  function autoGuide(playerId, now = Date.now()) {
+    const available = navigationControlAvailable(playerId);
+    if (!available.ok) return false;
+
+    const input = ctx.components.get(playerId, "Input");
+    if (finite(input?.forward) <= AUTO_GUIDE_FORWARD_THRESHOLD) return false;
+
+    const resolved = targetAndPointFor(playerId);
+    if (!resolved.state?.active || !resolved.facePoint || !resolved.target) return false;
+    if (distance2(available.transform, resolved.facePoint) < MIN_FACE_DISTANCE) return false;
+
+    const previousAngle = finite(available.transform.angle);
+    const angle = angleTo(available.transform, resolved.facePoint);
+    available.transform.angle = angle;
+
+    const previousStats = autoGuideStats.get(playerId) ?? {
+      applications: 0,
+      checkpointChanges: 0,
+      lastCheckpointIndex: null,
+    };
+    const checkpointIndex = resolved.state?.checkpoint?.index ?? null;
+    const checkpointChanged = previousStats.lastCheckpointIndex !== null
+      && checkpointIndex !== previousStats.lastCheckpointIndex;
+    const stats = {
+      applications: previousStats.applications + 1,
+      checkpointChanges: previousStats.checkpointChanges + (checkpointChanged ? 1 : 0),
+      lastCheckpointIndex: checkpointIndex,
+      lastAt: now,
+      targetId: resolved.target.id,
+      targetName: resolved.target.name,
+      source: resolved.source,
+      previousAngle,
+      angle,
+      correctionRadians: Math.abs(shortestAngleDelta(angle, previousAngle)),
+      x: finite(resolved.facePoint.x),
+      y: finite(resolved.facePoint.y),
+      z: finite(resolved.facePoint.z),
+      distance: distance2(available.transform, resolved.facePoint),
+    };
+    autoGuideStats.set(playerId, stats);
+    return true;
+  }
+
   function facingState(playerId) {
     const transform = ctx.components.get(playerId, "Transform");
     const resolved = targetAndPointFor(playerId);
+    const input = ctx.components.get(playerId, "Input");
+    const stats = autoGuideStats.get(playerId) ?? null;
     if (!transform || !resolved.facePoint) {
       return {
         playerId,
@@ -135,6 +192,14 @@ export async function setup(ctx) {
         angle: transform ? finite(transform.angle) : null,
         desiredAngle: null,
         errorRadians: null,
+        autoGuide: {
+          enabled: true,
+          active: false,
+          forward: finite(input?.forward),
+          applications: stats?.applications ?? 0,
+          checkpointChanges: stats?.checkpointChanges ?? 0,
+          lastAt: stats?.lastAt ?? null,
+        },
         lastResult: lastResult.get(playerId) ?? null,
       };
     }
@@ -153,6 +218,16 @@ export async function setup(ctx) {
         y: finite(resolved.facePoint.y),
         z: finite(resolved.facePoint.z),
       },
+      autoGuide: {
+        enabled: true,
+        active: Boolean(resolved.state?.active && finite(input?.forward) > AUTO_GUIDE_FORWARD_THRESHOLD),
+        forward: finite(input?.forward),
+        applications: stats?.applications ?? 0,
+        checkpointChanges: stats?.checkpointChanges ?? 0,
+        lastCheckpointIndex: stats?.lastCheckpointIndex ?? null,
+        lastAt: stats?.lastAt ?? null,
+        correctionRadians: stats?.correctionRadians ?? null,
+      },
       lastResult: lastResult.get(playerId) ?? null,
     };
   }
@@ -170,17 +245,47 @@ export async function setup(ctx) {
     return state;
   }
 
+  function assertAutoGuiding(playerId, minimumApplications = 1) {
+    const state = facingState(playerId);
+    const minimum = Math.max(1, Math.floor(Number(minimumApplications) || 1));
+    if (!state.autoGuide.active) {
+      throw new Error(`Expected navigation auto-guide to be active for ${playerId}`);
+    }
+    if (state.autoGuide.applications < minimum) {
+      throw new Error(
+        `Expected at least ${minimum} auto-guide applications, got ${state.autoGuide.applications}`,
+      );
+    }
+    return state;
+  }
+
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
+    trackedPlayers.add(playerId);
     const result = originalHandleInput(playerId, input, now);
     if (input.navigationFacePressed) face(playerId, now);
     return result;
   };
 
-  ctx.events.on("entity:removed", ({ entityId }) => lastResult.delete(entityId));
+  matchApi.step = (dt, now = Date.now()) => {
+    for (const playerId of trackedPlayers) autoGuide(playerId, now);
+    const result = originalStep(dt, now);
+    // Navigation advances checkpoints after movement. Re-aim once more so the
+    // next physics frame already starts on the new route segment.
+    for (const playerId of trackedPlayers) autoGuide(playerId, now);
+    return result;
+  };
+
+  ctx.events.on("entity:removed", ({ entityId }) => {
+    lastResult.delete(entityId);
+    autoGuideStats.delete(entityId);
+    trackedPlayers.delete(entityId);
+  });
 
   ctx.services.provide("navigation-face", {
     face,
+    autoGuide,
     stateFor: facingState,
     assertFacing,
+    assertAutoGuiding,
   });
 }
