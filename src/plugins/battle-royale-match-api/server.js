@@ -3,10 +3,10 @@ export const ENTITY_INTEREST_RADIUS = 125;
 
 export const manifest = {
   id: "match-api",
-  version: "2.4.0",
+  version: "2.4.1",
   requires: [
     "entities", "movement", "weapons", "teams", "map-test-arena",
-    "battle-royale", "bot-fill", "bot-combat",
+    "battle-royale", "bot-fill", "bot-combat", "battle-royale-vehicle-fleet",
   ],
   optional: ["armor", "aim-steering", "health-regeneration"],
   capabilities: [
@@ -32,6 +32,7 @@ export async function setup(ctx) {
   const battleRoyale = ctx.services.get("battle-royale");
   const botFill = ctx.services.get("bot-fill");
   const botCombat = ctx.services.get("bot-combat");
+  const vehicles = ctx.services.get("vehicles");
   const armorService = ctx.services.has("armor") ? ctx.services.get("armor") : null;
   const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
   const healthRegeneration = ctx.services.has("health-regeneration")
@@ -237,6 +238,10 @@ export async function setup(ctx) {
       y: transform?.y ?? 0,
       z: transform?.z ?? 0,
     };
+    const drivenVehicle = vehicles.vehicleForDriver?.(entity.id) ?? null;
+    const semanticPosition = drivenVehicle
+      ? { x: drivenVehicle.x, y: 0, z: drivenVehicle.z }
+      : position;
     return {
       id: entity.id,
       name: entity.name,
@@ -247,9 +252,9 @@ export async function setup(ctx) {
       y: position.y,
       z: position.z,
       angle: transform?.angle ?? 0,
-      surface: map.surfaceAt?.(position) ?? map.defaultSurface ?? "forest",
-      acousticZone: map.acousticZoneAt?.(position) ?? "outdoor",
-      location: map.locationAt?.(position) ?? "Карта",
+      surface: map.surfaceAt?.(semanticPosition) ?? map.defaultSurface ?? "forest",
+      acousticZone: map.acousticZoneAt?.(semanticPosition) ?? "outdoor",
+      location: map.locationAt?.(semanticPosition) ?? "Карта",
       health: health?.current ?? null,
       healthMax: health?.maximum ?? null,
       armor: armor?.current ?? null,
