@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-client",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "keyboard-input",
     "cloudflare-session",
@@ -77,7 +77,6 @@ export async function setup(ctx) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });
     }
-    // speech-settings is deliberately latest-wins and never builds a TTS queue.
     speech.say(text, { interrupt });
   }
 
@@ -195,8 +194,6 @@ export async function setup(ctx) {
     latestNavigation = nextNavigation;
     latestSelf = snapshot?.entities?.find((entity) => entity.id === network.playerId) ?? null;
 
-    // Selection speech follows the same snapshot that drives the audible beacon.
-    // If the beacon state arrived, this announcement path necessarily arrived too.
     if (selectedId && selectedId !== lastSelectedId) {
       announce(`${selected.name || "Цель"}. ${roundedMeters(selected.distance)} метров. Enter — выбрать.`);
     }
@@ -221,8 +218,6 @@ export async function setup(ctx) {
     const payload = packet?.payload ?? {};
     if (payload.entityId !== network.playerId) return;
 
-    // Selection/start are intentionally snapshot-driven above. These terminal
-    // events keep the more specific messages while retaining snapshot fallback.
     if (packet.event === "navigation:stopped") {
       terminalEventAt = performance.now();
       announce("Навигация выключена.");
@@ -236,6 +231,10 @@ export async function setup(ctx) {
     if (packet.event === "navigation:unavailable") {
       terminalEventAt = performance.now();
       announce("Цель навигации недоступна.");
+      return;
+    }
+    if (packet.event === "navigation:warning" && payload.reason === "outside-safe-zone") {
+      announce(`Внимание. Цель ${payload.targetName || "маршрута"} находится за пределами безопасной зоны.`);
       return;
     }
     if (packet.event === "vehicle:dropzone-placed") {
