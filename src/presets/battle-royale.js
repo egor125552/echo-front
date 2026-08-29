@@ -1,5 +1,6 @@
 import * as entities from "../plugins/entities/server.js";
 import * as physics from "../plugins/rapier-physics/server.js";
+import * as toggleableColliders from "../plugins/rapier-toggleable-colliders/server.js";
 import * as cardinalRamps from "../plugins/rapier-cardinal-ramps/server.js";
 import * as ragdollStability from "../plugins/battle-royale-ragdoll-stability/server.js";
 import * as ragdollSelfCollision from "../plugins/battle-royale-ragdoll-self-collision/server.js";
@@ -65,6 +66,7 @@ import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/serv
 export const battleRoyalePreset = [
   entities,
   physics,
+  toggleableColliders,
   cardinalRamps,
   ragdollStability,
   ragdollSelfCollision,
