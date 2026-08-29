@@ -1,41 +1,42 @@
-const START = 2000018500000;
+const START = 2000018600000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 185,
+  id: 186,
   mode: "battle-royale",
-  room: "engine-play-forest-hut-185",
+  room: "engine-play-grounded-forest-hut-186",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: { commands: [
     { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
-    { command: "entity.spawn", args: { spec: { id: "explorer-185", kind: "human", name: "Forest Hut Explorer", bot: false, team: 18501, health: 400, weapons: ["pistol"], position: { x: -115, y: 0, z: -66.5, angle: 0 } } } },
-    { command: "game.step", args: { dt: 0.02, steps: 3, now: START + 20 } },
+    { command: "entity.spawn", args: { spec: { id: "explorer-186", kind: "human", name: "Grounded Forest Hut Explorer", bot: false, team: 18601, health: 400, weapons: ["pistol"], position: { x: -115, y: 0, z: -66.5, angle: 0 } } } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["explorer-186", { x: -115, y: 0, z: -66.5, angle: 0 }] } },
+    { command: "service.call", args: { service: "parachute", method: "finishMovement", arguments: [0.02, START + 20] } },
+    { command: "service.call", args: { service: "parachute", method: "stateFor", arguments: ["explorer-186"] } },
 
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-185", { forward: 1 }, START + 100] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-186", { forward: 1 }, START + 100] } },
     { command: "game.step", args: { dt: 0.02, steps: 45, now: START + 120 } },
-    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["explorer-185", START + 1100] } },
+    { command: "service.call", args: { service: "physics", method: "position", arguments: ["explorer-186"] } },
 
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-185", { strafe: 1 }, START + 1200] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-186", { strafe: 1 }, START + 1200] } },
     { command: "game.step", args: { dt: 0.02, steps: 70, now: START + 1220 } },
-    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["explorer-185", START + 2700] } },
+    { command: "service.call", args: { service: "physics", method: "position", arguments: ["explorer-186"] } },
 
     { command: "service.call", args: { service: "map", method: "acousticOcclusionBetween", arguments: [{ x: -110, y: 0, z: -67.2 }, { x: -110, y: 0, z: -75 }] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-185", { interactPressed: true }, START + 2800] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-186", { interactPressed: true }, START + 2800] } },
     { command: "service.call", args: { service: "map", method: "acousticOcclusionBetween", arguments: [{ x: -110, y: 0, z: -67.2 }, { x: -110, y: 0, z: -75 }] } },
 
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-185", { forward: 1 }, START + 2900] } },
-    { command: "game.step", args: { dt: 0.02, steps: 75, now: START + 2920 } },
-    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["explorer-185", START + 4500] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-186", { forward: 1 }, START + 2900] } },
+    { command: "game.step", args: { dt: 0.02, steps: 72, now: START + 2920 } },
+    { command: "service.call", args: { service: "physics", method: "position", arguments: ["explorer-186"] } },
+    { command: "service.call", args: { service: "map", method: "locationAt", arguments: [{ x: -110, y: 0, z: -74 }] } } },
+    { command: "service.call", args: { service: "map", method: "acousticProfileAt", arguments: [{ x: -110, y: 0, z: -74 }] } } },
 
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-185", { strafe: -1 }, START + 4600] } },
-    { command: "game.step", args: { dt: 0.02, steps: 32, now: START + 4620 } },
-    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["explorer-185", START + 5300] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-185", { interactPressed: true }, START + 5400] } },
-    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["explorer-185", START + 5500] } },
-
-    { command: "service.call", args: { service: "building-design-validator", method: "validateAll", arguments: [] } },
-    { command: "service.call", args: { service: "object-affordances", method: "nearestVehicle", arguments: ["explorer-185"] } }
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-186", { strafe: -1 }, START + 4500] } },
+    { command: "game.step", args: { dt: 0.02, steps: 34, now: START + 4520 } },
+    { command: "service.call", args: { service: "physics", method: "position", arguments: ["explorer-186"] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-186", { interactPressed: true }, START + 5300] } },
+    { command: "service.call", args: { service: "map", method: "interact", arguments: [{ entityId: "explorer-186", x: -112.1, y: 0, z: -74, now: START + 5400 }] } }
   ] },
-  requestedAt: "2026-08-29T22:34:00+03:00"
+  requestedAt: "2026-08-29T22:38:00+03:00"
 });
