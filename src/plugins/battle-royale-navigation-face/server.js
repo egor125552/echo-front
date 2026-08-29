@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -8,12 +8,11 @@ export const manifest = {
     "battle-royale-parachute",
     "battle-royale-ragdoll",
     "entities",
-    "movement",
   ],
   capabilities: [
     "services.consume", "services.provide",
     "components.read", "components.write",
-    "events.emit",
+    "events.on", "events.emit",
   ],
 };
 
@@ -177,7 +176,7 @@ export async function setup(ctx) {
     return result;
   };
 
-  ctx.events.on?.("entity:removed", ({ entityId }) => lastResult.delete(entityId));
+  ctx.events.on("entity:removed", ({ entityId }) => lastResult.delete(entityId));
 
   ctx.services.provide("navigation-face", {
     face,
