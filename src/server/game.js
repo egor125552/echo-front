@@ -68,6 +68,9 @@ export async function createEchoFrontGame({ mode = "tdm" } = {}) {
     drainEvents() {
       return events.splice(0);
     },
+    pendingEvents() {
+      return events.slice();
+    },
     pendingEventCount() {
       return events.length;
     },
