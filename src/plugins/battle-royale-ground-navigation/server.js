@@ -6,8 +6,8 @@ export const BUILDING_BYPASS_END_CLEARANCE = 1.35;
 
 export const manifest = {
   id: "battle-royale-ground-navigation",
-  version: "1.1.0",
-  requires: ["map-test-arena"],
+  version: "1.2.0",
+  requires: ["map-test-arena", "battle-royale-building-navigation"],
   capabilities: ["services.consume", "services.provide"],
 };
 
@@ -167,10 +167,18 @@ export function buildingDoorBypassWaypoint(from, doorWaypoint, building) {
 
 export async function setup(ctx) {
   const map = ctx.services.get("map");
+  const buildingNavigation = ctx.services.get("building-navigation");
   const originalNavigationWaypoint = map.navigationWaypoint.bind(map);
   const stair = stairBounds(map);
 
+  function requiredWaypoints(from, target) {
+    return buildingNavigation.requiredWaypoints(from, target) ?? [];
+  }
+
   function navigationWaypoint(from, target) {
+    const buildingRoute = requiredWaypoints(from, target);
+    if (buildingRoute.length) return buildingRoute[0];
+
     const semantic = originalNavigationWaypoint(from, target);
 
     if (
@@ -207,6 +215,11 @@ export async function setup(ctx) {
   ctx.services.provide("ground-navigation", {
     stair,
     waypoint: navigationWaypoint,
+    requiredWaypoints,
+    buildingLocation: buildingNavigation.locationFor,
+    registerBuilding: buildingNavigation.registerBuilding,
+    unregisterBuilding: buildingNavigation.unregisterBuilding,
+    buildings: buildingNavigation.list,
     bypassWaypoint(from, target) {
       return groundFloorBypassWaypoint(from, target, { building: map.building, stair });
     },
