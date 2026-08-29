@@ -4,7 +4,7 @@ export const CRATE_HEIGHT = 0.55;
 
 export const manifest = {
   id: "battle-royale-crate-physics",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["rapier-physics", "map-test-arena"],
   capabilities: ["services.consume"],
 };
@@ -17,7 +17,11 @@ export async function setup(ctx) {
   physics.beginBatch?.();
   try {
     for (const crate of crates) {
-      physics.createWall({
+      // Declarative building factory crates already have their collider because
+      // they may also be created dynamically. Legacy map crates still come
+      // through this plugin.
+      if (crate.collider) continue;
+      crate.collider = physics.createWall({
         kind: "loot-crate",
         crateId: crate.id,
         accessibleName: "ящик",
