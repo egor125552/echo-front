@@ -1,7 +1,13 @@
 export const manifest = {
   id: "battle-royale-navigation-face-client",
-  version: "1.1.0",
-  requires: ["keyboard-input", "cloudflare-session", "spatial-audio-web", "speech-settings"],
+  version: "1.1.1",
+  requires: [
+    "battle-royale-navigation-client",
+    "keyboard-input",
+    "cloudflare-session",
+    "spatial-audio-web",
+    "speech-settings",
+  ],
 };
 
 export async function setup(ctx) {
