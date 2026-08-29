@@ -1,6 +1,6 @@
 export const manifest = {
   id: "play-journal",
-  version: "2.1.0",
+  version: "2.2.0",
   requires: ["cloudflare-session"],
 };
 
@@ -87,6 +87,9 @@ export function encodeInputRecord(timeMs, input = {}) {
     input.interactPressed ? 1 : 0,
     input.platePressed ? 1 : 0,
     input.posePressed ? 1 : 0,
+    input.navigationNextPressed ? 1 : 0,
+    input.navigationTogglePressed ? 1 : 0,
+    input.navigationFacePressed ? 1 : 0,
   ];
 }
 
@@ -101,16 +104,16 @@ function persistentInputSignature(input = {}) {
 }
 
 function header(epochMs) {
-  return ["EFJ", 3, epochMs, {
+  return ["EFJ", 4, epochMs, {
     clock: "client milliseconds from journal start",
     keys: "1 up,2 down,3 left,4 right,5 space,6 C,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B",
     k: "[k,t,key,down] exact browser key transition",
-    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed,posePressed] input sampled for server",
+    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed,posePressed,navigationNextPressed,navigationTogglePressed,navigationFacePressed] input sampled for server",
     n: "[n,t,index,id,name,bot,team,healthMax,armorMax] entity dictionary",
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
     c: `change=[entityIndex,bitmask,values...] bits: ${ENTITY_FIELDS.join(",")}`,
-    e: "[e,t,event,payload] authoritative game event; ragdoll events include reason, body part and impact severity when available",
-    m: "[m,t,name,data] journal/network/input marker",
+    e: "[e,t,event,payload] authoritative game event",
+    m: "[m,t,name,data] journal/network/navigation/speech marker",
   }];
 }
 
@@ -130,6 +133,7 @@ export async function setup(ctx) {
   let previousSnapshotIds = new Set();
   let nextEntityIndex = 1;
   let sawRawSnapshot = false;
+  let lastGuidanceSignature = null;
 
   function stamp() {
     return Math.max(0, Math.round(performance.now() - startedAtPerf));
@@ -151,6 +155,7 @@ export async function setup(ctx) {
     previousSnapshotIds = new Set();
     nextEntityIndex = 1;
     sawRawSnapshot = false;
+    lastGuidanceSignature = null;
     updateUi();
   }
 
@@ -174,6 +179,9 @@ export async function setup(ctx) {
       || input.interactPressed
       || input.platePressed
       || input.posePressed
+      || input.navigationNextPressed
+      || input.navigationTogglePressed
+      || input.navigationFacePressed
     );
     if (signature === lastInputSignature && !impulse) return;
     lastInputSignature = signature;
@@ -191,10 +199,29 @@ export async function setup(ctx) {
     return index;
   }
 
+  function recordGuidanceSnapshot(snapshot, timeMs) {
+    const guidance = snapshot?.navigationGuidance;
+    if (!guidance) return;
+    const compact = {
+      enabled: Boolean(guidance.enabled),
+      mode: guidance.mode ?? null,
+      targetId: guidance.targetId ?? null,
+      targetName: guidance.targetName ?? null,
+      active: Boolean(guidance.active),
+      manualOverride: Boolean(guidance.manualOverride),
+    };
+    const signature = JSON.stringify(compact);
+    if (signature === lastGuidanceSignature) return;
+    lastGuidanceSignature = signature;
+    append(["m", timeMs, "navigation-guidance", compact]);
+  }
+
   function recordSnapshot(snapshot = {}) {
     const timeMs = stamp();
     const changes = [];
     const currentIds = new Set();
+
+    recordGuidanceSnapshot(snapshot, timeMs);
 
     for (const entity of snapshot.entities ?? []) {
       if (!entity?.id) continue;
@@ -230,6 +257,22 @@ export async function setup(ctx) {
       changes,
       removed,
     ]);
+  }
+
+  function compactSpeechState(state = {}) {
+    return {
+      reason: state.reason ?? null,
+      error: state.error ?? null,
+      fallbackReason: state.fallbackReason ?? null,
+      supported: state.supported ?? null,
+      enabled: state.enabled ?? null,
+      primed: state.primed ?? null,
+      speaking: state.speaking ?? null,
+      pending: state.pending ?? null,
+      userActive: state.userActive ?? null,
+      voice: state.voice ?? state.selectedVoice ?? null,
+      retry: state.retry ?? null,
+    };
   }
 
   async function makeDownloadBlob(text) {
@@ -300,6 +343,12 @@ export async function setup(ctx) {
   ctx.events.on("network:welcome", ({ playerId, team } = {}) => append(["m", stamp(), "welcome", { playerId, team }]));
   ctx.events.on("network:disconnected", () => append(["m", stamp(), "disconnected", null]));
   ctx.events.on("network:error", () => append(["m", stamp(), "network-error", null]));
+  ctx.events.on("speech:state", (state = {}) => {
+    append(["m", stamp(), "speech-state", compactSpeechState(state)]);
+  });
+  ctx.events.on("speech:visible-error", ({ reason, message } = {}) => {
+    append(["m", stamp(), "speech-visible-error", { reason: reason ?? null, message: message ?? null }]);
+  });
   ctx.events.on("game:snapshot:raw", (snapshot) => {
     sawRawSnapshot = true;
     recordSnapshot(snapshot);
