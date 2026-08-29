@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face-client",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: [
     "battle-royale-navigation-client",
     "keyboard-input",
@@ -24,6 +24,7 @@ export async function setup(ctx) {
   let navigationFacePressed = false;
   let connected = Boolean(network.connected);
   let guidanceEnabled = false;
+  let guidanceSnapshotInitialized = false;
 
   function announce(text) {
     if (!text) return;
@@ -31,14 +32,26 @@ export async function setup(ctx) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });
     }
-    // This is the in-game TTS path, not just the DOM live region.
     speech.say(text, { interrupt: true });
+  }
+
+  function enabledMessage(targetName = null) {
+    return `Автоведение включено. Веду к цели: ${targetName || "цель"}.`;
   }
 
   function syncGuidanceButtons() {
     for (const button of guidanceButtons) {
       button.setAttribute("aria-pressed", guidanceEnabled ? "true" : "false");
     }
+  }
+
+  function setGuidanceState(enabled, { announceChange = false, targetName = null } = {}) {
+    const next = Boolean(enabled);
+    const changed = next !== guidanceEnabled;
+    guidanceEnabled = next;
+    syncGuidanceButtons();
+    if (!announceChange || !changed) return;
+    announce(next ? enabledMessage(targetName) : "Автоведение выключено. Управление ручное.");
   }
 
   input.sample = () => {
@@ -91,10 +104,24 @@ export async function setup(ctx) {
   ctx.events.on("network:disconnected", () => {
     connected = false;
     guidanceEnabled = false;
+    guidanceSnapshotInitialized = false;
     navigationNextPressed = false;
     navigationTogglePressed = false;
     navigationFacePressed = false;
     syncGuidanceButtons();
+  });
+
+  ctx.events.on("game:snapshot", (snapshot) => {
+    if (snapshot?.mode !== "battle-royale" || !snapshot.navigationGuidance) return;
+    const next = Boolean(snapshot.navigationGuidance.enabled);
+    const targetName = snapshot.navigationGuidance.targetName || null;
+    if (!guidanceSnapshotInitialized) {
+      guidanceSnapshotInitialized = true;
+      guidanceEnabled = next;
+      syncGuidanceButtons();
+      return;
+    }
+    setGuidanceState(next, { announceChange: true, targetName });
   });
 
   ctx.events.on("game:event", (packet) => {
@@ -102,16 +129,20 @@ export async function setup(ctx) {
     if (payload.entityId !== network.playerId) return;
 
     if (packet.event === "navigation:guidance-enabled") {
+      guidanceSnapshotInitialized = true;
+      const changed = !guidanceEnabled;
       guidanceEnabled = true;
       syncGuidanceButtons();
-      announce(`Автоведение включено. Веду к цели: ${payload.targetName || "цель"}.`);
+      if (changed) announce(enabledMessage(payload.targetName));
       return;
     }
 
     if (packet.event === "navigation:guidance-disabled") {
+      guidanceSnapshotInitialized = true;
+      const changed = guidanceEnabled;
       guidanceEnabled = false;
       syncGuidanceButtons();
-      if (payload.reason === "toggle") announce("Автоведение выключено. Управление ручное.");
+      if (changed && payload.reason === "toggle") announce("Автоведение выключено. Управление ручное.");
       return;
     }
 
