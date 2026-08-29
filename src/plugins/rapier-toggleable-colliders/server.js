@@ -1,8 +1,8 @@
 export const manifest = {
   id: "rapier-toggleable-colliders",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["rapier-physics"],
-  capabilities: ["services.consume"],
+  capabilities: ["services.consume", "services.provide"],
 };
 
 function finite(value, fallback = 0) {
