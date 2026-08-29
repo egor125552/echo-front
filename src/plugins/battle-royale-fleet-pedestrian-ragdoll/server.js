@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-fleet-pedestrian-ragdoll",
-  version: "1.3.1",
+  version: "1.3.2",
   requires: [
     "battle-royale-vehicle-fleet",
     "battle-royale-ragdoll",
@@ -47,6 +47,7 @@ export async function setup(ctx) {
   let contactCandidates = 0;
   let cooldownRejectedHits = 0;
   let peakDetectedImpactSpeed = 0;
+  let lastHit = null;
 
   const originalCreateCharacter = physics.createCharacter.bind(physics);
   physics.createCharacter = (entityId, position) => {
@@ -105,16 +106,13 @@ export async function setup(ctx) {
         : afterVelocity;
       const horizontal = Math.hypot(Number(linvel?.x) || 0, Number(linvel?.z) || 0) || 1;
 
-      // Slow impacts should mostly knock a pedestrian over. Fast impacts carry
-      // noticeably more of the vehicle's momentum and can throw them clear of
-      // the chassis instead of repeatedly trapping them underneath it.
       const carry = Math.min(0.9, 0.5 + impactSpeed * 0.018);
       const knock = Math.min(5.2, 0.8 + impactSpeed * 0.14);
       const lift = Math.min(2.8, 0.65 + impactSpeed * 0.07);
 
       for (const entityId of hitIds) {
-        const entity = entities.get(entityId);
-        const wasBot = Boolean(entity?.bot);
+        const entityBefore = entities.get(entityId);
+        const botBefore = Boolean(entityBefore?.bot);
         const activated = ragdoll.activate(entityId, {
           reason: "vehicle-hit",
           vehicleId: vehicle.id,
@@ -131,16 +129,31 @@ export async function setup(ctx) {
             z: ((Number(linvel?.z) || 0) / horizontal) * knock,
           },
         }, now);
+        const entityAfter = entities.get(entityId);
+        lastHit = {
+          entityId,
+          entityName: entityBefore?.name ?? null,
+          botBefore,
+          botAfter: Boolean(entityAfter?.bot),
+          aliveBefore: Boolean(entityBefore?.alive),
+          aliveAfter: Boolean(entityAfter?.alive),
+          vehicleId: vehicle.id,
+          driverId: vehicle.driverId ?? null,
+          impactSpeed,
+          impactSpeedKph: impactSpeed * 3.6,
+          activated: Boolean(activated),
+          now,
+        };
         if (!activated) continue;
 
         lastVehicleHitAt.set(hitKey(vehicle.id, entityId), now);
         detectedHits += 1;
-        if (wasBot) botHits += 1;
+        if (botBefore) botHits += 1;
         else playerHits += 1;
         peakDetectedImpactSpeed = Math.max(peakDetectedImpactSpeed, impactSpeed);
         ctx.events.emit("ragdoll:fleet-vehicle-hit", {
           entityId,
-          bot: wasBot,
+          bot: botBefore,
           vehicleId: vehicle.id,
           vehicleKind: vehicle.kind,
           driverId: vehicle.driverId ?? null,
@@ -175,6 +188,7 @@ export async function setup(ctx) {
         minimumHitSpeedKph: VEHICLE_PEDESTRIAN_HIT_SPEED * 3.6,
         peakDetectedImpactSpeed,
         peakDetectedImpactSpeedKph: peakDetectedImpactSpeed * 3.6,
+        lastHit,
       };
     },
   });
