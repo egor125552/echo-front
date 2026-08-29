@@ -4,6 +4,7 @@ import * as ragdollStability from "../plugins/battle-royale-ragdoll-stability/se
 import * as ragdollSelfCollision from "../plugins/battle-royale-ragdoll-self-collision/server.js";
 import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
+import * as buildingFactory from "../plugins/battle-royale-building-factory/server.js";
 import * as worldExpansion from "../plugins/battle-royale-world-expansion/server.js";
 import * as buildingNavigation from "../plugins/battle-royale-building-navigation/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
@@ -43,6 +44,7 @@ import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
 import * as fleetPedestrianRagdoll from "../plugins/battle-royale-fleet-pedestrian-ragdoll/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
+import * as acousticProfile from "../plugins/battle-royale-acoustic-profile/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/server.js";
@@ -53,6 +55,7 @@ import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js"
 import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integration/server.js";
 import * as parkourRagdoll from "../plugins/battle-royale-parkour-ragdoll/server.js";
 import * as navigation from "../plugins/battle-royale-navigation/index.js";
+import * as buildingTargets from "../plugins/battle-royale-building-targets/server.js";
 import * as airNavigation from "../plugins/battle-royale-air-navigation/server.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face/server.js";
 import * as navigationLifecycle from "../plugins/battle-royale-navigation-lifecycle/server.js";
@@ -65,6 +68,7 @@ export const battleRoyalePreset = [
   ragdollSelfCollision,
   liveCharacterQueries,
   map,
+  buildingFactory,
   worldExpansion,
   buildingNavigation,
   groundNavigation,
@@ -104,6 +108,7 @@ export const battleRoyalePreset = [
   ragdollTuning,
   fleetPedestrianRagdoll,
   matchApi,
+  acousticProfile,
   vehicleIntegration,
   parachuteIntegration,
   parachuteCanopy,
@@ -114,6 +119,7 @@ export const battleRoyalePreset = [
   ragdollIntegration,
   parkourRagdoll,
   navigation,
+  buildingTargets,
   airNavigation,
   navigationFace,
   navigationLifecycle,
