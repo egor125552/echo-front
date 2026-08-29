@@ -79,6 +79,17 @@ export async function createEchoFrontGame({ mode = "tdm" } = {}) {
     },
   };
 
+  // Read-only Engine Control hooks on the already-public match-api service.
+  // They make missing network forwarding immediately observable without
+  // draining the real queue or changing gameplay state.
+  game.api.enginePendingEvents = (prefix = "") => {
+    const wanted = String(prefix ?? "");
+    return events
+      .filter((packet) => !wanted || String(packet?.event ?? "").startsWith(wanted))
+      .slice();
+  };
+  game.api.enginePendingEventCount = () => events.length;
+
   const engineConsole = createEngineConsole(game);
   game.command = (request) => engineConsole.execute(request);
   game.engineCommands = () => engineConsole.list();
