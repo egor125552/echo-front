@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -50,6 +50,7 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
   const originalStep = matchApi.step.bind(matchApi);
+  const originalSnapshotFor = matchApi.snapshotFor.bind(matchApi);
   const lastResult = new Map();
   const trackedPlayers = new Set();
   const guidanceEnabled = new Set();
@@ -264,6 +265,20 @@ export async function setup(ctx) {
     const result = originalStep(dt, now);
     for (const playerId of trackedPlayers) autoGuide(playerId, now);
     return result;
+  };
+
+  matchApi.snapshotFor = (playerId, now = Date.now()) => {
+    const snapshot = originalSnapshotFor(playerId, now);
+    const guidance = stateFor(playerId);
+    return {
+      ...snapshot,
+      navigationGuidance: {
+        enabled: guidance.enabled,
+        targetId: guidance.targetId,
+        targetName: guidance.targetName,
+        active: guidance.autoGuide.active,
+      },
+    };
   };
 
   ctx.events.on("navigation:stopped", ({ entityId }) => {
