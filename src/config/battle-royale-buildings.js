@@ -21,6 +21,7 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
     z: -75,
     width: 12,
     depth: 10,
+    wallMaterial: "wood",
     acoustics: {
       zone: "forest-hut",
       reverbMix: 0.2,
@@ -35,7 +36,7 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         name: "комната",
         y: 0,
         height: 2.7,
-        surface: "stone",
+        surface: "wood",
         acoustics: { reverbMix: 0.22 },
       },
     ],
@@ -46,12 +47,12 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         floorId: "ground",
         side: "south",
         offset: 0,
-        width: 2.1,
+        width: 2.2,
         material: "wood",
       },
     ],
     crates: [
-      { id: "forest-hut-armor", floorId: "ground", x: -2.5, z: 1.8, loot: "armor" },
+      { id: "forest-hut-armor", floorId: "ground", x: -2.6, z: 1.6, loot: "armor" },
     ],
   },
   {
@@ -105,7 +106,7 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         floorId: "ground",
         side: "east",
         offset: 0,
-        width: 2.4,
+        width: 2.6,
         material: "metal",
       },
       {
@@ -114,16 +115,15 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         floorId: "ground",
         side: "west",
         offset: -3.5,
-        width: 2.2,
+        width: 2.4,
         material: "wood",
       },
     ],
-    // A partial divider creates two acoustically different halves while leaving
-    // a wide passage in the middle. More complex layouts can be expressed as
-    // as many explicit wall segments as needed.
+    // Two short wall pieces make two rooms but deliberately leave a broad,
+    // shoulder-friendly passage through the middle.
     walls: [
-      { floorId: "ground", x: 0, z: -5.4, hx: 0.22, hz: 2.1, height: 2.9, material: "concrete" },
-      { floorId: "ground", x: 0, z: 5.4, hx: 0.22, hz: 2.1, height: 2.9, material: "concrete" },
+      { floorId: "ground", x: 0, z: -5.25, hx: 0.22, hz: 2.25, height: 2.9, material: "concrete" },
+      { floorId: "ground", x: 0, z: 5.25, hx: 0.22, hz: 2.25, height: 2.9, material: "concrete" },
     ],
     crates: [
       { id: "loot-house-rifle-a", floorId: "ground", x: -6.7, z: -4.8, loot: "rifle" },
@@ -150,25 +150,27 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
     floors: [
       {
         id: "ground",
-        name: "первый этаж",
+        name: "холл первого этажа",
         y: 0,
         height: 2.9,
-        surface: "concrete",
-        acoustics: { zone: "two-storey-ground", reverbMix: 0.34 },
+        surface: "wood",
+        acoustics: { zone: "two-storey-ground", reverbMix: 0.31 },
       },
       {
         id: "upper",
         name: "второй этаж",
         y: 3.2,
         height: 2.9,
-        surface: "concrete",
-        acoustics: { zone: "two-storey-upper", reverbMix: 0.5 },
-        // Four slabs leave a real physical opening over the staircase.
+        surface: "wood",
+        acoustics: { zone: "two-storey-upper", reverbMix: 0.48 },
+        // The stair is against the east side of the house. These slabs leave a
+        // generous rectangular stairwell and a real top landing instead of a
+        // ramp poking through a solid floor.
         slabs: [
-          { x: -4, z: 0, width: 10, depth: 14 },
-          { x: 8, z: 0, width: 2, depth: 14 },
-          { x: 4, z: -4.5, width: 6, depth: 5 },
-          { x: 4, z: 4.5, width: 6, depth: 5 },
+          { x: -3.0, z: 0, width: 12.0, depth: 14.0 },
+          { x: 8.2, z: 0, width: 1.6, depth: 14.0 },
+          { x: 5.2, z: -6.1, width: 4.0, depth: 1.8 },
+          { x: 5.2, z: 4.7, width: 4.0, depth: 4.6 },
         ],
       },
     ],
@@ -177,23 +179,25 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         id: "two-storey-front-door",
         name: "Входная дверь двухэтажного дома",
         floorId: "ground",
-        side: "east",
+        side: "south",
         offset: 0,
-        width: 2.4,
+        width: 2.8,
         material: "wood",
       },
     ],
     stairs: [
       {
         id: "two-storey-main-stair",
+        name: "лестница на второй этаж",
         fromFloorId: "ground",
         toFloorId: "upper",
-        x: 4,
-        z: 0,
-        run: 6,
-        width: 3.6,
-        risesToward: "west",
+        x: 5.2,
+        z: -1.5,
+        run: 6.0,
+        width: 2.8,
+        risesToward: "north",
         material: "wood",
+        acoustics: { zone: "two-storey-stairs", reverbMix: 0.4 },
       },
     ],
     crates: [
@@ -201,78 +205,7 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
       { id: "two-storey-ground-rifle", floorId: "ground", x: -5.5, z: 4.5, loot: "rifle" },
       { id: "two-storey-upper-rifle-a", floorId: "upper", x: -5.5, z: -4.5, loot: "rifle" },
       { id: "two-storey-upper-armor", floorId: "upper", x: -5.5, z: 4.5, loot: "armor" },
-      { id: "two-storey-upper-rifle-b", floorId: "upper", x: 7.2, z: 4.7, loot: "rifle" },
-    ],
-  },
-  {
-    id: "north-stair-house",
-    name: "Дом с северной лестницей",
-    x: 265,
-    z: -185,
-    width: 16,
-    depth: 18,
-    acoustics: {
-      zone: "north-stair-house",
-      reverbMix: 0.4,
-      wallOcclusion: 0.83,
-      doorOcclusion: 0.9,
-      floorOcclusion: 0.89,
-      stairOcclusion: 0.35,
-    },
-    floors: [
-      {
-        id: "ground",
-        name: "первый этаж",
-        y: 0,
-        height: 2.9,
-        surface: "wood",
-        acoustics: { zone: "north-stair-ground", reverbMix: 0.31 },
-      },
-      {
-        id: "upper",
-        name: "второй этаж",
-        y: 3.2,
-        height: 2.9,
-        surface: "wood",
-        acoustics: { zone: "north-stair-upper", reverbMix: 0.47 },
-        // Leave a compact opening around the north/south staircase.
-        slabs: [
-          { x: -4.9, z: 0, width: 6.2, depth: 18 },
-          { x: 4.9, z: 0, width: 6.2, depth: 18 },
-          { x: 0, z: -6.2, width: 3.6, depth: 5.6 },
-          { x: 0, z: 6.2, width: 3.6, depth: 5.6 },
-        ],
-      },
-    ],
-    doors: [
-      {
-        id: "north-stair-front-door",
-        name: "Входная дверь дома с северной лестницей",
-        floorId: "ground",
-        side: "south",
-        offset: 0,
-        width: 2.4,
-        material: "wood",
-      },
-    ],
-    stairs: [
-      {
-        id: "north-stair-main",
-        name: "северная лестница",
-        fromFloorId: "ground",
-        toFloorId: "upper",
-        x: 0,
-        z: 0,
-        run: 6,
-        width: 3.4,
-        risesToward: "north",
-        material: "wood",
-        acoustics: { zone: "north-stair-steps", reverbMix: 0.41 },
-      },
-    ],
-    crates: [
-      { id: "north-stair-ground-crate", floorId: "ground", x: -5.2, z: -5.8, loot: "armor" },
-      { id: "north-stair-upper-crate", floorId: "upper", x: 5.2, z: 5.8, loot: "rifle" },
+      { id: "two-storey-upper-rifle-b", floorId: "upper", x: 0.5, z: 4.7, loot: "rifle" },
     ],
   },
 ]);
