@@ -52,6 +52,7 @@ import * as botParachute from "../plugins/battle-royale-bot-parachute/server.js"
 import * as ragdollIntegration from "../plugins/battle-royale-ragdoll-integration/server.js";
 import * as parkourRagdoll from "../plugins/battle-royale-parkour-ragdoll/server.js";
 import * as navigation from "../plugins/battle-royale-navigation/index.js";
+import * as navigationFace from "../plugins/battle-royale-navigation-face/server.js";
 import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/server.js";
 
 export const battleRoyalePreset = [
@@ -109,5 +110,6 @@ export const battleRoyalePreset = [
   ragdollIntegration,
   parkourRagdoll,
   navigation,
+  navigationFace,
   dropzoneVehicle,
 ];
