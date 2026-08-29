@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -52,6 +52,7 @@ export async function setup(ctx) {
   const originalStep = matchApi.step.bind(matchApi);
   const lastResult = new Map();
   const trackedPlayers = new Set();
+  const guidanceEnabled = new Set();
   const autoGuideStats = new Map();
 
   function emitFor(playerId, event, payload = {}) {
@@ -66,12 +67,7 @@ export async function setup(ctx) {
     if (!target) return { state, target: null, facePoint: null, source: null };
 
     if (state.active && state.checkpoint) {
-      return {
-        state,
-        target,
-        facePoint: state.checkpoint,
-        source: "checkpoint",
-      };
+      return { state, target, facePoint: state.checkpoint, source: "checkpoint" };
     }
 
     const transform = ctx.components.get(playerId, "Transform");
@@ -92,7 +88,7 @@ export async function setup(ctx) {
     return result;
   }
 
-  function navigationControlAvailable(playerId) {
+  function controlAvailable(playerId) {
     const entity = entities.get(playerId);
     const transform = ctx.components.get(playerId, "Transform");
     if (!entity?.alive || entity.bot || !transform) return { ok: false, reason: "player-unavailable", transform };
@@ -102,23 +98,17 @@ export async function setup(ctx) {
     return { ok: true, transform };
   }
 
-  function face(playerId, now = Date.now()) {
-    trackedPlayers.add(playerId);
-    const available = navigationControlAvailable(playerId);
-    if (!available.ok) return unavailable(playerId, available.reason, now);
-    const transform = available.transform;
-
+  function alignToRoute(playerId, now = Date.now()) {
+    const available = controlAvailable(playerId);
+    if (!available.ok) return null;
     const resolved = targetAndPointFor(playerId);
-    if (!resolved.target || !resolved.facePoint) return unavailable(playerId, "no-target", now);
-    if (distance2(transform, resolved.facePoint) < MIN_FACE_DISTANCE) {
-      return unavailable(playerId, "already-there", now);
-    }
+    if (!resolved.target || !resolved.facePoint) return null;
+    if (distance2(available.transform, resolved.facePoint) < MIN_FACE_DISTANCE) return null;
 
-    const previousAngle = finite(transform.angle);
-    const angle = angleTo(transform, resolved.facePoint);
-    transform.angle = angle;
-    const result = {
-      ok: true,
+    const previousAngle = finite(available.transform.angle);
+    const angle = angleTo(available.transform, resolved.facePoint);
+    available.transform.angle = angle;
+    return {
       targetId: resolved.target.id,
       targetName: resolved.target.name,
       targetKind: resolved.target.kind,
@@ -129,16 +119,56 @@ export async function setup(ctx) {
       angle,
       previousAngle,
       turnedRadians: Math.abs(shortestAngleDelta(angle, previousAngle)),
-      distance: distance2(transform, resolved.facePoint),
+      distance: distance2(available.transform, resolved.facePoint),
+      now,
+    };
+  }
+
+  function enableGuidance(playerId, now = Date.now()) {
+    trackedPlayers.add(playerId);
+    const available = controlAvailable(playerId);
+    if (!available.ok) return unavailable(playerId, available.reason, now);
+
+    let state = navigation.stateFor(playerId);
+    if (!state.active) {
+      if (!state.selectedTargetId) return unavailable(playerId, "no-target", now);
+      navigation.toggle(playerId, now);
+      state = navigation.stateFor(playerId);
+    }
+    if (!state.active) return unavailable(playerId, "no-route", now);
+
+    guidanceEnabled.add(playerId);
+    const alignment = alignToRoute(playerId, now);
+    const target = navigation.stateFor(playerId).target;
+    const result = {
+      ok: true,
+      enabled: true,
+      targetId: target?.id ?? state.activeTargetId ?? null,
+      targetName: target?.name ?? "цель",
+      aligned: Boolean(alignment),
       now,
     };
     lastResult.set(playerId, result);
-    emitFor(playerId, "navigation:faced", result);
+    emitFor(playerId, "navigation:guidance-enabled", result);
     return result;
   }
 
+  function disableGuidance(playerId, now = Date.now(), reason = "toggle") {
+    const wasEnabled = guidanceEnabled.delete(playerId);
+    const result = { ok: true, enabled: false, reason, now };
+    lastResult.set(playerId, result);
+    if (wasEnabled) emitFor(playerId, "navigation:guidance-disabled", result);
+    return result;
+  }
+
+  function toggleGuidance(playerId, now = Date.now()) {
+    if (guidanceEnabled.has(playerId)) return disableGuidance(playerId, now, "toggle");
+    return enableGuidance(playerId, now);
+  }
+
   function autoGuide(playerId, now = Date.now()) {
-    const available = navigationControlAvailable(playerId);
+    if (!guidanceEnabled.has(playerId)) return false;
+    const available = controlAvailable(playerId);
     if (!available.ok) return false;
 
     const input = ctx.components.get(playerId, "Input");
@@ -160,67 +190,45 @@ export async function setup(ctx) {
     const checkpointIndex = resolved.state?.checkpoint?.index ?? null;
     const checkpointChanged = previousStats.lastCheckpointIndex !== null
       && checkpointIndex !== previousStats.lastCheckpointIndex;
-    const stats = {
+    autoGuideStats.set(playerId, {
       applications: previousStats.applications + 1,
       checkpointChanges: previousStats.checkpointChanges + (checkpointChanged ? 1 : 0),
       lastCheckpointIndex: checkpointIndex,
       lastAt: now,
       targetId: resolved.target.id,
       targetName: resolved.target.name,
-      source: resolved.source,
       previousAngle,
       angle,
       correctionRadians: Math.abs(shortestAngleDelta(angle, previousAngle)),
-      x: finite(resolved.facePoint.x),
-      y: finite(resolved.facePoint.y),
-      z: finite(resolved.facePoint.z),
       distance: distance2(available.transform, resolved.facePoint),
-    };
-    autoGuideStats.set(playerId, stats);
+    });
     return true;
   }
 
-  function facingState(playerId) {
+  function stateFor(playerId) {
     const transform = ctx.components.get(playerId, "Transform");
     const resolved = targetAndPointFor(playerId);
     const input = ctx.components.get(playerId, "Input");
     const stats = autoGuideStats.get(playerId) ?? null;
-    if (!transform || !resolved.facePoint) {
-      return {
-        playerId,
-        hasTarget: Boolean(resolved.target),
-        angle: transform ? finite(transform.angle) : null,
-        desiredAngle: null,
-        errorRadians: null,
-        autoGuide: {
-          enabled: true,
-          active: false,
-          forward: finite(input?.forward),
-          applications: stats?.applications ?? 0,
-          checkpointChanges: stats?.checkpointChanges ?? 0,
-          lastAt: stats?.lastAt ?? null,
-        },
-        lastResult: lastResult.get(playerId) ?? null,
-      };
-    }
-    const desiredAngle = angleTo(transform, resolved.facePoint);
+    const desiredAngle = transform && resolved.facePoint ? angleTo(transform, resolved.facePoint) : null;
     return {
       playerId,
-      hasTarget: true,
+      enabled: guidanceEnabled.has(playerId),
+      hasTarget: Boolean(resolved.target),
       targetId: resolved.target?.id ?? null,
       targetName: resolved.target?.name ?? null,
       source: resolved.source,
-      angle: finite(transform.angle),
+      angle: transform ? finite(transform.angle) : null,
       desiredAngle,
-      errorRadians: Math.abs(shortestAngleDelta(transform.angle, desiredAngle)),
-      facePoint: {
-        x: finite(resolved.facePoint.x),
-        y: finite(resolved.facePoint.y),
-        z: finite(resolved.facePoint.z),
-      },
+      errorRadians: desiredAngle == null || !transform
+        ? null
+        : Math.abs(shortestAngleDelta(transform.angle, desiredAngle)),
       autoGuide: {
-        enabled: true,
-        active: Boolean(resolved.state?.active && finite(input?.forward) > AUTO_GUIDE_FORWARD_THRESHOLD),
+        active: Boolean(
+          guidanceEnabled.has(playerId)
+          && resolved.state?.active
+          && finite(input?.forward) > AUTO_GUIDE_FORWARD_THRESHOLD
+        ),
         forward: finite(input?.forward),
         applications: stats?.applications ?? 0,
         checkpointChanges: stats?.checkpointChanges ?? 0,
@@ -232,29 +240,14 @@ export async function setup(ctx) {
     };
   }
 
-  function assertFacing(playerId, maxErrorRadians = 0.0001) {
-    const state = facingState(playerId);
-    if (!state.hasTarget || state.desiredAngle == null) {
-      throw new Error(`Navigation face target unavailable for ${playerId}`);
+  function assertGuidance(playerId, expectedEnabled = true, minimumApplications = 0) {
+    const state = stateFor(playerId);
+    if (state.enabled !== Boolean(expectedEnabled)) {
+      throw new Error(`Expected guidance enabled=${Boolean(expectedEnabled)}, got ${state.enabled}`);
     }
-    if (state.errorRadians > Math.max(0, Number(maxErrorRadians) || 0)) {
-      throw new Error(
-        `Expected ${playerId} to face navigation point; angular error ${state.errorRadians}`,
-      );
-    }
-    return state;
-  }
-
-  function assertAutoGuiding(playerId, minimumApplications = 1) {
-    const state = facingState(playerId);
-    const minimum = Math.max(1, Math.floor(Number(minimumApplications) || 1));
-    if (!state.autoGuide.active) {
-      throw new Error(`Expected navigation auto-guide to be active for ${playerId}`);
-    }
+    const minimum = Math.max(0, Math.floor(Number(minimumApplications) || 0));
     if (state.autoGuide.applications < minimum) {
-      throw new Error(
-        `Expected at least ${minimum} auto-guide applications, got ${state.autoGuide.applications}`,
-      );
+      throw new Error(`Expected at least ${minimum} guidance applications, got ${state.autoGuide.applications}`);
     }
     return state;
   }
@@ -262,30 +255,36 @@ export async function setup(ctx) {
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     trackedPlayers.add(playerId);
     const result = originalHandleInput(playerId, input, now);
-    if (input.navigationFacePressed) face(playerId, now);
+    if (input.navigationFacePressed) toggleGuidance(playerId, now);
     return result;
   };
 
   matchApi.step = (dt, now = Date.now()) => {
     for (const playerId of trackedPlayers) autoGuide(playerId, now);
     const result = originalStep(dt, now);
-    // Navigation advances checkpoints after movement. Re-aim once more so the
-    // next physics frame already starts on the new route segment.
     for (const playerId of trackedPlayers) autoGuide(playerId, now);
     return result;
   };
 
+  ctx.events.on("navigation:stopped", ({ entityId }) => {
+    if (guidanceEnabled.has(entityId)) disableGuidance(entityId, Date.now(), "navigation-stopped");
+  });
+  ctx.events.on("navigation:reached", ({ entityId }) => {
+    if (guidanceEnabled.has(entityId)) disableGuidance(entityId, Date.now(), "reached");
+  });
   ctx.events.on("entity:removed", ({ entityId }) => {
     lastResult.delete(entityId);
     autoGuideStats.delete(entityId);
     trackedPlayers.delete(entityId);
+    guidanceEnabled.delete(entityId);
   });
 
   ctx.services.provide("navigation-face", {
-    face,
+    toggleGuidance,
+    enableGuidance,
+    disableGuidance,
     autoGuide,
-    stateFor: facingState,
-    assertFacing,
-    assertAutoGuiding,
+    stateFor,
+    assertGuidance,
   });
 }
