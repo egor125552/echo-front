@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face-client",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["keyboard-input", "cloudflare-session", "spatial-audio-web", "speech-settings"],
 };
 
@@ -11,7 +11,9 @@ export async function setup(ctx) {
   const speech = ctx.services.get("speech");
   const live = document.querySelector("#announcer");
   const originalSample = input.sample.bind(input);
-  const faceButtons = [...document.querySelectorAll('[data-navigation-action="face"]')];
+  const navigationButtons = [...document.querySelectorAll("[data-navigation-action]")];
+  let navigationNextPressed = false;
+  let navigationTogglePressed = false;
   let navigationFacePressed = false;
   let connected = Boolean(network.connected);
 
@@ -26,22 +28,34 @@ export async function setup(ctx) {
 
   input.sample = () => {
     const sampled = originalSample();
+    const next = navigationNextPressed;
+    const toggle = navigationTogglePressed;
     const face = navigationFacePressed;
+    navigationNextPressed = false;
+    navigationTogglePressed = false;
     navigationFacePressed = false;
-    return { ...sampled, navigationFacePressed: face };
+    return {
+      ...sampled,
+      navigationNextPressed: Boolean(sampled.navigationNextPressed || next),
+      navigationTogglePressed: Boolean(sampled.navigationTogglePressed || toggle),
+      navigationFacePressed: face,
+    };
   };
 
-  function triggerFace() {
+  function trigger(action) {
     if (!connected) return;
-    navigationFacePressed = true;
+    if (action === "next") navigationNextPressed = true;
+    else if (action === "toggle") navigationTogglePressed = true;
+    else if (action === "face") navigationFacePressed = true;
+    else return;
     void audio.resume();
-    ctx.events.emit("input:changed", { reason: "navigation:KeyY" });
+    ctx.events.emit("input:changed", { reason: `navigation:${action}` });
   }
 
   window.addEventListener("keydown", (event) => {
     if (!connected || event.repeat || event.code !== "KeyY") return;
     event.preventDefault();
-    triggerFace();
+    trigger("face");
   }, { capture: true, passive: false });
 
   window.addEventListener("keyup", (event) => {
@@ -49,11 +63,11 @@ export async function setup(ctx) {
     event.preventDefault();
   }, { capture: true, passive: false });
 
-  for (const button of faceButtons) {
+  for (const button of navigationButtons) {
     button.addEventListener("click", (event) => {
       if (!connected) return;
       event.preventDefault();
-      triggerFace();
+      trigger(button.dataset.navigationAction);
     });
   }
 
@@ -61,6 +75,8 @@ export async function setup(ctx) {
   ctx.events.on("network:reconnected", () => { connected = true; });
   ctx.events.on("network:disconnected", () => {
     connected = false;
+    navigationNextPressed = false;
+    navigationTogglePressed = false;
     navigationFacePressed = false;
   });
 
