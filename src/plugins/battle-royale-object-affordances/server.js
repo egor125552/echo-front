@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-object-affordances",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: [
     "battle-royale-building-factory",
     "battle-royale-vehicle-fleet",
@@ -12,8 +12,8 @@ export const manifest = {
 };
 
 const DOOR_INTERACTION_MARGIN = 1.45;
-const CRATE_INTERACTION_MARGIN = 1.55;
-const VEHICLE_INTERACTION_MARGIN = 1.8;
+const CRATE_INTERACTION_MARGIN = 2.4;
+const VEHICLE_INTERACTION_MARGIN = 2.2;
 const INTERACTION_VERTICAL_TOLERANCE = 2.2;
 const DOOR_DEBOUNCE_MS = 450;
 
@@ -25,10 +25,6 @@ const VEHICLE_FOOTPRINTS = Object.freeze({
 function finite(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
-}
-
-function clamp(value, minimum, maximum) {
-  return Math.max(minimum, Math.min(maximum, finite(value)));
 }
 
 function distanceToInterval(value, minimum, maximum) {
@@ -104,9 +100,9 @@ export async function setup(ctx) {
   const originalVehicleEnter = vehicles.enter.bind(vehicles);
   const originalVehicleInteract = vehicles.interact.bind(vehicles);
 
-  // Make loot crates physically substantial. The shell is deliberately a bit
-  // larger than the decorative crate so a one-step lateral miss still bumps the
-  // player into an object instead of silently slipping past it.
+  // Give loot a real, easy-to-discover body. A blind player can deliberately
+  // sweep a room and physically bump the crate instead of passing one small
+  // coordinate beside it.
   for (const crate of map.crates ?? []) {
     if (!crate?.id || crateShells.has(crate.id)) continue;
     const collider = physics.createWall({
@@ -128,9 +124,9 @@ export async function setup(ctx) {
     crateShells.set(crate.id, collider);
   }
 
-  // Add a massless collision shell around every vehicle. It changes neither
-  // mass nor suspension tuning, only the physical body envelope a pedestrian
-  // can bump into.
+  // Add a massless collision envelope around every vehicle. It changes neither
+  // mass nor suspension tuning; it only makes the pedestrian-facing body match
+  // the size a player expects from a jeep/supercar.
   for (const vehicle of vehicles.snapshot?.() ?? []) {
     const footprint = vehicleFootprint(vehicle);
     const collider = physics.addDynamicCuboidCollider(vehicle.id, {
@@ -235,9 +231,9 @@ export async function setup(ctx) {
     const candidate = expandedVehicleCandidate(playerId, requestedVehicleId);
     if (!transform || !candidate) return false;
 
-    // The fleet service still performs all authoritative entry checks. We only
-    // present it a temporary proximity probe at the chassis center after the
-    // player's real position has already passed our footprint/LOS checks.
+    // The authoritative vehicle service still performs the actual entry. We
+    // only bridge its old center-distance check after the player's real pose
+    // has already passed the new body-envelope check.
     const original = { x: transform.x, y: transform.y, z: transform.z };
     transform.x = candidate.x;
     transform.y = candidate.y;
