@@ -7,6 +7,7 @@ import * as ragdollSelfCollision from "../plugins/battle-royale-ragdoll-self-col
 import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
 import * as buildingFactory from "../plugins/battle-royale-building-factory/server.js";
+import * as buildingDesignValidator from "../plugins/battle-royale-building-design-validator/server.js";
 import * as worldExpansion from "../plugins/battle-royale-world-expansion/server.js";
 import * as buildingNavigation from "../plugins/battle-royale-building-navigation/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
@@ -42,6 +43,7 @@ import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
 import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
 import * as vehicleFleet from "../plugins/battle-royale-vehicle-fleet/server.js";
+import * as objectAffordances from "../plugins/battle-royale-object-affordances/server.js";
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
 import * as fleetPedestrianRagdoll from "../plugins/battle-royale-fleet-pedestrian-ragdoll/server.js";
@@ -73,6 +75,7 @@ export const battleRoyalePreset = [
   liveCharacterQueries,
   map,
   buildingFactory,
+  buildingDesignValidator,
   worldExpansion,
   buildingNavigation,
   groundNavigation,
@@ -108,6 +111,7 @@ export const battleRoyalePreset = [
   botFill,
   vehicle,
   vehicleFleet,
+  objectAffordances,
   ragdoll,
   ragdollTuning,
   fleetPedestrianRagdoll,
