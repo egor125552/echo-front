@@ -6,6 +6,7 @@ import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as speechSettings from "../plugins/speech-settings.js";
+import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
@@ -38,6 +39,7 @@ export const echoFrontClientPreset = [
   journal,
   smoothing,
   speechSettings,
+  speechDiagnostics,
   spatialAudio,
   audioResilience,
   navigation,
