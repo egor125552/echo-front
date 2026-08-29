@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-fleet-pedestrian-ragdoll",
-  version: "1.3.2",
+  version: "1.3.3",
   requires: [
     "battle-royale-vehicle-fleet",
     "battle-royale-ragdoll",
@@ -73,6 +73,7 @@ export async function setup(ctx) {
     for (const vehicle of afterFleet) {
       if (!vehicle?.id) continue;
       const before = beforeById.get(vehicle.id);
+      const impactDriverId = vehicle.driverId ?? before?.driverId ?? null;
       const impactSpeed = Math.max(speedOf(before), speedOf(vehicle));
       if (impactSpeed < VEHICLE_PEDESTRIAN_HIT_SPEED) continue;
 
@@ -84,7 +85,10 @@ export async function setup(ctx) {
       world.contactPairsWith(chassisCollider, (other) => {
         contactCandidates += 1;
         const entityId = characterColliderOwners.get(other.handle);
-        if (!entityId || entityId === vehicle.driverId || ragdoll.isActive(entityId)) return;
+        if (!entityId
+          || entityId === vehicle.driverId
+          || entityId === before?.driverId
+          || ragdoll.isActive(entityId)) return;
         const entity = entities.get(entityId);
         if (!entity?.alive) return;
         if (!pairHasActualContact(world, chassisCollider, other)) return;
@@ -116,7 +120,7 @@ export async function setup(ctx) {
         const activated = ragdoll.activate(entityId, {
           reason: "vehicle-hit",
           vehicleId: vehicle.id,
-          driverId: vehicle.driverId ?? null,
+          driverId: impactDriverId,
           impactSpeed,
           velocity: {
             x: (Number(linvel?.x) || 0) * carry,
@@ -138,7 +142,9 @@ export async function setup(ctx) {
           aliveBefore: Boolean(entityBefore?.alive),
           aliveAfter: Boolean(entityAfter?.alive),
           vehicleId: vehicle.id,
-          driverId: vehicle.driverId ?? null,
+          driverId: impactDriverId,
+          currentDriverId: vehicle.driverId ?? null,
+          previousDriverId: before?.driverId ?? null,
           impactSpeed,
           impactSpeedKph: impactSpeed * 3.6,
           activated: Boolean(activated),
@@ -156,7 +162,7 @@ export async function setup(ctx) {
           bot: botBefore,
           vehicleId: vehicle.id,
           vehicleKind: vehicle.kind,
-          driverId: vehicle.driverId ?? null,
+          driverId: impactDriverId,
           speed: impactSpeed,
           speedKph: impactSpeed * 3.6,
           now,
