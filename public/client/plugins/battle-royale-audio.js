@@ -15,6 +15,10 @@ const CRATE_AUDIO_RADIUS = 10;
 const CRATE_START_RADIUS = 9.5;
 const CRATE_FLOOR_TOLERANCE = 1.75;
 const CRATE_OCCLUSION_RESTART_DELTA = 0.08;
+const CRATE_AMBIENT_GAIN = 0.48;
+const CRATE_OCCLUDED_GAIN_REDUCTION = 0.52;
+const CRATE_OCCLUSION_CURVE = 0.72;
+const CRATE_OCCLUSION_BOOST = 1.08;
 
 export const manifest = {
   id: "battle-royale-audio",
@@ -23,6 +27,17 @@ export const manifest = {
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function audibleCrateOcclusion(value) {
+  const physical = clamp01(value);
+  if (physical <= 0) return 0;
+  return clamp01(Math.pow(physical, CRATE_OCCLUSION_CURVE) * CRATE_OCCLUSION_BOOST);
+}
+
+function crateAmbientGain(occlusion) {
+  const audible = audibleCrateOcclusion(occlusion);
+  return CRATE_AMBIENT_GAIN * (1 - audible * CRATE_OCCLUDED_GAIN_REDUCTION);
 }
 
 function createDoorBuffer(audioContext, open) {
@@ -77,13 +92,14 @@ export async function setup(ctx) {
     if (pendingCrates.has(crate.id) || crateLoops.has(crate.id)) return;
     pendingCrates.add(crate.id);
     const occlusion = clamp01(crate.occlusion);
+    const audibleOcclusion = audibleCrateOcclusion(occlusion);
     try {
       const handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
         radius: CRATE_AUDIO_RADIUS,
-        gain: 0.48,
+        gain: crateAmbientGain(occlusion),
         referenceDistance: 1.1,
         rolloffFactor: 4.5,
-        occlusion,
+        occlusion: audibleOcclusion,
         loop: true,
         channel: crateChannel(crate.id),
         replace: true,
@@ -93,6 +109,8 @@ export async function setup(ctx) {
         return;
       }
       if (handle) {
+        // Keep the raw physical value here so reopening a door reliably crosses
+        // the restart threshold even though playback uses the perceptual curve.
         handle.crateOcclusion = occlusion;
         crateLoops.set(crate.id, handle);
       }
