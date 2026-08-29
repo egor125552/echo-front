@@ -1,30 +1,32 @@
-const START = 2000015700000;
+const START = 2000015800000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 157,
+  id: 158,
   mode: "battle-royale",
-  room: "engine-lab-slow-player-vehicle-bot-touch-157",
+  room: "engine-lab-navigation-face-158",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: { commands: [
     { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
-    { command: "entity.spawn", args: { spec: { id: "slow-driver-157", kind: "human", name: "Slow Driver", bot: false, team: 15701, health: 400, weapons: [], position: { x: 96.4, y: 1.1, z: 24, angle: 0 } } } },
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["slow-driver-157", { x: 96.4, y: 1.1, z: 24, angle: 0 }] } },
+    { command: "entity.spawn", args: { spec: { id: "nav-player-158", kind: "human", name: "Navigation Player", bot: false, team: 15801, health: 400, weapons: [], position: { x: 20, y: 0, z: 0, angle: 2.7 } } } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["nav-player-158", { x: 20, y: 0, z: 0, angle: 2.7 }] } },
     { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 20 } },
-    { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["slow-driver-157", START + 60, "br-jeep-1"] } },
-    { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["slow-driver-157", { forward: 1 }] } },
-    { command: "game.step", args: { dt: 0.02, steps: 75, now: START + 80 } },
-    { command: "service.call", args: { service: "vehicles", method: "setInput", arguments: ["slow-driver-157", { forward: 0 }] } },
-    { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-jeep-1"] } },
-    { command: "entity.spawn", args: { spec: { id: "slow-target-bot-157", kind: "human", name: "Slow Target Bot", bot: true, team: 15701, health: 400, weapons: [], position: { x: 94.1, y: 1.1, z: 19.8, angle: 0 } } } },
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["slow-target-bot-157", { x: 94.1, y: 1.1, z: 19.8, angle: 0 }] } },
-    { command: "service.call", args: { service: "bots", method: "isBot", arguments: ["slow-target-bot-157"] } },
-    { command: "game.step", args: { dt: 0.02, steps: 45, now: START + 1700 } },
-    { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-jeep-1"] } },
-    { command: "service.call", args: { service: "ragdoll", method: "isActive", arguments: ["slow-target-bot-157"] } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["slow-target-bot-157"] } },
-    { command: "service.call", args: { service: "fleet-pedestrian-ragdoll", method: "summary", arguments: [] } }
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-player-158", { navigationNextPressed: true }, START + 80] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["nav-player-158", START + 90] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-player-158", { navigationFacePressed: true }, START + 100] } },
+    { command: "service.call", args: { service: "navigation-face", method: "assertFacing", arguments: ["nav-player-158", 0.0001] } },
+    { command: "service.call", args: { service: "navigation-face", method: "stateFor", arguments: ["nav-player-158"] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-player-158", { navigationTogglePressed: true }, START + 120] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["nav-player-158", START + 130] } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["nav-player-158", { x: 20, y: 0, z: 0, angle: -2.4 }] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-player-158", { navigationFacePressed: true }, START + 150] } },
+    { command: "service.call", args: { service: "navigation-face", method: "assertFacing", arguments: ["nav-player-158", 0.0001] } },
+    { command: "service.call", args: { service: "navigation-face", method: "stateFor", arguments: ["nav-player-158"] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-player-158", { forward: 1 }, START + 170] } },
+    { command: "game.step", args: { dt: 0.02, steps: 30, now: START + 180 } },
+    { command: "service.call", args: { service: "physics", method: "position", arguments: ["nav-player-158"] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["nav-player-158", START + 800] } }
   ] },
-  requestedAt: "2026-08-29T20:05:00Z"
+  requestedAt: "2026-08-29T20:10:00Z"
 });
