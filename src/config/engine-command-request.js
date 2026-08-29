@@ -1,37 +1,32 @@
-const START = 2000016700000;
+const START = 2000016800000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 167,
+  id: 168,
   mode: "battle-royale",
-  room: "engine-lab-building-navigation-167",
+  room: "engine-lab-navigation-humanity-168",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: { commands: [
     { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
-    { command: "service.call", args: { service: "building-navigation", method: "list", arguments: [] } },
-    { command: "service.call", args: { service: "ground-navigation", method: "requiredWaypoints", arguments: [
-      { x: 52, y: 3.2, z: 8 }, { x: 77.8, y: 0, z: 0 }
-    ] } },
-    { command: "entity.spawn", args: { spec: { id: "nav-building-167", kind: "human", name: "Building Navigation Player", bot: false, team: 16701, health: 400, weapons: [], position: { x: 52, y: 3.2, z: 8, angle: -1 } } } },
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["nav-building-167", { x: 52, y: 3.2, z: 8, angle: -1 }] } },
-    { command: "service.call", args: { service: "map", method: "setDoorOpen", arguments: ["warehouse-upper-room-door", true, "nav-building-167", START + 30] } },
-    { command: "service.call", args: { service: "map", method: "setDoorOpen", arguments: ["warehouse-front-door", true, "nav-building-167", START + 40] } },
-    { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 50 } },
-    { command: "service.call", args: { service: "navigation", method: "selectTarget", arguments: ["nav-building-167", "warehouse", START + 90] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-building-167", { navigationFacePressed: true }, START + 100] } },
-    { command: "service.call", args: { service: "navigation", method: "assertState", arguments: ["nav-building-167", { active: true, minSemanticTransitions: 4 }] } },
-    { command: "service.call", args: { service: "navigation-face", method: "assertGuidance", arguments: ["nav-building-167", true, 0] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-building-167", { forward: 1, sprint: true }, START + 120] } },
-    { command: "game.step", args: { dt: 0.02, steps: 500, now: START + 140 } },
-    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["nav-building-167", START + 10150] } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["nav-building-167"] } },
-    { command: "game.step", args: { dt: 0.02, steps: 500, now: START + 10160 } },
-    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["nav-building-167", START + 20170] } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["nav-building-167"] } },
-    { command: "service.call", args: { service: "navigation", method: "assertState", arguments: ["nav-building-167", { active: false }] } },
-    { command: "service.call", args: { service: "navigation-face", method: "assertGuidance", arguments: ["nav-building-167", false, 1] } },
-    { command: "service.call", args: { service: "match-api", method: "enginePendingEvents", arguments: ["navigation:"] } }
+    { command: "entity.spawn", args: { spec: { id: "nav-driver-168", kind: "human", name: "Navigation Driver", bot: false, team: 16801, health: 400, weapons: [], position: { x: 94, y: 0, z: 24, angle: 0 } } } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["nav-driver-168", { x: 94, y: 0, z: 24, angle: 0 }] } },
+    { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 20 } },
+    { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["nav-driver-168", START + 70, "br-jeep-1"] } },
+    { command: "service.call", args: { service: "navigation", method: "availableTargets", arguments: ["nav-driver-168"] } },
+    { command: "service.call", args: { service: "navigation", method: "selectTarget", arguments: ["nav-driver-168", "vehicle:br-jeep-1", START + 80] } },
+    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["nav-driver-168", START + 90] } },
+    { command: "service.call", args: { service: "navigation", method: "selectTarget", arguments: ["nav-driver-168", "warehouse", START + 100] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["nav-driver-168", { navigationFacePressed: true }, START + 110] } },
+    { command: "service.call", args: { service: "navigation-face", method: "assertGuidance", arguments: ["nav-driver-168", true, 0] } },
+    { command: "service.call", args: { service: "health", method: "applyDamage", arguments: ["nav-driver-168", 9999, { attackerId: null, weaponId: "engine-check", now: START + 120 }] } },
+    { command: "service.call", args: { service: "navigation-face", method: "assertGuidance", arguments: ["nav-driver-168", false, 0] } },
+    { command: "entity.spawn", args: { spec: { id: "nav-open-168", kind: "human", name: "Open Route Player", bot: false, team: 16802, health: 400, weapons: [], position: { x: -300, y: 0, z: -300, angle: 0 } } } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["nav-open-168", { x: -300, y: 0, z: -300, angle: 0 }] } },
+    { command: "service.call", args: { service: "navigation", method: "selectTarget", arguments: ["nav-open-168", "warehouse", START + 150] } },
+    { command: "service.call", args: { service: "navigation", method: "toggle", arguments: ["nav-open-168", START + 160] } },
+    { command: "service.call", args: { service: "navigation", method: "assertState", arguments: ["nav-open-168", { active: true, maxCheckpoints: 10 }] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["nav-open-168", START + 170] } }
   ] },
-  requestedAt: "2026-08-29T16:40:00+03:00"
+  requestedAt: "2026-08-29T16:50:00+03:00"
 });
