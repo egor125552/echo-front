@@ -1,23 +1,28 @@
-export const NAVIGATION_CHECKPOINT_SPACING = 24;
-export const NAVIGATION_CHECKPOINT_REACHED = 4.25;
-export const NAVIGATION_ROUTE_REPLAN_MS = 1800;
-export const NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE = 4.5;
-export const NAVIGATION_DETOUR_CLEARANCE = 2.6;
+export const NAVIGATION_CHECKPOINT_SPACING = 72;
+export const NAVIGATION_CHECKPOINT_REACHED = 5.25;
+export const NAVIGATION_ROUTE_REPLAN_MS = 2200;
+export const NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE = 6;
+export const NAVIGATION_DETOUR_CLEARANCE = 3.2;
+export const NAVIGATION_VEHICLE_DETOUR_CLEARANCE = 7;
 
-const MAX_ROUTE_ANCHORS = 14;
-const MAX_RAY_SKIP_HITS = 8;
+const MAX_ROUTE_ANCHORS = 24;
+const MAX_RAY_SKIP_HITS = 10;
 const ROUTE_RAY_HEIGHT = 1.05;
 const TARGET_REACHED_DEFAULT = 5.5;
+const TARGET_VERTICAL_TOLERANCE = 2.15;
+const CHECKPOINT_VERTICAL_TOLERANCE = 1.2;
+const MAX_VISIBLE_VEHICLE_TARGETS = 5;
 
 export const manifest = {
   id: "battle-royale-navigation",
-  version: "1.0.0",
+  version: "1.2.0",
   requires: [
     "match-api",
     "battle-royale-ground-navigation",
     "rapier-physics",
     "map-test-arena",
     "battle-royale-vehicle",
+    "battle-royale",
     "entities",
     "battle-royale-vehicle-integration",
     "battle-royale-parachute-integration",
@@ -41,8 +46,27 @@ function point(value = {}) {
   };
 }
 
+function waypoint(value = {}) {
+  return {
+    ...point(value),
+    kind: value.kind ? String(value.kind) : null,
+    doorId: value.doorId ? String(value.doorId) : null,
+    transitionId: value.transitionId ? String(value.transitionId) : null,
+    buildingId: value.buildingId ? String(value.buildingId) : null,
+    mandatory: Boolean(value.mandatory),
+  };
+}
+
 function distance2(a, b) {
   return Math.hypot(finite(a?.x) - finite(b?.x), finite(a?.z) - finite(b?.z));
+}
+
+function distance3(a, b) {
+  return Math.hypot(
+    finite(a?.x) - finite(b?.x),
+    finite(a?.y) - finite(b?.y),
+    finite(a?.z) - finite(b?.z),
+  );
 }
 
 function copyPoint(value) {
@@ -50,11 +74,25 @@ function copyPoint(value) {
   return { x: p.x, y: p.y, z: p.z };
 }
 
+function copyWaypoint(value) {
+  const p = waypoint(value);
+  return {
+    x: p.x,
+    y: p.y,
+    z: p.z,
+    ...(p.kind ? { kind: p.kind } : {}),
+    ...(p.doorId ? { doorId: p.doorId } : {}),
+    ...(p.transitionId ? { transitionId: p.transitionId } : {}),
+    ...(p.buildingId ? { buildingId: p.buildingId } : {}),
+    ...(p.mandatory ? { mandatory: true } : {}),
+  };
+}
+
 function routeLength(from, checkpoints = []) {
   let total = 0;
   let cursor = from;
   for (const checkpoint of checkpoints) {
-    total += distance2(cursor, checkpoint);
+    total += distance3(cursor, checkpoint);
     cursor = checkpoint;
   }
   return total;
@@ -64,12 +102,29 @@ function roundedDistance(value) {
   return Math.max(0, Math.round(Number(value) || 0));
 }
 
+function targetReached(transform, target) {
+  if (!transform || !target) return false;
+  if (distance2(transform, target.position) > target.arriveDistance) return false;
+  const tolerance = Math.max(
+    TARGET_VERTICAL_TOLERANCE,
+    finite(target.metadata?.verticalTolerance, TARGET_VERTICAL_TOLERANCE),
+  );
+  return Math.abs(finite(transform.y) - finite(target.position.y)) <= tolerance;
+}
+
+function checkpointReached(transform, checkpoint) {
+  if (!transform || !checkpoint) return false;
+  if (distance2(transform, checkpoint) > NAVIGATION_CHECKPOINT_REACHED) return false;
+  return Math.abs(finite(transform.y) - finite(checkpoint.y)) <= CHECKPOINT_VERTICAL_TOLERANCE;
+}
+
 export async function setup(ctx) {
   const matchApi = ctx.services.get("match-api");
   const groundNavigation = ctx.services.get("ground-navigation");
   const physics = ctx.services.get("physics");
   const map = ctx.services.get("map");
   const vehicles = ctx.services.get("vehicles");
+  const battleRoyale = ctx.services.get("battle-royale");
   const entities = ctx.services.get("entities");
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
@@ -137,9 +192,18 @@ export async function setup(ctx) {
     return ctx.components.get(playerId, "Transform") ?? null;
   }
 
+  function zoneRisk(target, now = Date.now()) {
+    const zone = battleRoyale.status?.(now)?.zone ?? null;
+    if (!zone || !Number.isFinite(Number(zone.radius))) return false;
+    return Math.hypot(
+      finite(target?.position?.x) - finite(zone.x),
+      finite(target?.position?.z) - finite(zone.z),
+    ) > finite(zone.radius);
+  }
+
   function availableTargets(playerId) {
     const transform = transformFor(playerId);
-    const targets = [];
+    let targets = [];
     let serial = 0;
 
     for (const raw of staticTargets.values()) {
@@ -161,11 +225,33 @@ export async function setup(ctx) {
     }
 
     for (const target of targets) {
-      target.distance = transform ? distance2(transform, target.position) : Infinity;
+      target.distance = transform ? distance3(transform, target.position) : Infinity;
+      target.outsideSafeZone = zoneRisk(target);
     }
+
+    const currentVehicleId = vehicles.vehicleForDriver?.(playerId)?.id ?? null;
+    if (currentVehicleId) {
+      targets = targets.filter((target) => target.vehicleId !== currentVehicleId);
+    }
+
+    const state = playerStates.get(playerId) ?? null;
+    const pinned = new Set([state?.selectedTargetId, state?.activeTargetId].filter(Boolean));
+    const nonVehicles = targets.filter((target) => target.kind !== "vehicle");
+    const vehicleTargets = targets
+      .filter((target) => target.kind === "vehicle")
+      .filter((target) => !target.metadata?.occupiedByOther)
+      .sort((a, b) => {
+        if (a.outsideSafeZone !== b.outsideSafeZone) return a.outsideSafeZone ? 1 : -1;
+        return a.distance - b.distance;
+      });
+    const visibleVehicles = vehicleTargets.filter((target, index) => (
+      index < MAX_VISIBLE_VEHICLE_TARGETS || pinned.has(target.id)
+    ));
+    targets = [...nonVehicles, ...visibleVehicles];
 
     targets.sort((a, b) => {
       if (a.order !== b.order) return a.order - b.order;
+      if (a.outsideSafeZone !== b.outsideSafeZone) return a.outsideSafeZone ? 1 : -1;
       if (a.kind === "vehicle" && b.kind === "vehicle" && a.distance !== b.distance) {
         return a.distance - b.distance;
       }
@@ -199,11 +285,11 @@ export async function setup(ctx) {
     const kind = String(object?.kind ?? "");
     if (!object) return false;
     if (kind === "ground" || kind === "building-floor" || kind === "building-stair") return true;
-    if (kind === "vehicle-ballast") return true;
-    if (kind === "vehicle-chassis") {
-      if (target?.vehicleId && String(object.vehicleId) === String(target.vehicleId)) return true;
-      return true;
+    if (kind === "building-door" && target?.allowDoorId) {
+      return String(object.doorId ?? "") === String(target.allowDoorId);
     }
+    if (kind === "vehicle-ballast") return true;
+    if (kind === "vehicle-chassis") return true;
     if (kind === "crate" || kind === "loot-crate") return true;
     return false;
   }
@@ -268,13 +354,16 @@ export async function setup(ctx) {
     ];
   }
 
-  function detourCandidates(hit, from) {
+  function detourCandidates(hit, from, options = {}) {
     const object = hit?.worldObject ?? null;
     if (!object) return [];
     const y = Math.max(0, finite(from?.y));
     const kind = String(object.kind ?? "");
+    const clearance = options.mode === "vehicle"
+      ? NAVIGATION_VEHICLE_DETOUR_CLEARANCE
+      : NAVIGATION_DETOUR_CLEARANCE;
     if (kind.startsWith("building-") && map.building) {
-      return expandedCorners(map.building, y, NAVIGATION_DETOUR_CLEARANCE);
+      return expandedCorners(map.building, y, clearance);
     }
     if (
       Number.isFinite(Number(object.x))
@@ -287,35 +376,36 @@ export async function setup(ctx) {
         maxX: Number(object.x) + Math.abs(Number(object.hx)),
         minZ: Number(object.z) - Math.abs(Number(object.hz)),
         maxZ: Number(object.z) + Math.abs(Number(object.hz)),
-      }, y, NAVIGATION_DETOUR_CLEARANCE);
+      }, y, clearance);
     }
     return [];
   }
 
   function semanticCandidate(from, targetPosition) {
-    const waypoint = groundNavigation.waypoint(from, targetPosition);
-    if (!waypoint || distance2(from, waypoint) < 0.75) return null;
-    return point(waypoint);
+    const candidate = groundNavigation.waypoint(from, targetPosition);
+    if (!candidate || distance3(from, candidate) < 0.55) return null;
+    return waypoint(candidate);
   }
 
-  function chooseDetour(from, target, hit, used) {
+  function chooseDetour(from, target, hit, used, options = {}) {
     const candidates = [];
-    const semantic = semanticCandidate(from, target.position);
+    const semantic = options.mode === "vehicle" ? null : semanticCandidate(from, target.position);
     if (semantic) candidates.push({ point: semantic, semantic: true });
-    for (const candidate of detourCandidates(hit, from)) {
-      candidates.push({ point: candidate, semantic: false });
+    for (const candidate of detourCandidates(hit, from, options)) {
+      candidates.push({ point: waypoint(candidate), semantic: false });
     }
 
     let best = null;
     let bestScore = Infinity;
     for (const candidate of candidates) {
       const p = candidate.point;
-      const key = `${Math.round(p.x * 10)}:${Math.round(p.z * 10)}`;
+      const key = `${Math.round(p.x * 10)}:${Math.round(p.y * 10)}:${Math.round(p.z * 10)}`;
       if (used.has(key)) continue;
-      if (!segmentClear(from, p, target)) continue;
-      const score = distance2(from, p)
-        + distance2(p, target.position)
-        + (candidate.semantic ? -1.25 : 0);
+      const candidateTarget = p.doorId ? { ...target, allowDoorId: p.doorId } : target;
+      if (!segmentClear(from, p, candidateTarget)) continue;
+      const score = distance3(from, p)
+        + distance3(p, target.position)
+        + (candidate.semantic ? -2.5 : 0);
       if (score >= bestScore) continue;
       best = { ...p, key };
       bestScore = score;
@@ -323,7 +413,7 @@ export async function setup(ctx) {
     return best;
   }
 
-  function buildAnchors(from, target) {
+  function buildSegmentAnchors(from, target, options = {}) {
     const anchors = [];
     const used = new Set();
     let cursor = point(from);
@@ -333,56 +423,104 @@ export async function setup(ctx) {
     for (let depth = 0; depth < MAX_ROUTE_ANCHORS; depth += 1) {
       const hit = firstBlockingHit(cursor, target.position, target);
       if (!hit) {
-        anchors.push(copyPoint(target.position));
+        anchors.push(copyWaypoint(target.position));
         break;
       }
       rapierBlockedSegments += 1;
-      const detour = chooseDetour(cursor, target, hit, used);
+      const detour = chooseDetour(cursor, target, hit, used, options);
       if (!detour) {
-        anchors.push(copyPoint(target.position));
+        anchors.push(copyWaypoint(target.position));
         break;
       }
       used.add(detour.key);
-      anchors.push({ x: detour.x, y: detour.y, z: detour.z });
+      anchors.push(copyWaypoint(detour));
       cursor = detour;
       detours += 1;
     }
 
-    if (!anchors.length) anchors.push(copyPoint(target.position));
+    if (!anchors.length) anchors.push(copyWaypoint(target.position));
     const last = anchors.at(-1);
-    if (distance2(last, target.position) > 0.6) anchors.push(copyPoint(target.position));
+    if (distance3(last, target.position) > 0.6) anchors.push(copyWaypoint(target.position));
     return { anchors, detours, rapierBlockedSegments };
+  }
+
+  function buildAnchors(from, target, options = {}) {
+    const start = point(from);
+    const required = options.mode === "vehicle"
+      ? []
+      : (groundNavigation.requiredWaypoints?.(start, target.position) ?? []).map(waypoint);
+    const goals = [...required, waypoint(target.position)];
+    const anchors = [];
+    let cursor = start;
+    let detours = 0;
+    let rapierBlockedSegments = 0;
+
+    for (const goal of goals) {
+      if (distance3(cursor, goal) < 0.45) {
+        cursor = goal;
+        continue;
+      }
+      const segmentTarget = {
+        ...target,
+        position: goal,
+        allowDoorId: goal.doorId ?? null,
+      };
+      const segment = buildSegmentAnchors(cursor, segmentTarget, options);
+      for (const anchor of segment.anchors) {
+        const previous = anchors.at(-1) ?? cursor;
+        if (distance3(previous, anchor) < 0.25) continue;
+        anchors.push(anchor);
+      }
+      detours += segment.detours;
+      rapierBlockedSegments += segment.rapierBlockedSegments;
+      cursor = goal;
+    }
+
+    return {
+      anchors,
+      detours,
+      rapierBlockedSegments,
+      semanticTransitions: required.length,
+    };
   }
 
   function subdivideRoute(from, anchors) {
     const checkpoints = [];
     let cursor = point(from);
-    for (const anchor of anchors) {
-      const end = point(anchor);
-      const distance = distance2(cursor, end);
+    for (const rawAnchor of anchors) {
+      const anchor = waypoint(rawAnchor);
+      const distance = distance3(cursor, anchor);
       const pieces = Math.max(1, Math.ceil(distance / NAVIGATION_CHECKPOINT_SPACING));
       for (let i = 1; i <= pieces; i += 1) {
         const t = i / pieces;
+        const finalPiece = i === pieces;
         checkpoints.push({
-          x: cursor.x + (end.x - cursor.x) * t,
-          y: cursor.y + (end.y - cursor.y) * t,
-          z: cursor.z + (end.z - cursor.z) * t,
+          x: cursor.x + (anchor.x - cursor.x) * t,
+          y: cursor.y + (anchor.y - cursor.y) * t,
+          z: cursor.z + (anchor.z - cursor.z) * t,
+          ...(finalPiece && anchor.kind ? { kind: anchor.kind } : {}),
+          ...(finalPiece && anchor.doorId ? { doorId: anchor.doorId } : {}),
+          ...(finalPiece && anchor.transitionId ? { transitionId: anchor.transitionId } : {}),
+          ...(finalPiece && anchor.buildingId ? { buildingId: anchor.buildingId } : {}),
+          ...(finalPiece && anchor.mandatory ? { mandatory: true } : {}),
         });
       }
-      cursor = end;
+      cursor = anchor;
     }
     return checkpoints;
   }
 
-  function buildRoute(from, target) {
+  function buildRoute(from, target, options = {}) {
     const start = point(from);
-    const built = buildAnchors(start, target);
+    const built = buildAnchors(start, target, options);
     const checkpoints = subdivideRoute(start, built.anchors);
     return {
       checkpoints,
       anchors: built.anchors,
       detours: built.detours,
       rapierBlockedSegments: built.rapierBlockedSegments,
+      semanticTransitions: built.semanticTransitions,
+      mode: options.mode ?? "foot",
       distance: routeLength(start, checkpoints),
     };
   }
@@ -403,6 +541,7 @@ export async function setup(ctx) {
         targetKind: target.kind,
         distance: target.distance,
         distanceMeters: roundedDistance(target.distance),
+        outsideSafeZone: Boolean(target.outsideSafeZone),
         now,
       });
     }
@@ -444,12 +583,16 @@ export async function setup(ctx) {
     return true;
   }
 
+  function routeModeFor(playerId) {
+    return vehicles.isDriving?.(playerId) ? "vehicle" : "foot";
+  }
+
   function activate(playerId, target, now = Date.now()) {
     const transform = transformFor(playerId);
     if (!transform || !target) return false;
     const state = playerState(playerId);
     const replacing = Boolean(state.activeTargetId && state.activeTargetId !== target.id);
-    const route = buildRoute(transform, target);
+    const route = buildRoute(transform, target, { mode: routeModeFor(playerId) });
     state.activeTargetId = target.id;
     state.selectedTargetId = target.id;
     state.checkpoints = route.checkpoints;
@@ -460,6 +603,8 @@ export async function setup(ctx) {
       anchors: route.anchors,
       detours: route.detours,
       rapierBlockedSegments: route.rapierBlockedSegments,
+      semanticTransitions: route.semanticTransitions,
+      mode: route.mode,
       initialDistance: route.distance,
     };
     emitFor(playerId, "navigation:started", {
@@ -471,8 +616,18 @@ export async function setup(ctx) {
       distanceMeters: roundedDistance(route.distance),
       checkpointCount: route.checkpoints.length,
       detours: route.detours,
+      semanticTransitions: route.semanticTransitions,
+      mode: route.mode,
       now,
     });
+    if (target.outsideSafeZone) {
+      emitFor(playerId, "navigation:warning", {
+        reason: "outside-safe-zone",
+        targetId: target.id,
+        targetName: target.name,
+        now,
+      });
+    }
     return true;
   }
 
@@ -494,7 +649,7 @@ export async function setup(ctx) {
     const state = playerState(playerId);
     const transform = transformFor(playerId);
     if (!transform || !target) return false;
-    const route = buildRoute(transform, target);
+    const route = buildRoute(transform, target, { mode: routeModeFor(playerId) });
     state.checkpoints = route.checkpoints;
     state.checkpointIndex = 0;
     state.lastRouteAt = now;
@@ -503,6 +658,8 @@ export async function setup(ctx) {
       anchors: route.anchors,
       detours: route.detours,
       rapierBlockedSegments: route.rapierBlockedSegments,
+      semanticTransitions: route.semanticTransitions,
+      mode: route.mode,
       initialDistance: route.distance,
     };
     return true;
@@ -525,8 +682,7 @@ export async function setup(ctx) {
       return;
     }
 
-    const targetDistance = distance2(transform, target.position);
-    if (targetDistance <= target.arriveDistance) {
+    if (targetReached(transform, target)) {
       state.activeTargetId = null;
       state.checkpoints = [];
       state.checkpointIndex = 0;
@@ -542,7 +698,7 @@ export async function setup(ctx) {
 
     while (state.checkpointIndex < state.checkpoints.length) {
       const checkpoint = state.checkpoints[state.checkpointIndex];
-      if (distance2(transform, checkpoint) > NAVIGATION_CHECKPOINT_REACHED) break;
+      if (!checkpointReached(transform, checkpoint)) break;
       state.checkpointIndex += 1;
     }
 
@@ -554,7 +710,8 @@ export async function setup(ctx) {
       && targetMoved >= NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE;
     const staleRoute = now - state.lastRouteAt >= NAVIGATION_ROUTE_REPLAN_MS
       && state.checkpointIndex > 0;
-    if (exhausted || staleMovingTarget || staleRoute) replan(playerId, target, now);
+    const modeChanged = state.routeMeta?.mode !== routeModeFor(playerId);
+    if (exhausted || staleMovingTarget || staleRoute || modeChanged) replan(playerId, target, now);
   }
 
   function checkpointFor(playerId) {
@@ -572,7 +729,7 @@ export async function setup(ctx) {
     const remaining = transform && checkpoint
       ? routeLength(transform, state.checkpoints.slice(state.checkpointIndex))
       : active && transform
-        ? distance2(transform, active.position)
+        ? distance3(transform, active.position)
         : 0;
     return {
       available: targets.length,
@@ -581,24 +738,28 @@ export async function setup(ctx) {
         name: selected.name,
         kind: selected.kind,
         distance: selected.distance,
+        outsideSafeZone: Boolean(selected.outsideSafeZone),
       } : null,
       active: Boolean(active),
       target: active ? {
         id: active.id,
         name: active.name,
         kind: active.kind,
-        distance: transform ? distance2(transform, active.position) : active.distance,
+        distance: transform ? distance3(transform, active.position) : active.distance,
+        outsideSafeZone: Boolean(active.outsideSafeZone),
       } : null,
       checkpoint: checkpoint ? {
-        ...copyPoint(checkpoint),
+        ...copyWaypoint(checkpoint),
         index: state.checkpointIndex + 1,
         total: state.checkpoints.length,
-        distance: transform ? distance2(transform, checkpoint) : null,
+        distance: transform ? distance3(transform, checkpoint) : null,
       } : null,
       remainingDistance: remaining,
       route: state.routeMeta ? {
         detours: state.routeMeta.detours,
         rapierBlockedSegments: state.routeMeta.rapierBlockedSegments,
+        semanticTransitions: state.routeMeta.semanticTransitions,
+        mode: state.routeMeta.mode,
         checkpointCount: state.checkpoints.length,
       } : null,
       now,
@@ -612,10 +773,10 @@ export async function setup(ctx) {
       selectedTargetId: state.selectedTargetId,
       activeTargetId: state.activeTargetId,
       checkpointIndex: state.checkpointIndex,
-      checkpoints: state.checkpoints.map(copyPoint),
+      checkpoints: state.checkpoints.map(copyWaypoint),
       routeMeta: state.routeMeta ? {
         ...state.routeMeta,
-        anchors: state.routeMeta.anchors.map(copyPoint),
+        anchors: state.routeMeta.anchors.map(copyWaypoint),
       } : null,
     };
   }
@@ -633,6 +794,15 @@ export async function setup(ctx) {
     }
     if (Number.isFinite(expected.minCheckpoints) && state.checkpoints.length < Number(expected.minCheckpoints)) {
       throw new Error(`Expected at least ${expected.minCheckpoints} checkpoints, got ${state.checkpoints.length}`);
+    }
+    if (Number.isFinite(expected.maxCheckpoints) && state.checkpoints.length > Number(expected.maxCheckpoints)) {
+      throw new Error(`Expected at most ${expected.maxCheckpoints} checkpoints, got ${state.checkpoints.length}`);
+    }
+    if (Number.isFinite(expected.minSemanticTransitions)
+      && finite(state.routeMeta?.semanticTransitions) < Number(expected.minSemanticTransitions)) {
+      throw new Error(
+        `Expected at least ${expected.minSemanticTransitions} semantic transitions, got ${state.routeMeta?.semanticTransitions ?? 0}`,
+      );
     }
     if (Number.isFinite(expected.minDetours) && finite(state.routeMeta?.detours) < Number(expected.minDetours)) {
       throw new Error(`Expected at least ${expected.minDetours} detours, got ${state.routeMeta?.detours ?? 0}`);
@@ -661,28 +831,39 @@ export async function setup(ctx) {
           z: (finite(building.minZ) + finite(building.maxZ)) / 2,
         };
       },
-      metadata: { buildingId: building.id ?? "warehouse" },
+      metadata: {
+        buildingId: building.id ?? "warehouse",
+        verticalTolerance: 1.8,
+      },
     });
   }
 
-  registerProvider("vehicles", () => {
+  registerProvider("vehicles", (playerId) => {
     const counts = new Map();
-    return (vehicles.snapshot?.() ?? []).map((vehicle) => {
-      const kind = vehicle.kind === "supercar" ? "supercar" : "offroad";
-      const next = (counts.get(kind) ?? 0) + 1;
-      counts.set(kind, next);
-      const baseName = kind === "supercar" ? "Суперкар" : "Внедорожник";
-      return {
-        id: `vehicle:${vehicle.id}`,
-        name: `${baseName} ${next}`,
-        kind: "vehicle",
-        order: 20,
-        arriveDistance: 5.25,
-        position: { x: vehicle.x, y: vehicle.y ?? 0, z: vehicle.z },
-        vehicleId: vehicle.id,
-        metadata: { vehicleKind: kind },
-      };
-    });
+    const currentVehicleId = vehicles.vehicleForDriver?.(playerId)?.id ?? null;
+    return (vehicles.snapshot?.() ?? [])
+      .filter((vehicle) => vehicle.id !== currentVehicleId)
+      .filter((vehicle) => !vehicle.occupied || vehicle.driverId === playerId)
+      .map((vehicle) => {
+        const kind = vehicle.kind === "supercar" ? "supercar" : "offroad";
+        const next = (counts.get(kind) ?? 0) + 1;
+        counts.set(kind, next);
+        const baseName = kind === "supercar" ? "Суперкар" : "Внедорожник";
+        return {
+          id: `vehicle:${vehicle.id}`,
+          name: `${baseName} ${next}`,
+          kind: "vehicle",
+          order: 20,
+          arriveDistance: 5.25,
+          position: { x: vehicle.x, y: vehicle.y ?? 0, z: vehicle.z },
+          vehicleId: vehicle.id,
+          metadata: {
+            vehicleKind: kind,
+            occupiedByOther: Boolean(vehicle.occupied && vehicle.driverId !== playerId),
+            verticalTolerance: 2.2,
+          },
+        };
+      });
   });
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
@@ -745,8 +926,9 @@ export async function setup(ctx) {
         kind: targetSpec?.kind ?? "point",
         position: targetSpec?.position ?? targetSpec,
         vehicleId: targetSpec?.vehicleId ?? null,
+        metadata: targetSpec?.metadata ?? null,
       }, null);
-      return target ? buildRoute(from, target) : null;
+      return target ? buildRoute(from, target, { mode: targetSpec?.mode ?? "foot" }) : null;
     },
     stateFor,
     assertState,
@@ -754,6 +936,7 @@ export async function setup(ctx) {
       checkpointSpacing: NAVIGATION_CHECKPOINT_SPACING,
       checkpointReached: NAVIGATION_CHECKPOINT_REACHED,
       routeReplanMs: NAVIGATION_ROUTE_REPLAN_MS,
+      vehicleDetourClearance: NAVIGATION_VEHICLE_DETOUR_CLEARANCE,
     },
   });
 }
