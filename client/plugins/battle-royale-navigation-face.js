@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-face-client",
-  version: "1.2.1",
+  version: "1.3.0",
   requires: [
     "battle-royale-navigation-client",
     "keyboard-input",
@@ -10,12 +10,15 @@ export const manifest = {
   ],
 };
 
+const GUIDANCE_CONFIRM_TIMEOUT_MS = 1600;
+
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const network = ctx.services.get("network");
   const audio = ctx.services.get("audio");
   const speech = ctx.services.get("speech");
   const live = document.querySelector("#announcer");
+  const speechStatus = document.querySelector("#speech-status");
   const originalSample = input.sample.bind(input);
   const navigationButtons = [...document.querySelectorAll("[data-navigation-action]")];
   const guidanceButtons = navigationButtons.filter(button => button.dataset.navigationAction === "face");
@@ -25,6 +28,8 @@ export async function setup(ctx) {
   let connected = Boolean(network.connected);
   let guidanceEnabled = false;
   let guidanceSnapshotInitialized = false;
+  let confirmationTimer = null;
+  let expectedState = null;
 
   function announce(text) {
     if (!text) return;
@@ -35,8 +40,38 @@ export async function setup(ctx) {
     speech.say(text, { interrupt: true });
   }
 
+  function showNavigationProblem(text) {
+    if (speechStatus) {
+      speechStatus.textContent = text;
+      speechStatus.dataset.state = "error";
+    }
+    announce(text);
+    console.error("[Echo Front navigation]", text);
+  }
+
   function enabledMessage(targetName = null) {
     return `Автоведение включено. Веду к цели: ${targetName || "цель"}.`;
+  }
+
+  function clearConfirmation() {
+    if (confirmationTimer != null) clearTimeout(confirmationTimer);
+    confirmationTimer = null;
+    expectedState = null;
+  }
+
+  function confirmState(state) {
+    if (expectedState == null) return;
+    if (Boolean(state) === expectedState) clearConfirmation();
+  }
+
+  function waitForConfirmation() {
+    clearConfirmation();
+    expectedState = !guidanceEnabled;
+    confirmationTimer = setTimeout(() => {
+      confirmationTimer = null;
+      expectedState = null;
+      showNavigationProblem("Ошибка автоведения: команда Y не подтверждена игрой.");
+    }, GUIDANCE_CONFIRM_TIMEOUT_MS);
   }
 
   function syncGuidanceButtons() {
@@ -49,6 +84,7 @@ export async function setup(ctx) {
     const next = Boolean(enabled);
     const changed = next !== guidanceEnabled;
     guidanceEnabled = next;
+    confirmState(next);
     syncGuidanceButtons();
     if (!announceChange || !changed) return;
     announce(next ? enabledMessage(targetName) : "Автоведение выключено. Управление ручное.");
@@ -78,6 +114,7 @@ export async function setup(ctx) {
     else return;
     void audio.resume();
     ctx.events.emit("input:changed", { reason: `navigation:${action}` });
+    if (action === "face") waitForConfirmation();
   }
 
   window.addEventListener("keydown", (event) => {
@@ -103,6 +140,7 @@ export async function setup(ctx) {
   ctx.events.on("network:reconnected", () => { connected = true; });
   ctx.events.on("network:disconnected", () => {
     connected = false;
+    clearConfirmation();
     guidanceEnabled = false;
     guidanceSnapshotInitialized = false;
     navigationNextPressed = false;
@@ -118,6 +156,7 @@ export async function setup(ctx) {
     if (!guidanceSnapshotInitialized) {
       guidanceSnapshotInitialized = true;
       guidanceEnabled = next;
+      confirmState(next);
       syncGuidanceButtons();
       return;
     }
@@ -130,6 +169,7 @@ export async function setup(ctx) {
 
     if (packet.event === "navigation:guidance-enabled") {
       guidanceSnapshotInitialized = true;
+      clearConfirmation();
       const changed = !guidanceEnabled;
       guidanceEnabled = true;
       syncGuidanceButtons();
@@ -139,6 +179,7 @@ export async function setup(ctx) {
 
     if (packet.event === "navigation:guidance-disabled") {
       guidanceSnapshotInitialized = true;
+      clearConfirmation();
       const changed = guidanceEnabled;
       guidanceEnabled = false;
       syncGuidanceButtons();
@@ -147,11 +188,9 @@ export async function setup(ctx) {
     }
 
     if (packet.event !== "navigation:face-unavailable") return;
+    clearConfirmation();
     if (payload.reason === "no-target") announce("Сначала выберите цель навигации.");
     else if (payload.reason === "no-route") announce("Не удалось построить маршрут к выбранной цели.");
-    else if (payload.reason === "driving") announce("Автоведение пешего маршрута недоступно за рулём.");
-    else if (payload.reason === "airborne") announce("Автоведение недоступно в воздухе.");
-    else if (payload.reason === "ragdoll") announce("Сначала встаньте, затем включите автоведение.");
     else announce("Сейчас включить автоведение нельзя.");
   });
 
