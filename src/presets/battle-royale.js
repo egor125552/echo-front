@@ -5,6 +5,7 @@ import * as ragdollSelfCollision from "../plugins/battle-royale-ragdoll-self-col
 import * as liveCharacterQueries from "../plugins/rapier-live-character-queries/server.js";
 import * as map from "../plugins/battle-royale-map/server.js";
 import * as worldExpansion from "../plugins/battle-royale-world-expansion/server.js";
+import * as buildingNavigation from "../plugins/battle-royale-building-navigation/server.js";
 import * as groundNavigation from "../plugins/battle-royale-ground-navigation/server.js";
 import * as cratePhysics from "../plugins/battle-royale-crate-physics/server.js";
 import * as movement from "../plugins/movement/server.js";
@@ -63,6 +64,7 @@ export const battleRoyalePreset = [
   liveCharacterQueries,
   map,
   worldExpansion,
+  buildingNavigation,
   groundNavigation,
   cratePhysics,
   movement,
