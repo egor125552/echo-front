@@ -1,42 +1,31 @@
-const START = 2000017700000;
+const START = 2000017800000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 177,
+  id: 178,
   mode: "battle-royale",
-  room: "engine-lab-building-ground-route-177",
+  room: "engine-lab-building-interactions-178",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: { commands: [
     { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
-    { command: "entity.spawn", args: { spec: { id: "builder-177", kind: "human", name: "Ground Building Walker", bot: false, team: 17701, health: 400, weapons: ["pistol"], position: { x: 130, y: 3.2, z: 120, angle: 0 } } } },
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["builder-177", { x: 130, y: 3.2, z: 120, angle: 1.57079632679 }] } },
+    { command: "entity.spawn", args: { spec: { id: "builder-178", kind: "human", name: "Building Interaction Player", bot: false, team: 17801, health: 400, weapons: ["pistol"], position: { x: -110, y: 0, z: -68.4, angle: 0 } } } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["builder-178", { x: -110, y: 0, z: -68.4, angle: 0 }] } },
     { command: "game.step", args: { dt: 0.02, steps: 3, now: START + 20 } },
-    { command: "service.call", args: { service: "parachute", method: "stateFor", arguments: ["builder-177"] } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["builder-177"] } },
+    { command: "service.call", args: { service: "parachute", method: "stateFor", arguments: ["builder-178"] } },
 
-    { command: "service.call", args: { service: "map", method: "setDoorOpen", arguments: ["two-storey-front-door", true, "builder-177", START + 100] } },
-    { command: "service.call", args: { service: "navigation", method: "registerTarget", arguments: [{ id: "outside-two-storey-test-177", name: "Точка снаружи дома", kind: "point", order: 1, arriveDistance: 2.5, position: { x: 150, y: 0, z: 120 }, metadata: { verticalTolerance: 1.5 } }] } },
-    { command: "service.call", args: { service: "navigation", method: "selectTarget", arguments: ["builder-177", "outside-two-storey-test-177", START + 120] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["builder-177", { navigationFacePressed: true }, START + 130] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["builder-177", { forward: 1 }, START + 140] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["builder-178", { interactPressed: true }, START + 100] } },
+    { command: "service.call", args: { service: "map", method: "setDoorOpen", arguments: ["forest-hut-front-door", true, "builder-178", START + 110] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["builder-178", { forward: 1 }, START + 120] } },
+    { command: "game.step", args: { dt: 0.02, steps: 65, now: START + 140 } },
+    { command: "service.call", args: { service: "physics", method: "position", arguments: ["builder-178"] } },
+    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["builder-178", START + 1500] } },
 
-    { command: "game.step", args: { dt: 0.02, steps: 150, now: START + 200 } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["builder-177"] } },
-    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["builder-177", START + 3200] } },
-
-    { command: "game.step", args: { dt: 0.02, steps: 150, now: START + 3300 } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["builder-177"] } },
-    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["builder-177", START + 6300] } },
-
-    { command: "game.step", args: { dt: 0.02, steps: 150, now: START + 6400 } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["builder-177"] } },
-    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["builder-177", START + 9400] } },
-
-    { command: "game.step", args: { dt: 0.02, steps: 150, now: START + 9500 } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["builder-177"] } },
-    { command: "service.call", args: { service: "navigation-face", method: "stateFor", arguments: ["builder-177"] } },
-    { command: "service.call", args: { service: "parachute", method: "stateFor", arguments: ["builder-177"] } }
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["builder-178", { x: -112.5, y: 0, z: -73.2, angle: 0 }] } },
+    { command: "game.step", args: { dt: 0.02, steps: 2, now: START + 1600 } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["builder-178", { interactPressed: true }, START + 1700] } },
+    { command: "service.call", args: { service: "map", method: "interact", arguments: [{ entityId: "builder-178", x: -112.5, y: 0, z: -73.2, now: START + 1800 }] } },
+    { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: ["builder-178", START + 1900] } }
   ] },
-  requestedAt: "2026-08-29T21:16:00+03:00"
+  requestedAt: "2026-08-29T21:20:00+03:00"
 });
