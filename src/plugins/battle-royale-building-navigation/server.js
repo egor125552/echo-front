@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-building-navigation",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["map-test-arena"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -305,6 +305,7 @@ function legacyBuildingTopology(map) {
   if (!groundDoor || !stairPath) return null;
   const entrance = exteriorDoorPoints(groundDoor, building);
   const splitY = upperY / 2;
+  const stairLandingMargin = Math.min(0.45, upperY * 0.18);
   return {
     id: String(building.id ?? "legacy-building"),
     name: String(building.name ?? "Здание"),
@@ -330,8 +331,11 @@ function legacyBuildingTopology(map) {
         priority: 100,
         bounds: {
           ...stairPath.bounds,
-          minY: -0.3,
-          maxY: upperY + 0.3,
+          // The flat landings belong to their floors. Treat only the actual
+          // sloped middle as the stair region so route replanning cannot keep
+          // re-entering the same stair transition at the bottom or top.
+          minY: stairLandingMargin,
+          maxY: upperY - stairLandingMargin,
         },
       },
       {
