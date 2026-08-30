@@ -1,8 +1,8 @@
 export const manifest = {
   id: "battle-royale-shared-human-spawn",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["entities", "map-test-arena"],
-  capabilities: ["services.consume"],
+  capabilities: ["services.consume", "services.provide"],
 };
 
 export async function setup(ctx) {
@@ -30,7 +30,7 @@ export async function setup(ctx) {
     return originalSpawn(spec);
   };
 
-  ctx.services.provide?.("shared-human-spawn", {
+  ctx.services.provide("shared-human-spawn", {
     get position() { return shared ? { ...shared } : null; },
   });
 }
