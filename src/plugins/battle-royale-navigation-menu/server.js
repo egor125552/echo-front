@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-menu",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["battle-royale-navigation", "match-api"],
   capabilities: ["services.consume"],
 };
@@ -23,7 +23,10 @@ export async function setup(ctx) {
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     const requested = String(input.navigationSelectTargetId ?? "").trim();
-    if (requested) navigation.selectTarget(playerId, requested, now);
+    if (requested) {
+      const selected = navigation.selectTarget(playerId, requested, now);
+      if (selected && input.navigationActivateSelected) navigation.toggle(playerId, now);
+    }
     return originalHandleInput(playerId, input, now);
   };
 
