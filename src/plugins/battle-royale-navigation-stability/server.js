@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -9,7 +9,7 @@ export const manifest = {
     "battle-royale-parachute",
   ],
   capabilities: [
-    "services.consume", "services.provide", "components.read", "events.emit",
+    "services.consume", "services.provide", "components.read", "events.on", "events.emit",
   ],
 };
 
@@ -97,7 +97,7 @@ export async function setup(ctx) {
     return stats;
   }
 
-  function previewRouteDistance(playerId, selected, snapshot) {
+  function previewRouteDistance(playerId, selected) {
     if (!selected?.id) return null;
     const transform = ctx.components.get(playerId, "Transform");
     if (!transform) return Number.isFinite(Number(selected.distance)) ? Number(selected.distance) : null;
@@ -125,7 +125,7 @@ export async function setup(ctx) {
     const nav = snapshot?.navigation;
     if (!nav?.selected) return snapshot;
     const directDistance = Number(nav.selected.distance);
-    const previewDistance = previewRouteDistance(playerId, nav.selected, snapshot);
+    const previewDistance = previewRouteDistance(playerId, nav.selected);
     if (!Number.isFinite(previewDistance)) return snapshot;
 
     const stats = statsFor(playerId);
@@ -166,9 +166,6 @@ export async function setup(ctx) {
     const desiredAngle = angleTo(vehicle, checkpoint);
     const headingError = shortestAngleDelta(desiredAngle, finite(vehicle.angle));
 
-    // At speed the physical steering rack deliberately has less steering lock.
-    // Compensate by reaching full steering command sooner, while keeping the
-    // actual wheel angle governed by the vehicle physics plugin.
     const fullCommandError = clamp(0.56 - speed * 0.012, 0.21, 0.56);
     let steering = clamp(headingError / fullCommandError, -1, 1);
     if (Math.abs(steering) < 0.025) steering = 0;
@@ -353,7 +350,7 @@ export async function setup(ctx) {
       const state = navigation.stateFor(playerId);
       return state.active
         ? state.remainingDistance
-        : previewRouteDistance(playerId, state.selected, { navigation: state });
+        : previewRouteDistance(playerId, state.selected);
     },
     constants: {
       missedCheckpointStaleMs: MISSED_CHECKPOINT_STALE_MS,
