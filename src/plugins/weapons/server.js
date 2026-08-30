@@ -31,7 +31,7 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.9.0",
+  version: "1.9.1",
   requires: ["entities", "movement", "combat", "rapier-physics", "teams", "map-test-arena"],
   optional: ["aim-assist", "target-assist"],
   capabilities: [
@@ -102,6 +102,22 @@ export async function setup(ctx) {
     inventory.items.push(createWeapon(definition));
     ctx.events.emit("weapon:unlocked", { entityId, weaponId });
     return true;
+  }
+
+  function restock(entityId, weaponId, reserveAmount = 60) {
+    const inventory = ctx.components.get(entityId, "Weapons");
+    const definition = DEFINITIONS[weaponId];
+    const weapon = inventory?.items?.find((item) => item.id === weaponId) ?? null;
+    if (!weapon || !definition) return 0;
+    const amount = Math.max(1, Math.floor(Number(reserveAmount) || 60));
+    const reserveCap = Math.max(definition.reserve, definition.reserve * 2);
+    const before = Math.max(0, Number(weapon.reserve) || 0);
+    weapon.reserve = Math.min(reserveCap, before + amount);
+    const added = weapon.reserve - before;
+    if (added > 0) {
+      ctx.events.emit("weapon:ammo-restocked", { entityId, weaponId, added, reserve: weapon.reserve });
+    }
+    return added;
   }
 
   function fire(entityId, now = Date.now()) {
@@ -186,6 +202,7 @@ export async function setup(ctx) {
     definitions: DEFINITIONS,
     fire,
     grant,
+    restock,
     has(entityId, weaponId) {
       return Boolean(ctx.components.get(entityId, "Weapons")?.items?.some((item) => item.id === weaponId));
     },

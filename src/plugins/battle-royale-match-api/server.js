@@ -167,7 +167,15 @@ export async function setup(ctx) {
 
     let applied = false;
     let quantity = 0;
-    if (result.loot === "rifle") applied = weapons.grant(playerId, "rifle");
+    let restocked = false;
+    if (result.loot === "rifle") {
+      applied = weapons.grant(playerId, "rifle");
+      if (!applied) {
+        quantity = weapons.restock?.(playerId, "rifle", 60) ?? 0;
+        restocked = quantity > 0;
+        applied = restocked;
+      }
+    }
     if (result.loot === "armor") {
       quantity = armorService?.grantPlates(playerId, armorCratePlateCount(result.crateId)) ?? 0;
       applied = quantity > 0;
@@ -178,6 +186,7 @@ export async function setup(ctx) {
       loot: result.loot,
       applied,
       quantity,
+      restocked,
       x: result.x,
       y: result.y,
       z: result.z,

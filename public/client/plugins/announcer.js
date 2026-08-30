@@ -211,7 +211,10 @@ export async function setup(ctx) {
         announce(payload.open ? "Дверь открыта" : "Дверь закрыта", { interrupt: false, repeat: true });
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
-        if (payload.loot === "rifle") announce(payload.applied ? "Автомат подобран" : "Автомат уже есть", { interrupt: false });
+        if (payload.loot === "rifle") {
+          if (payload.restocked) announce(`Патроны к автомату: ${Math.max(0, Number(payload.quantity) || 0)}`, { interrupt: false });
+          else announce(payload.applied ? "Автомат подобран" : "Боезапас автомата полон", { interrupt: false });
+        }
         if (payload.loot === "armor" && !payload.applied) announce("Запас бронепластин полон", { interrupt: false });
       }
       if (packet.event === "battle-royale:ended") {
