@@ -456,15 +456,19 @@ export async function setup(ctx) {
 
     let best = null;
     let bestScore = Infinity;
+    const directDistance = distance3(from, target.position);
     for (const candidate of candidates) {
       const p = candidate.point;
       const key = `${Math.round(p.x * 10)}:${Math.round(p.y * 10)}:${Math.round(p.z * 10)}`;
       if (used.has(key)) continue;
       const candidateTarget = p.doorId ? { ...target, allowDoorId: p.doorId } : target;
       if (!segmentClear(from, p, candidateTarget)) continue;
-      const score = distance3(from, p)
-        + distance3(p, target.position)
-        + (candidate.semantic ? -2.5 : 0);
+      const projectedDistance = distance3(from, p) + distance3(p, target.position);
+      if (candidate.semantic) {
+        const semanticLimit = directDistance + Math.max(36, directDistance * 2.5);
+        if (projectedDistance > semanticLimit) continue;
+      }
+      const score = projectedDistance + (candidate.semantic ? -2.5 : 0);
       if (score >= bestScore) continue;
       best = { ...p, key };
       bestScore = score;
