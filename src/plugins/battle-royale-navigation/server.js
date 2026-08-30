@@ -5,6 +5,7 @@ export const NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE = 6;
 export const NAVIGATION_DETOUR_CLEARANCE = 3.2;
 export const NAVIGATION_VEHICLE_DETOUR_CLEARANCE = 7;
 export const NAVIGATION_VEHICLE_ARRIVAL_MAX_SPEED = 1.8;
+export const NAVIGATION_VEHICLE_BUILDING_STANDOFF = 10;
 
 const MAX_ROUTE_ANCHORS = 24;
 const MAX_RAY_SKIP_HITS = 10;
@@ -16,7 +17,7 @@ const MAX_VISIBLE_VEHICLE_TARGETS = 5;
 
 export const manifest = {
   id: "battle-royale-navigation",
-  version: "1.2.2",
+  version: "1.3.0",
   requires: [
     "match-api",
     "battle-royale-ground-navigation",
@@ -202,8 +203,43 @@ export async function setup(ctx) {
     ) > finite(zone.radius);
   }
 
+  function buildingBoundsFor(target) {
+    const buildingId = String(target?.metadata?.buildingId ?? "");
+    if (!buildingId) return null;
+    const topology = (map.navigationBuildings ?? [])
+      .find((entry) => String(entry?.id ?? "") === buildingId);
+    if (topology?.bounds) return topology.bounds;
+    if (map.building && String(map.building.id ?? "warehouse") === buildingId) return map.building;
+    return null;
+  }
+
+  function vehicleBuildingApproach(target) {
+    const bounds = buildingBoundsFor(target);
+    if (!bounds) return null;
+    const position = copyPoint(target.position);
+    const minX = finite(bounds.minX, position.x);
+    const maxX = finite(bounds.maxX, position.x);
+    const minZ = finite(bounds.minZ, position.z);
+    const maxZ = finite(bounds.maxZ, position.z);
+    const standOff = NAVIGATION_VEHICLE_BUILDING_STANDOFF;
+
+    if (position.x >= maxX) return { ...position, x: maxX + standOff };
+    if (position.x <= minX) return { ...position, x: minX - standOff };
+    if (position.z >= maxZ) return { ...position, z: maxZ + standOff };
+    if (position.z <= minZ) return { ...position, z: minZ - standOff };
+
+    const candidates = [
+      { distance: Math.abs(position.x - minX), point: { ...position, x: minX - standOff } },
+      { distance: Math.abs(maxX - position.x), point: { ...position, x: maxX + standOff } },
+      { distance: Math.abs(position.z - minZ), point: { ...position, z: minZ - standOff } },
+      { distance: Math.abs(maxZ - position.z), point: { ...position, z: maxZ + standOff } },
+    ].sort((a, b) => a.distance - b.distance);
+    return candidates[0]?.point ?? null;
+  }
+
   function availableTargets(playerId) {
     const transform = transformFor(playerId);
+    const driving = Boolean(vehicles.isDriving?.(playerId));
     let targets = [];
     let serial = 0;
 
@@ -226,6 +262,19 @@ export async function setup(ctx) {
     }
 
     for (const target of targets) {
+      if (driving && target.kind === "building") {
+        const footPosition = copyPoint(target.position);
+        const vehiclePosition = vehicleBuildingApproach(target);
+        if (vehiclePosition) {
+          target.position = vehiclePosition;
+          target.metadata = {
+            ...(target.metadata ?? {}),
+            footPosition,
+            vehicleApproach: true,
+            vehicleStandoff: NAVIGATION_VEHICLE_BUILDING_STANDOFF,
+          };
+        }
+      }
       target.distance = transform ? distance3(transform, target.position) : Infinity;
       target.outsideSafeZone = zoneRisk(target);
     }
@@ -696,10 +745,6 @@ export async function setup(ctx) {
       const drivenVehicle = vehicles.vehicleForDriver?.(playerId) ?? null;
       const vehicleSpeed = drivenVehicle ? Math.max(0, finite(drivenVehicle.speed)) : 0;
       if (drivenVehicle && vehicleSpeed > NAVIGATION_VEHICLE_ARRIVAL_MAX_SPEED) {
-        // Keep the route and Y guidance alive while the vehicle sheds its final
-        // momentum. Previously navigation announced arrival immediately on
-        // entering the radius, released auto braking, and a fast car continued
-        // straight into the target building.
         return;
       }
       state.activeTargetId = null;
@@ -958,6 +1003,7 @@ export async function setup(ctx) {
       routeReplanMs: NAVIGATION_ROUTE_REPLAN_MS,
       vehicleDetourClearance: NAVIGATION_VEHICLE_DETOUR_CLEARANCE,
       vehicleArrivalMaxSpeed: NAVIGATION_VEHICLE_ARRIVAL_MAX_SPEED,
+      vehicleBuildingStandoff: NAVIGATION_VEHICLE_BUILDING_STANDOFF,
     },
   });
 }
