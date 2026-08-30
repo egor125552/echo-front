@@ -1,12 +1,15 @@
 export const manifest = {
   id: "social",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities"],
   capabilities: ["services.consume", "services.provide", "events.on", "events.emit"],
 };
 
 const MAX_NAME_LENGTH = 24;
 const MAX_FRIENDS = 128;
+const DEFAULT_RULES = Object.freeze({
+  friendRamProtection: true,
+});
 
 function normalizeName(value) {
   return String(value ?? "")
@@ -31,10 +34,27 @@ function normalizeFriendIds(value, selfId) {
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const profiles = new Map();
+  const rules = { ...DEFAULT_RULES };
+  let hostId = null;
+
+  function humanIds() {
+    return entities.all()
+      .filter((entity) => entity?.kind === "human" && !entity.bot)
+      .map((entity) => entity.id);
+  }
+
+  function ensureHost(preferredId = null) {
+    if (hostId && entities.get(hostId)) return hostId;
+    const preferred = preferredId ? entities.get(preferredId) : null;
+    if (preferred?.kind === "human" && !preferred.bot) hostId = preferred.id;
+    else hostId = humanIds()[0] ?? null;
+    return hostId;
+  }
 
   function setProfile(playerId, profile = {}) {
     const entity = entities.get(playerId);
     if (!entity || entity.bot || entity.kind !== "human") return null;
+    ensureHost(playerId);
 
     const name = normalizeName(profile.name);
     const friends = normalizeFriendIds(profile.friendIds, playerId);
@@ -70,8 +90,42 @@ export async function setup(ctx) {
     return isFriend(a, b) || isFriend(b, a);
   }
 
+  function setRoomRule(requesterId, key, value) {
+    ensureHost();
+    if (!requesterId || requesterId !== hostId) return false;
+    if (key !== "friendRamProtection") return false;
+    const next = Boolean(value);
+    if (rules[key] === next) return true;
+    rules[key] = next;
+    ctx.events.emit("social:room-rule", {
+      entityId: requesterId,
+      key,
+      value: next,
+      now: Date.now(),
+    });
+    return true;
+  }
+
+  function roomState() {
+    ensureHost();
+    return {
+      hostId,
+      rules: { ...rules },
+    };
+  }
+
+  ctx.events.on("entity:spawned", ({ entityId }) => {
+    const entity = entities.get(entityId);
+    if (entity?.kind === "human" && !entity.bot) ensureHost(entityId);
+  });
+
   ctx.events.on("entity:removed", ({ entityId }) => {
     profiles.delete(entityId);
+    if (entityId === hostId) {
+      hostId = null;
+      ensureHost();
+      ctx.events.emit("social:host-changed", { entityId: hostId, now: Date.now() });
+    }
   });
 
   ctx.services.provide("social", {
@@ -80,5 +134,9 @@ export async function setup(ctx) {
     isFriend,
     eitherFriend,
     normalizeName,
+    setRoomRule,
+    roomState,
+    roomRules() { return { ...rules }; },
+    isHost(playerId) { return ensureHost() === playerId; },
   });
 }
