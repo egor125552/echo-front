@@ -20,6 +20,14 @@ function normalizeMode(value) {
   return value === "battle-royale" || value === "br" ? "battle-royale" : "tdm";
 }
 
+function socketStateName(value) {
+  if (value === WebSocket.CONNECTING) return "connecting";
+  if (value === WebSocket.OPEN) return "open";
+  if (value === WebSocket.CLOSING) return "closing";
+  if (value === WebSocket.CLOSED) return "closed";
+  return "unknown";
+}
+
 function loadOrCreateSessionId() {
   try {
     const persistent = localStorage.getItem(PLAYER_STORAGE_KEY);
@@ -60,7 +68,14 @@ export async function setup(ctx) {
     try {
       socket.send(JSON.stringify({ type, ...payload }));
       return true;
-    } catch {
+    } catch (error) {
+      ctx.events.emit("network:error", {
+        room: desiredRoom,
+        mode: desiredMode,
+        phase: "send",
+        endpoint: "/api/play",
+        message: String(error?.message ?? error ?? "WebSocket send failed"),
+      });
       return false;
     }
   }
@@ -114,7 +129,20 @@ export async function setup(ctx) {
     const mode = desiredMode;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}`;
-    const ws = new WebSocket(url);
+    let ws;
+    try {
+      ws = new WebSocket(url);
+    } catch (error) {
+      ctx.events.emit("network:error", {
+        room,
+        mode,
+        phase: "construct",
+        endpoint: "/api/play",
+        message: String(error?.message ?? error ?? "Could not create WebSocket"),
+      });
+      scheduleReconnect();
+      return;
+    }
     socket = ws;
 
     ws.addEventListener("open", () => {
@@ -131,7 +159,18 @@ export async function setup(ctx) {
     ws.addEventListener("message", (event) => {
       if (socket !== ws) return;
       let data;
-      try { data = JSON.parse(event.data); } catch { return; }
+      try {
+        data = JSON.parse(event.data);
+      } catch (error) {
+        ctx.events.emit("network:error", {
+          room,
+          mode: desiredMode,
+          phase: "message-parse",
+          endpoint: "/api/play",
+          message: String(error?.message ?? "Invalid server message"),
+        });
+        return;
+      }
       if (data.type === "welcome") {
         const wasReconnect = reconnectAttempt > 0 || data.resumed === true;
         playerId = data.playerId;
@@ -163,6 +202,9 @@ export async function setup(ctx) {
         room,
         mode: desiredMode,
         code: event.code,
+        reason: event.reason || null,
+        wasClean: Boolean(event.wasClean),
+        endpoint: "/api/play",
         willReconnect: Boolean(desiredRoom),
       });
       scheduleReconnect();
@@ -170,7 +212,15 @@ export async function setup(ctx) {
 
     ws.addEventListener("error", () => {
       if (socket !== ws) return;
-      ctx.events.emit("network:error", { room, mode: desiredMode });
+      ctx.events.emit("network:error", {
+        room,
+        mode: desiredMode,
+        phase: "socket",
+        endpoint: "/api/play",
+        readyState: socketStateName(ws.readyState),
+        attempt: reconnectAttempt,
+        message: "WebSocket connection failed",
+      });
     });
   }
 

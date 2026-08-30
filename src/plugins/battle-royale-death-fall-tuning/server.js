@@ -1,8 +1,8 @@
 export const manifest = {
   id: "battle-royale-death-fall-tuning",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["battle-royale-ragdoll-tuning"],
-  capabilities: ["services.consume"],
+  capabilities: ["services.consume", "services.provide"],
 };
 
 export async function setup(ctx) {
@@ -31,7 +31,7 @@ export async function setup(ctx) {
     scaleMaxExtra: 2.4,
   });
 
-  ctx.services.provide?.("death-fall-tuning", {
+  ctx.services.provide("death-fall-tuning", {
     profile() {
       return tuning.currentReason("death");
     },

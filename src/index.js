@@ -2,9 +2,14 @@ import { ENGINE_DIAGNOSTICS_CONTROL } from "./config/engine-diagnostics.js";
 import { ENGINE_CONTROL } from "./config/engine-control.js";
 import { ENGINE_COMMAND_REQUEST } from "./config/engine-command-request.js";
 import { MatchRoom } from "./server/match-room.js";
-import { normalizeGameMode } from "./server/game.js";
+import { createEchoFrontGame, normalizeGameMode } from "./server/game.js";
 
 export { MatchRoom };
+
+function errorText(error) {
+  const message = String(error?.message ?? error ?? "Unknown server error");
+  return message.slice(0, 500);
+}
 
 export default {
   async fetch(request, env) {
@@ -19,6 +24,28 @@ export default {
         engineControlRevision: ENGINE_CONTROL.revision,
         engineCommandRequestId: ENGINE_COMMAND_REQUEST.id,
       });
+    }
+
+    if (url.pathname === "/api/runtime-probe") {
+      const headers = { "Cache-Control": "no-store" };
+      if (!ENGINE_CONTROL.enabled) {
+        return Response.json({ ok: false, error: "Runtime probe is disabled" }, { status: 404, headers });
+      }
+      const mode = normalizeGameMode(url.searchParams.get("mode"));
+      let game = null;
+      try {
+        game = await createEchoFrontGame({ mode });
+        return Response.json({ ok: true, mode }, { headers });
+      } catch (error) {
+        return Response.json({
+          ok: false,
+          mode,
+          error: errorText(error),
+          errorName: String(error?.name ?? "Error").slice(0, 80),
+        }, { status: 500, headers });
+      } finally {
+        try { await game?.host?.stop?.(); } catch {}
+      }
     }
 
     if (url.pathname === "/api/diagnostics") {
