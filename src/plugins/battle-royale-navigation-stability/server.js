@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.1.1",
+  version: "1.1.2",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -27,7 +27,6 @@ const LOOKAHEAD_CHECKPOINTS = 6;
 const ARRIVAL_HOLD_DISTANCE = 7.5;
 const ARRIVAL_CRAWL_DISTANCE = 4.35;
 const ARRIVAL_BRAKE_RELEASE_SPEED = 1.25;
-const POST_ARRIVAL_BRAKE_STEPS = 24;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -187,6 +186,16 @@ export async function setup(ctx) {
 
   function postArrivalInput(playerId, raw = {}) {
     if (!postArrivalBrakes.has(playerId)) return null;
+
+    // Y is normally driven while the player keeps the accelerator held. After
+    // announcing arrival, keep the car stopped until a real input sample shows
+    // that the driver released the accelerator once. This prevents the restored
+    // held key from immediately launching the car into the destination wall.
+    if (humanInputDepth > MANUAL_INPUT_DEPTH_NONE && Math.abs(finite(raw.forward)) <= 0.08) {
+      postArrivalBrakes.delete(playerId);
+      return null;
+    }
+
     const vehicle = vehicles.vehicleForDriver?.(playerId);
     if (!vehicle) {
       postArrivalBrakes.delete(playerId);
@@ -405,21 +414,6 @@ export async function setup(ctx) {
     }
   }
 
-  function tickPostArrivalBrakes() {
-    for (const [playerId, entry] of postArrivalBrakes) {
-      const vehicle = vehicles.vehicleForDriver?.(playerId);
-      if (!vehicle) {
-        postArrivalBrakes.delete(playerId);
-        continue;
-      }
-      entry.steps -= 1;
-      const speed = Math.max(0, finite(vehicle.speed));
-      if (entry.steps <= 0 || (entry.steps <= POST_ARRIVAL_BRAKE_STEPS / 2 && speed <= 0.35)) {
-        postArrivalBrakes.delete(playerId);
-      }
-    }
-  }
-
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     humanInputDepth += 1;
     try {
@@ -436,7 +430,6 @@ export async function setup(ctx) {
   matchApi.step = (dt, now = Date.now()) => {
     const result = originalStep(dt, now);
     monitorDrivenRoutes(now);
-    tickPostArrivalBrakes();
     return result;
   };
 
@@ -451,7 +444,7 @@ export async function setup(ctx) {
   ctx.events.on("navigation:reached", ({ entityId }) => {
     recoveryTrackers.delete(entityId);
     if (vehicles.isDriving?.(entityId)) {
-      postArrivalBrakes.set(entityId, { steps: POST_ARRIVAL_BRAKE_STEPS });
+      postArrivalBrakes.set(entityId, { waitingForForwardRelease: true });
     }
   });
   ctx.events.on("entity:removed", ({ entityId }) => {
@@ -481,7 +474,7 @@ export async function setup(ctx) {
       autoNitroMaxSpeed: AUTO_NITRO_MAX_SPEED,
       lookaheadCheckpoints: LOOKAHEAD_CHECKPOINTS,
       arrivalHoldDistance: ARRIVAL_HOLD_DISTANCE,
-      postArrivalBrakeSteps: POST_ARRIVAL_BRAKE_STEPS,
+      postArrivalRequiresForwardRelease: true,
     },
   });
 }
