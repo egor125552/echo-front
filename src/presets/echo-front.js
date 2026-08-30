@@ -21,6 +21,7 @@ import * as botPerception from "../plugins/bot-perception/server.js";
 import * as botCombat from "../plugins/bot-combat/server.js";
 import * as botFill from "../plugins/bot-fill/server.js";
 import * as matchApi from "../plugins/match-api/server.js";
+import * as socialIntegration from "../plugins/social-match-integration/server.js";
 import * as networkTuning from "../plugins/network-tuning/server.js";
 
 export const echoFrontPreset = [
@@ -47,5 +48,6 @@ export const echoFrontPreset = [
   botCombat,
   botFill,
   matchApi,
+  socialIntegration,
   networkTuning,
 ];
