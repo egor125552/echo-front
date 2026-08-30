@@ -7,7 +7,10 @@ const TWO_FINGER_HOLD_MS = 650;
 const TWO_FINGER_MOVE_CANCEL_PX = 28;
 
 function distance2(a, b) {
-  return Math.hypot((Number(a?.x) || 0) - (Number(b?.x) || 0), (Number(a?.z) || 0) - (Number(b?.z) || 0));
+  return Math.hypot(
+    (Number(a?.x) || 0) - (Number(b?.x) || 0),
+    (Number(a?.z) || 0) - (Number(b?.z) || 0),
+  );
 }
 
 function isTypingTarget(target) {
@@ -65,14 +68,17 @@ function createMobileButtons() {
   row.className = "touch-actions";
   row.setAttribute("role", "group");
   row.setAttribute("aria-label", "Меню и карта");
+
   const menu = document.createElement("button");
   menu.type = "button";
   menu.textContent = "Меню";
   menu.dataset.accessibleMenu = "main";
+
   const map = document.createElement("button");
   map.type = "button";
   map.textContent = "Карта";
   map.dataset.accessibleMenu = "map";
+
   row.append(menu, map);
   controls.prepend(row);
 
@@ -202,13 +208,56 @@ export async function setup(ctx) {
       .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name, "ru"));
   }
 
+  function roomRules() {
+    return network.roomRules
+      ?? latestSnapshot?.socialRules
+      ?? { friendFireProtection: true, friendVehicleProtection: true };
+  }
+
+  function ruleLabel(name, enabled) {
+    return `${name}: ${enabled ? "включена" : "выключена"}`;
+  }
+
+  function toggleRoomRule(key, label) {
+    if (!network.organizer) {
+      announce("Эту настройку может менять только организатор комнаты.");
+      return;
+    }
+    const rules = roomRules();
+    const next = !Boolean(rules[key]);
+    if (!network.setRoomRule?.(key, next)) {
+      announce("Не удалось отправить изменение правила.");
+      return;
+    }
+    announce(`${label}: ${next ? "включаем" : "выключаем"}.`);
+  }
+
   function mainScreen() {
+    const items = [
+      { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
+    ];
+    if (network.organizer) {
+      items.push({ label: "Правила матча", action: () => show(organizerScreen(), { push: true }) });
+    }
+    items.push({ label: "Продолжить игру", action: () => closeMenu() });
+    return { id: "main", title: "Главное меню", items };
+  }
+
+  function organizerScreen() {
+    const rules = roomRules();
     return {
-      id: "main",
-      title: "Главное меню",
+      id: "organizer",
+      title: "Правила матча. Организатор",
       items: [
-        { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
-        { label: "Продолжить игру", action: () => closeMenu() },
+        {
+          label: ruleLabel("Защита друзей от выстрелов", rules.friendFireProtection),
+          action: () => toggleRoomRule("friendFireProtection", "Защита друзей от выстрелов"),
+        },
+        {
+          label: ruleLabel("Защита друзей от тарана", rules.friendVehicleProtection),
+          action: () => toggleRoomRule("friendVehicleProtection", "Защита друзей от тарана"),
+        },
+        { label: "Назад", action: goBack },
       ],
     };
   }
@@ -295,6 +344,7 @@ export async function setup(ctx) {
       title: "Карта",
       items: items.length
         ? items.map((target) => ({
+          targetId: String(target.id),
           label: `${target.name || "Точка"}. ${Math.max(0, Math.round(Number(target.distance) || 0))} метров${target.outsideSafeZone ? ". За пределами безопасной зоны" : ""}`,
           action: () => {
             pendingNavigation = {
@@ -356,7 +406,7 @@ export async function setup(ctx) {
     return {
       ...base,
       navigationSelectTargetId: pending.targetId,
-      navigationTogglePressed: Boolean(pending.activate),
+      navigationActivateSelected: Boolean(pending.activate),
     };
   };
 
@@ -378,7 +428,6 @@ export async function setup(ctx) {
       return;
     }
     if (!open && event.code === "Enter") {
-      // Enter only confirms a choice inside the new menu system.
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -408,8 +457,11 @@ export async function setup(ctx) {
   mobile.menu?.addEventListener("click", () => open ? closeMenu() : openMain());
   mobile.map?.addEventListener("click", openMap);
 
-  function padButton(gamepad, index) {
-    return Boolean(gamepad?.buttons?.[index]?.pressed || (Number(gamepad?.buttons?.[index]?.value) || 0) >= 0.5);
+  function padButton(gamepad, buttonIndex) {
+    return Boolean(
+      gamepad?.buttons?.[buttonIndex]?.pressed
+      || (Number(gamepad?.buttons?.[buttonIndex]?.value) || 0) >= 0.5,
+    );
   }
 
   function padEdge(gamepad, buttonIndex) {
@@ -421,7 +473,9 @@ export async function setup(ctx) {
 
   function pollGamepad() {
     gamepadFrame = requestAnimationFrame(pollGamepad);
-    const pads = typeof navigator.getGamepads === "function" ? Array.from(navigator.getGamepads() ?? []).filter(Boolean) : [];
+    const pads = typeof navigator.getGamepads === "function"
+      ? Array.from(navigator.getGamepads() ?? []).filter(Boolean)
+      : [];
     const gamepad = pads.find((pad) => pad.mapping === "standard") ?? pads[0] ?? null;
     if (!gamepad) {
       previousPadButtons.clear();
@@ -461,8 +515,7 @@ export async function setup(ctx) {
   document.addEventListener("touchstart", (event) => {
     if (open || event.touches.length !== 2) return;
     if (Array.from(event.touches).some((touch) => isTypingTarget(touch.target))) return;
-    const points = Array.from(event.touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
-    twoFingerStart = points;
+    twoFingerStart = Array.from(event.touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
     twoFingerTimer = setTimeout(() => {
       twoFingerTimer = null;
       twoFingerStart = null;
@@ -496,6 +549,27 @@ export async function setup(ctx) {
         const found = currentItems().findIndex((item) => item.targetId === selectedId);
         if (found >= 0) index = found;
       }
+    } else if (open && screen?.id === "organizer") {
+      const selectedKey = index;
+      screen = organizerScreen();
+      index = Math.min(selectedKey, Math.max(0, currentItems().length - 1));
+    }
+  });
+
+  ctx.events.on("network:room-rule-result", (result) => {
+    if (!result?.ok) {
+      announce(result?.organizer
+        ? "Не удалось изменить правило матча."
+        : "Только организатор комнаты может менять это правило.");
+      return;
+    }
+    const name = result.key === "friendVehicleProtection"
+      ? "Защита друзей от тарана"
+      : "Защита друзей от выстрелов";
+    announce(`${name}: ${result.enabled ? "включена" : "выключена"}.`);
+    if (open && screen?.id === "organizer") {
+      screen = organizerScreen();
+      render();
     }
   });
 
