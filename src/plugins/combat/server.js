@@ -1,6 +1,6 @@
 export const manifest = {
   id: "combat",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["health"],
   optional: ["social"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
@@ -21,7 +21,7 @@ export async function setup(ctx) {
       const attackerId = source.attackerId ?? null;
       const now = source.now ?? Date.now();
 
-      if (attackerId && social?.isFriend(attackerId, targetId)) {
+      if (attackerId && social?.protectFromFriendlyFire?.(attackerId, targetId)) {
         ctx.events.emit("combat:friend-protected", {
           attackerId,
           targetId,
