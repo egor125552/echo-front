@@ -23,7 +23,7 @@ export async function setup(ctx) {
       name: String(building.name ?? id),
       kind: "building",
       order: finite(building.metadata?.targetOrder, 12),
-      arriveDistance: Math.max(1.2, finite(building.metadata?.arriveDistance, 1.6)),
+      arriveDistance: Math.max(1, finite(building.metadata?.arriveDistance, 1)),
       position: {
         x: finite(target.x),
         y: finite(target.y),
