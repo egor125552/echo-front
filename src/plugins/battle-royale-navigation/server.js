@@ -724,6 +724,14 @@ export async function setup(ctx) {
     return true;
   }
 
+  function replanActiveForModeChange(playerId, now = Date.now()) {
+    const state = playerStates.get(playerId);
+    if (!state?.activeTargetId) return false;
+    const target = resolveTarget(playerId, state.activeTargetId);
+    if (!target) return false;
+    return replan(playerId, target, now);
+  }
+
   function updatePlayer(playerId, now = Date.now()) {
     const state = playerState(playerId);
     if (!state.activeTargetId) return;
@@ -786,9 +794,20 @@ export async function setup(ctx) {
 
   function publicState(playerId, now = Date.now()) {
     const state = playerState(playerId);
-    const targets = availableTargets(playerId);
-    const selected = targets.find((target) => target.id === state.selectedTargetId) ?? null;
-    const active = targets.find((target) => target.id === state.activeTargetId) ?? null;
+    let targets = availableTargets(playerId);
+    let selected = targets.find((target) => target.id === state.selectedTargetId) ?? null;
+    let active = targets.find((target) => target.id === state.activeTargetId) ?? null;
+
+    // Entering or leaving a vehicle changes both route geometry and building
+    // approach points. Replan before exposing a snapshot so spoken distance
+    // never gets stuck on the old vehicle route until navigation is toggled.
+    if (active && state.routeMeta?.mode !== routeModeFor(playerId)) {
+      replan(playerId, active, now);
+      targets = availableTargets(playerId);
+      selected = targets.find((target) => target.id === state.selectedTargetId) ?? null;
+      active = targets.find((target) => target.id === state.activeTargetId) ?? null;
+    }
+
     const transform = transformFor(playerId);
     const checkpoint = checkpointFor(playerId);
     const remaining = transform && checkpoint
@@ -970,6 +989,16 @@ export async function setup(ctx) {
     }
     return selected;
   };
+
+  ctx.events.on("vehicle:entered", ({ entityId, now }) => {
+    if (entityId) replanActiveForModeChange(entityId, Number(now) || Date.now());
+  });
+  ctx.events.on("vehicle:exited", ({ entityId, now }) => {
+    if (entityId) replanActiveForModeChange(entityId, Number(now) || Date.now());
+  });
+  ctx.events.on("vehicle:driver-lost", ({ entityId, now }) => {
+    if (entityId) replanActiveForModeChange(entityId, Number(now) || Date.now());
+  });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
     playerStates.delete(entityId);

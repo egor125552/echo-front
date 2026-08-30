@@ -137,6 +137,22 @@ function validateBuilding(spec) {
     }
   }
 
+  const primaryDoor = spec?.doors?.[0] ?? null;
+  if (primaryDoor) {
+    const primarySide = String(primaryDoor.side ?? "east");
+    const primaryOffset = Math.abs(finite(primaryDoor.offset));
+    const primaryWidth = Math.max(0.8, Math.abs(finite(primaryDoor.width, 2.2)));
+    if (primarySide !== "east") {
+      warnings.push(`primary door ${primaryDoor.id ?? "unnamed"} does not face east like the warehouse front entrance`);
+    }
+    if (primaryOffset > 0.35) {
+      warnings.push(`primary door ${primaryDoor.id ?? "unnamed"} is not centered on the front wall`);
+    }
+    if (primaryWidth < 3.2) {
+      warnings.push(`primary door ${primaryDoor.id ?? "unnamed"} is narrower than the preferred 3.2 meter accessible entrance`);
+    }
+  }
+
   for (const stair of spec?.stairs ?? []) {
     const stairId = stair.id ?? "unnamed";
     const from = floorById.get(String(stair.fromFloorId));
@@ -224,6 +240,12 @@ export async function setup(ctx) {
   const factory = ctx.services.get("building-factory");
   const reports = BATTLE_ROYALE_BUILDINGS.map(validateBuilding);
   const failed = reports.filter((report) => !report.ok);
+  const warned = reports.filter((report) => report.warnings.length);
+  if (warned.length) {
+    console.warn(
+      `Building design warnings: ${warned.map((report) => `${report.id}: ${report.warnings.join("; ")}`).join(" | ")}`,
+    );
+  }
   if (failed.length) {
     const message = failed
       .map((report) => `${report.id}: ${report.errors.join("; ")}`)
