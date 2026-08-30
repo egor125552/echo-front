@@ -41,19 +41,25 @@ export class MatchRoom extends DurableObject {
     this.lastSnapshotAt = 0;
     this.disconnectedHumans = new Map();
     this.diagnosticsStats = freshDiagnosticsStats();
+    this.organizerId = null;
 
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
+      const attached = sockets.map((socket) => {
+        try { return { socket, attachment: socket.deserializeAttachment() }; } catch { return null; }
+      }).filter(Boolean);
+      const organizer = attached.find((entry) => entry.attachment?.organizer)?.attachment?.playerId
+        ?? attached.sort((a, b) => Number(a.attachment?.connectedAt || 0) - Number(b.attachment?.connectedAt || 0))[0]?.attachment?.playerId
+        ?? null;
+      this.organizerId = organizer;
+
       if (!activeSocketCount(sockets)) return;
       const mode = normalizeGameMode(
-        sockets.map((socket) => {
-          try { return socket.deserializeAttachment()?.mode; } catch { return null; }
-        }).find(Boolean),
+        attached.map((entry) => entry.attachment?.mode).find(Boolean),
       );
       await this.ensureGame(mode);
-      for (const ws of sockets) {
+      for (const { socket: ws, attachment } of attached) {
         if (ws.readyState === 3) continue;
-        const attachment = ws.deserializeAttachment();
         if (!attachment?.playerId) continue;
         try { this.game.api.connectHuman(attachment.playerId); } catch {}
       }
@@ -81,6 +87,45 @@ export class MatchRoom extends DurableObject {
       if (!socket || socket === excludedSocket || socket.readyState === 3) return false;
       try { return socket.deserializeAttachment()?.playerId === playerId; } catch { return false; }
     });
+  }
+
+  activePlayerAttachments(excludedSocket = null) {
+    return this.ctx.getWebSockets()
+      .filter((socket) => socket && socket !== excludedSocket && socket.readyState !== 3)
+      .map((socket) => {
+        try { return { socket, attachment: socket.deserializeAttachment() }; } catch { return null; }
+      })
+      .filter((entry) => entry?.attachment?.playerId);
+  }
+
+  ensureOrganizer(excludedSocket = null) {
+    const active = this.activePlayerAttachments(excludedSocket);
+    if (this.organizerId && active.some((entry) => entry.attachment.playerId === this.organizerId)) {
+      return this.organizerId;
+    }
+    active.sort((a, b) => Number(a.attachment?.connectedAt || 0) - Number(b.attachment?.connectedAt || 0));
+    this.organizerId = active[0]?.attachment?.playerId ?? null;
+    for (const { socket, attachment } of active) {
+      try {
+        socket.serializeAttachment({
+          ...attachment,
+          organizer: attachment.playerId === this.organizerId,
+        });
+      } catch {}
+    }
+    return this.organizerId;
+  }
+
+  snapshotForPlayer(playerId, now = Date.now()) {
+    const base = typeof this.game.api.snapshotFor === "function"
+      ? this.game.api.snapshotFor(playerId, now)
+      : this.game.api.snapshot(now);
+    return {
+      ...base,
+      room: {
+        organizer: Boolean(playerId && playerId === this.organizerId),
+      },
+    };
   }
 
   cleanupDisconnectedHumans(now = Date.now()) {
@@ -181,6 +226,7 @@ export class MatchRoom extends DurableObject {
       roomActive: true,
       mode: this.mode,
       sockets: activeSocketCount(this.ctx.getWebSockets()),
+      organizerId: this.organizerId,
       disconnectedHumans: this.disconnectedHumans.size,
       loopRunning: Boolean(this.gameLoopTimer),
       lastStepAt: this.lastStepAt,
@@ -208,20 +254,23 @@ export class MatchRoom extends DurableObject {
     const playerId = requestedPlayerId ?? crypto.randomUUID();
     const previousSockets = this.socketsForPlayer(playerId);
 
+    if (!this.organizerId) this.organizerId = playerId;
+    const organizer = playerId === this.organizerId;
+
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ playerId, mode });
+    server.serializeAttachment({ playerId, mode, organizer, connectedAt: Date.now() });
     this.disconnectedHumans.delete(playerId);
 
     const joined = this.game.api.connectHuman(playerId);
-    const initialSnapshot = typeof this.game.api.snapshotFor === "function"
-      ? this.game.api.snapshotFor(playerId)
-      : this.game.api.snapshot();
+    const initialSnapshot = this.snapshotForPlayer(playerId);
     server.send(JSON.stringify({
       type: "welcome",
       playerId,
       team: joined.team,
       mode,
+      organizer,
+      socialRules: this.game.api.socialRules?.() ?? null,
       resumed: Boolean(joined.resumed),
       snapshot: initialSnapshot,
     }));
@@ -244,7 +293,27 @@ export class MatchRoom extends DurableObject {
     const playerId = attachment?.playerId;
     if (!playerId) return;
     const now = Date.now();
-    if (data.type === "input") this.game.api.handleInput(playerId, data.input ?? {}, now);
+
+    if (data.type === "input") {
+      this.game.api.handleInput(playerId, data.input ?? {}, now);
+    } else if (data.type === "room-rule") {
+      const authorized = playerId === this.organizerId && Boolean(attachment?.organizer);
+      const key = String(data.key ?? "");
+      const enabled = Boolean(data.enabled);
+      const accepted = authorized && Boolean(this.game.api.setSocialRule?.(key, enabled));
+      try {
+        ws.send(JSON.stringify({
+          type: "room-rule-result",
+          ok: accepted,
+          key,
+          enabled,
+          organizer: authorized,
+          rules: this.game.api.socialRules?.() ?? null,
+        }));
+      } catch {}
+      if (accepted) this.broadcastSnapshot(true);
+    }
+
     this.startGameLoop();
     this.broadcastEvents();
   }
@@ -258,13 +327,22 @@ export class MatchRoom extends DurableObject {
   }
 
   async webSocketClose(ws) {
+    const wasOrganizer = ws.deserializeAttachment()?.playerId === this.organizerId;
     this.markSocketDisconnected(ws);
-    this.broadcastSnapshot(true);
+    if (wasOrganizer) {
+      this.ensureOrganizer(ws);
+      this.broadcastSnapshot(true);
+    }
     await this.scheduleCleanupIfEmpty(ws);
   }
 
   async webSocketError(ws) {
+    const wasOrganizer = ws.deserializeAttachment()?.playerId === this.organizerId;
     this.markSocketDisconnected(ws);
+    if (wasOrganizer) {
+      this.ensureOrganizer(ws);
+      this.broadcastSnapshot(true);
+    }
     await this.scheduleCleanupIfEmpty(ws);
   }
 
@@ -287,6 +365,7 @@ export class MatchRoom extends DurableObject {
       this.game = null;
     }
     this.mode = null;
+    this.organizerId = null;
     this.disconnectedHumans.clear();
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
@@ -321,20 +400,12 @@ export class MatchRoom extends DurableObject {
     this.lastSnapshotAt = now;
     this.diagnosticsStats.snapshotBroadcasts += 1;
 
-    if (typeof this.game.api.snapshotFor !== "function") {
-      const message = JSON.stringify({ type: "snapshot", snapshot: this.game.api.snapshot(now) });
-      for (const socket of this.ctx.getWebSockets()) {
-        try { socket.send(message); } catch {}
-      }
-      return;
-    }
-
     for (const socket of this.ctx.getWebSockets()) {
       try {
         const playerId = socket.deserializeAttachment()?.playerId;
         socket.send(JSON.stringify({
           type: "snapshot",
-          snapshot: this.game.api.snapshotFor(playerId, now),
+          snapshot: this.snapshotForPlayer(playerId, now),
         }));
       } catch {}
     }
