@@ -1,35 +1,45 @@
-const START = 2000019400000;
+const START = 2000019500000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 194,
+  id: 195,
   mode: "battle-royale",
-  room: "engine-play-vehicle-body-194",
+  room: "engine-play-navigation-stability-195",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: { commands: [
     { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [START] } },
-    { command: "entity.spawn", args: { spec: { id: "explorer-194", kind: "human", name: "Vehicle Body Explorer", bot: false, team: 19401, health: 400, weapons: ["pistol"], position: { x: 89.8, y: 0, z: 20.7, angle: 1.57079632679 } } } },
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["explorer-194", { x: 89.8, y: 0, z: 20.7, angle: 1.57079632679 }] } },
+    { command: "entity.spawn", args: { spec: { id: "driver-195", kind: "human", name: "Navigation Driver", bot: false, team: 19501, health: 400, weapons: ["pistol"], position: { x: 94, y: 0, z: 24, angle: 0 } } } },
     { command: "service.call", args: { service: "parachute", method: "finishMovement", arguments: [0.02, START + 20] } },
-    { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-jeep-1"] } },
-    { command: "service.call", args: { service: "object-affordances", method: "nearestVehicle", arguments: ["explorer-194"] } },
+    { command: "service.call", args: { service: "vehicles", method: "enter", arguments: ["driver-195", START + 40, "br-jeep-1"] } },
 
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-194", { forward: 1 }, START + 100] } },
-    { command: "game.step", args: { dt: 0.02, steps: 20, now: START + 120 } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["explorer-194"] } },
-    { command: "service.call", args: { service: "object-affordances", method: "nearestVehicle", arguments: ["explorer-194"] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-194", { interactPressed: true }, START + 600] } },
-    { command: "service.call", args: { service: "vehicles", method: "vehicleForDriver", arguments: ["explorer-194"] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-194", { interactPressed: true }, START + 800] } },
+    { command: "service.call", args: { service: "navigation", method: "selectTarget", arguments: ["driver-195", "two-storey-house", START + 80] } },
+    { command: "service.call", args: { service: "navigation-stability", method: "previewDistance", arguments: ["driver-195"] } },
+    { command: "service.call", args: { service: "navigation", method: "toggle", arguments: ["driver-195", START + 100] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["driver-195", START + 120] } },
+    { command: "service.call", args: { service: "navigation-face", method: "enableGuidance", arguments: ["driver-195", START + 140] } },
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["driver-195", { forward: 1, fireHeld: true }, START + 160] } },
 
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: ["explorer-194", { x: -92.8, y: 0, z: 516.8, angle: 0.8 }] } },
-    { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: ["br-supercar-1"] } },
-    { command: "service.call", args: { service: "object-affordances", method: "nearestVehicle", arguments: ["explorer-194"] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-194", { interactPressed: true }, START + 1000] } },
-    { command: "service.call", args: { service: "vehicles", method: "vehicleForDriver", arguments: ["explorer-194"] } },
-    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["explorer-194", { interactPressed: true }, START + 1200] } },
-    { command: "service.call", args: { service: "physics", method: "position", arguments: ["explorer-194"] } }
+    { command: "game.step", args: { dt: 0.02, steps: 150, now: START + 180 } },
+    { command: "service.call", args: { service: "vehicles", method: "vehicleForDriver", arguments: ["driver-195"] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["driver-195", START + 3200] } },
+    { command: "service.call", args: { service: "navigation-stability", method: "stateFor", arguments: ["driver-195"] } },
+
+    { command: "game.step", args: { dt: 0.02, steps: 150, now: START + 3220 } },
+    { command: "service.call", args: { service: "vehicles", method: "vehicleForDriver", arguments: ["driver-195"] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["driver-195", START + 6240] } },
+    { command: "service.call", args: { service: "navigation-stability", method: "stateFor", arguments: ["driver-195"] } },
+
+    { command: "game.step", args: { dt: 0.02, steps: 200, now: START + 6260 } },
+    { command: "service.call", args: { service: "vehicles", method: "vehicleForDriver", arguments: ["driver-195"] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["driver-195", START + 10280] } },
+    { command: "service.call", args: { service: "navigation-stability", method: "stateFor", arguments: ["driver-195"] } },
+
+    { command: "service.call", args: { service: "match-api", method: "handleInput", arguments: ["driver-195", { forward: 1, fireHeld: false }, START + 10300] } },
+    { command: "game.step", args: { dt: 0.02, steps: 200, now: START + 10320 } },
+    { command: "service.call", args: { service: "vehicles", method: "vehicleForDriver", arguments: ["driver-195"] } },
+    { command: "service.call", args: { service: "navigation", method: "stateFor", arguments: ["driver-195", START + 14340] } },
+    { command: "service.call", args: { service: "navigation-stability", method: "stateFor", arguments: ["driver-195"] } }
   ] },
-  requestedAt: "2026-08-29T22:59:00+03:00"
+  requestedAt: "2026-08-30T08:35:00+03:00"
 });
