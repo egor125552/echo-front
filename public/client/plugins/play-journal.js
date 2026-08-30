@@ -1,6 +1,6 @@
 export const manifest = {
   id: "play-journal",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: ["cloudflare-session"],
 };
 
@@ -339,10 +339,46 @@ export async function setup(ctx) {
   });
   ctx.events.on("input:reset", ({ reason } = {}) => append(["m", stamp(), "input-reset", reason ?? null]));
   ctx.events.on("network:input-sampled", ({ input }) => recordInput(input));
-  ctx.events.on("network:connected", ({ room } = {}) => append(["m", stamp(), "connected", room ?? "public"]));
-  ctx.events.on("network:welcome", ({ playerId, team } = {}) => append(["m", stamp(), "welcome", { playerId, team }]));
-  ctx.events.on("network:disconnected", () => append(["m", stamp(), "disconnected", null]));
-  ctx.events.on("network:error", () => append(["m", stamp(), "network-error", null]));
+  ctx.events.on("network:connected", (details = {}) => append(["m", stamp(), "connected", {
+    room: details.room ?? "public",
+    mode: details.mode ?? null,
+    reconnecting: Boolean(details.reconnecting),
+  }]));
+  ctx.events.on("network:welcome", ({ playerId, team, mode, resumed } = {}) => append(["m", stamp(), "welcome", {
+    playerId,
+    team,
+    mode: mode ?? null,
+    resumed: Boolean(resumed),
+  }]));
+  ctx.events.on("network:disconnected", (details = {}) => append(["m", stamp(), "disconnected", {
+    room: details.room ?? null,
+    mode: details.mode ?? null,
+    code: details.code ?? null,
+    reason: details.reason ?? null,
+    wasClean: details.wasClean ?? null,
+    endpoint: details.endpoint ?? null,
+    willReconnect: details.willReconnect ?? null,
+  }]));
+  ctx.events.on("network:error", (details = {}) => append(["m", stamp(), "network-error", {
+    room: details.room ?? null,
+    mode: details.mode ?? null,
+    phase: details.phase ?? null,
+    endpoint: details.endpoint ?? null,
+    readyState: details.readyState ?? null,
+    attempt: details.attempt ?? null,
+    message: details.message ?? null,
+  }]));
+  ctx.events.on("network:reconnecting", (details = {}) => append(["m", stamp(), "reconnecting", {
+    room: details.room ?? null,
+    mode: details.mode ?? null,
+    attempt: details.attempt ?? null,
+    delay: details.delay ?? null,
+  }]));
+  ctx.events.on("network:reconnected", (details = {}) => append(["m", stamp(), "reconnected", {
+    room: details.room ?? null,
+    mode: details.mode ?? null,
+    resumed: Boolean(details.resumed),
+  }]));
   ctx.events.on("speech:state", (state = {}) => {
     append(["m", stamp(), "speech-state", compactSpeechState(state)]);
   });
