@@ -8,6 +8,7 @@ import * as openingRound from "../plugins/opening-round/server.js";
 import * as health from "../plugins/health/server.js";
 import * as armor from "../plugins/armor/server.js";
 import * as spawnProtection from "../plugins/spawn-protection/server.js";
+import * as social from "../plugins/social/server.js";
 import * as targetAssist from "../plugins/target-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
 import * as healthRegeneration from "../plugins/health-regeneration/server.js";
@@ -33,6 +34,7 @@ export const echoFrontPreset = [
   health,
   armor,
   spawnProtection,
+  social,
   targetAssist,
   combat,
   healthRegeneration,
