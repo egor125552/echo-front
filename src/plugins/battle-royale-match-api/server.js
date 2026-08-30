@@ -152,6 +152,13 @@ export async function setup(ctx) {
     );
   }
 
+  function armorCratePlateCount(crateId) {
+    const text = String(crateId ?? "armor-crate");
+    let hash = 0;
+    for (let i = 0; i < text.length; i += 1) hash = ((hash * 31) + text.charCodeAt(i)) >>> 0;
+    return 3 + (hash % 2);
+  }
+
   function handleInteraction(playerId) {
     const transform = ctx.components.get(playerId, "Transform");
     if (!transform || typeof map.interact !== "function") return false;
@@ -162,7 +169,7 @@ export async function setup(ctx) {
     let quantity = 0;
     if (result.loot === "rifle") applied = weapons.grant(playerId, "rifle");
     if (result.loot === "armor") {
-      quantity = armorService?.grantPlates(playerId, 1) ?? 0;
+      quantity = armorService?.grantPlates(playerId, armorCratePlateCount(result.crateId)) ?? 0;
       applied = quantity > 0;
     }
     ctx.events.emit("loot:picked", {
