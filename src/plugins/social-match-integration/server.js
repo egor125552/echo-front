@@ -1,6 +1,6 @@
 export const manifest = {
   id: "social-match-integration",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: ["social", "match-api"],
   capabilities: ["services.consume"],
 };
@@ -8,6 +8,12 @@ export const manifest = {
 export async function setup(ctx) {
   const social = ctx.services.get("social");
   const matchApi = ctx.services.get("match-api");
+  const originalHandleInput = matchApi.handleInput.bind(matchApi);
+
+  matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
+    if (input?.socialProfile) social.setProfile(playerId, input.socialProfile);
+    return originalHandleInput(playerId, input, now);
+  };
 
   matchApi.setSocialProfile = (playerId, profile = {}) => social.setProfile(playerId, profile);
   matchApi.socialRules = () => social.ruleState();
