@@ -1,6 +1,6 @@
 export const manifest = {
   id: "social-ragdoll-protection",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["social", "health", "battle-royale-fleet-pedestrian-ragdoll"],
   capabilities: ["services.consume", "events.on", "events.emit"],
 };
@@ -28,7 +28,7 @@ export async function setup(ctx) {
     if (source?.weaponId === "ragdoll-impact") {
       const recent = recentVehicleHits.get(targetId);
       const now = Number(source?.now) || Date.now();
-      if (recent && now <= recent.expiresAt && social.isFriend(recent.driverId, targetId)) {
+      if (recent && now <= recent.expiresAt && social.protectFromFriendlyVehicle?.(recent.driverId, targetId)) {
         ctx.events.emit("combat:friend-protected", {
           attackerId: recent.driverId,
           targetId,
