@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.1.0",
+  version: "1.1.1",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -24,6 +24,10 @@ const MIN_DISTANCE_GROWTH = 4;
 const MAX_AUTO_BRAKE_DISTANCE = 360;
 const AUTO_NITRO_MAX_SPEED = 48;
 const LOOKAHEAD_CHECKPOINTS = 6;
+const ARRIVAL_HOLD_DISTANCE = 7.5;
+const ARRIVAL_CRAWL_DISTANCE = 4.35;
+const ARRIVAL_BRAKE_RELEASE_SPEED = 1.25;
+const POST_ARRIVAL_BRAKE_STEPS = 24;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -104,6 +108,7 @@ export async function setup(ctx) {
 
   const recoveryTrackers = new Map();
   const assistStats = new Map();
+  const postArrivalBrakes = new Map();
   let humanInputDepth = MANUAL_INPUT_DEPTH_NONE;
 
   function statsFor(playerId) {
@@ -114,6 +119,8 @@ export async function setup(ctx) {
       brakeApplications: 0,
       finalBrakeApplications: 0,
       cornerBrakeApplications: 0,
+      arrivalHoldApplications: 0,
+      postArrivalBrakeApplications: 0,
       nitroSuppressions: 0,
       missedCheckpointRecoveries: 0,
       lastBrakeAt: null,
@@ -178,7 +185,34 @@ export async function setup(ctx) {
     };
   }
 
+  function postArrivalInput(playerId, raw = {}) {
+    if (!postArrivalBrakes.has(playerId)) return null;
+    const vehicle = vehicles.vehicleForDriver?.(playerId);
+    if (!vehicle) {
+      postArrivalBrakes.delete(playerId);
+      return null;
+    }
+    const forwardSpeed = finite(vehicle.forwardSpeed);
+    const speed = Math.max(0, finite(vehicle.speed));
+    let forward = 0;
+    if (forwardSpeed > ARRIVAL_BRAKE_RELEASE_SPEED) {
+      forward = -clamp(0.38 + speed / 14, 0.42, 1);
+    } else if (forwardSpeed < -ARRIVAL_BRAKE_RELEASE_SPEED) {
+      forward = clamp(0.34 + speed / 16, 0.38, 0.8);
+    }
+    const stats = statsFor(playerId);
+    stats.postArrivalBrakeApplications += 1;
+    return {
+      ...raw,
+      forward,
+      sprint: false,
+      fireHeld: false,
+    };
+  }
+
   function guidedVehicleInput(playerId, raw = {}) {
+    const postArrival = postArrivalInput(playerId, raw);
+    if (postArrival) return postArrival;
     if (humanInputDepth > MANUAL_INPUT_DEPTH_NONE) return raw;
 
     const face = navigationFace.stateFor?.(playerId);
@@ -192,14 +226,12 @@ export async function setup(ctx) {
 
     const checkpoint = state.checkpoint;
     const speed = Math.max(0, Math.abs(finite(vehicle.forwardSpeed, vehicle.speed)));
+    const forwardSpeed = finite(vehicle.forwardSpeed);
     const distance = distance2(vehicle, checkpoint);
     const remainingDistance = Math.max(distance, finite(state.remainingDistance, distance));
     const desiredAngle = angleTo(vehicle, checkpoint);
     const headingError = shortestAngleDelta(desiredAngle, finite(vehicle.angle));
 
-    // At speed the physical steering rack deliberately has less steering lock.
-    // Reach a full steering command sooner, while still letting vehicle physics
-    // own the actual wheel-angle limit.
     const fullCommandError = clamp(0.56 - speed * 0.012, 0.18, 0.56);
     let steering = clamp(headingError / fullCommandError, -1, 1);
     if (Math.abs(steering) < 0.025) steering = 0;
@@ -210,9 +242,6 @@ export async function setup(ctx) {
     const cornerSeverity = Math.max(headingSeverity, finite(nearestTurn?.severity));
     const cornerDistance = nearestTurn?.distance ?? Infinity;
 
-    // Use the whole remaining route, not just the final checkpoint. A supercar
-    // can cover one checkpoint interval before it has physically had time to
-    // brake, so beginning the approach at the last checkpoint is much too late.
     const stoppingDistance = clamp(
       12 + speed * 1.45 + (speed * speed) / 13,
       14,
@@ -225,13 +254,11 @@ export async function setup(ctx) {
       && cornerDistance <= cornerBrakeWindow
       && speed > targetTurnSpeed + 1.1;
 
-    const desiredApproachSpeed = clamp((remainingDistance - 5) * 0.16, 3.5, 32);
+    const desiredApproachSpeed = clamp((remainingDistance - 3.5) * 0.22, 1.1, 28);
     const needsFinalBrake = remainingDistance <= stoppingDistance
-      && speed > desiredApproachSpeed + 1.25;
+      && speed > desiredApproachSpeed + 0.8;
+    const arrivalHold = remainingDistance <= ARRIVAL_HOLD_DISTANCE;
 
-    // Nitro is useful only while there is genuinely enough straight route left
-    // to spend the extra speed. This still lets a supercar accelerate hard on a
-    // long straight, but Y will not keep boosting into a bend or the destination.
     const nitroSafetyDistance = Math.max(170, stoppingDistance * 1.08);
     const turnNeedsNitroCut = nearestTurn
       && nearestTurn.distance <= Math.max(150, stoppingDistance * 0.92);
@@ -239,12 +266,28 @@ export async function setup(ctx) {
       speed >= AUTO_NITRO_MAX_SPEED
       || remainingDistance <= nitroSafetyDistance
       || turnNeedsNitroCut
+      || arrivalHold
     );
 
     let forward = raw.forward;
     let fireHeld = suppressNitro ? false : raw.fireHeld;
     let braking = false;
-    if ((needsCornerBrake || needsFinalBrake) && finite(raw.forward) > 0.08) {
+
+    if (arrivalHold) {
+      fireHeld = false;
+      if (forwardSpeed > ARRIVAL_BRAKE_RELEASE_SPEED) {
+        forward = -clamp(0.42 + (speed - 1) / 10, 0.45, 1);
+        braking = true;
+      } else if (forwardSpeed < -ARRIVAL_BRAKE_RELEASE_SPEED) {
+        forward = clamp(0.32 + speed / 16, 0.36, 0.72);
+        braking = true;
+      } else if (remainingDistance > ARRIVAL_CRAWL_DISTANCE) {
+        forward = 0.16;
+      } else {
+        forward = 0;
+        steering = 0;
+      }
+    } else if ((needsCornerBrake || needsFinalBrake) && finite(raw.forward) > 0.08) {
       const desiredSpeed = needsFinalBrake
         ? Math.min(desiredApproachSpeed, needsCornerBrake ? targetTurnSpeed : desiredApproachSpeed)
         : targetTurnSpeed;
@@ -261,9 +304,10 @@ export async function setup(ctx) {
     stats.lastCornerDistance = Number.isFinite(cornerDistance) ? cornerDistance : null;
     stats.lastRemainingDistance = remainingDistance;
     if (suppressNitro) stats.nitroSuppressions += 1;
+    if (arrivalHold) stats.arrivalHoldApplications += 1;
     if (braking) {
       stats.brakeApplications += 1;
-      if (needsFinalBrake) stats.finalBrakeApplications += 1;
+      if (needsFinalBrake || arrivalHold) stats.finalBrakeApplications += 1;
       if (needsCornerBrake) stats.cornerBrakeApplications += 1;
       stats.lastBrakeAt = Date.now();
     }
@@ -361,6 +405,21 @@ export async function setup(ctx) {
     }
   }
 
+  function tickPostArrivalBrakes() {
+    for (const [playerId, entry] of postArrivalBrakes) {
+      const vehicle = vehicles.vehicleForDriver?.(playerId);
+      if (!vehicle) {
+        postArrivalBrakes.delete(playerId);
+        continue;
+      }
+      entry.steps -= 1;
+      const speed = Math.max(0, finite(vehicle.speed));
+      if (entry.steps <= 0 || (entry.steps <= POST_ARRIVAL_BRAKE_STEPS / 2 && speed <= 0.35)) {
+        postArrivalBrakes.delete(playerId);
+      }
+    }
+  }
+
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     humanInputDepth += 1;
     try {
@@ -377,6 +436,7 @@ export async function setup(ctx) {
   matchApi.step = (dt, now = Date.now()) => {
     const result = originalStep(dt, now);
     monitorDrivenRoutes(now);
+    tickPostArrivalBrakes();
     return result;
   };
 
@@ -384,10 +444,19 @@ export async function setup(ctx) {
     decorateNavigationSnapshot(playerId, originalSnapshotFor(playerId, now))
   );
 
-  ctx.events.on("navigation:stopped", ({ entityId }) => recoveryTrackers.delete(entityId));
-  ctx.events.on("navigation:reached", ({ entityId }) => recoveryTrackers.delete(entityId));
+  ctx.events.on("navigation:stopped", ({ entityId }) => {
+    recoveryTrackers.delete(entityId);
+    postArrivalBrakes.delete(entityId);
+  });
+  ctx.events.on("navigation:reached", ({ entityId }) => {
+    recoveryTrackers.delete(entityId);
+    if (vehicles.isDriving?.(entityId)) {
+      postArrivalBrakes.set(entityId, { steps: POST_ARRIVAL_BRAKE_STEPS });
+    }
+  });
   ctx.events.on("entity:removed", ({ entityId }) => {
     recoveryTrackers.delete(entityId);
+    postArrivalBrakes.delete(entityId);
     assistStats.delete(entityId);
   });
 
@@ -397,6 +466,7 @@ export async function setup(ctx) {
         playerId,
         ...(assistStats.get(playerId) ?? statsFor(playerId)),
         recoveryTracker: recoveryTrackers.get(playerId) ?? null,
+        postArrivalBrake: postArrivalBrakes.get(playerId) ?? null,
       };
     },
     previewDistance(playerId) {
@@ -410,6 +480,8 @@ export async function setup(ctx) {
       maxAutoBrakeDistance: MAX_AUTO_BRAKE_DISTANCE,
       autoNitroMaxSpeed: AUTO_NITRO_MAX_SPEED,
       lookaheadCheckpoints: LOOKAHEAD_CHECKPOINTS,
+      arrivalHoldDistance: ARRIVAL_HOLD_DISTANCE,
+      postArrivalBrakeSteps: POST_ARRIVAL_BRAKE_STEPS,
     },
   });
 }
