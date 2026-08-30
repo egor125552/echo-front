@@ -35,6 +35,17 @@ function selectGamepad() {
   return connected.find((pad) => pad.mapping === "standard") ?? connected[0] ?? null;
 }
 
+function ensureAccessibleHelp() {
+  if (document.getElementById("gamepad-controls-help")) return;
+  const headings = [...document.querySelectorAll("#game-panel h3")];
+  const heading = headings.find((node) => node.textContent?.trim() === "Управление") ?? headings[0];
+  if (!heading) return;
+  const help = document.createElement("p");
+  help.id = "gamepad-controls-help";
+  help.textContent = "Геймпад: левый стик — движение, правый стик — поворот камеры и направления персонажа. Нажатие левого стика — бег, а в машине ручник. Правый курок — огонь, а при управлении машиной используется существующее нитро. Крестик или A — прыжок, а в падении раскрыть или снова раскрыть парашют. Кружок или B — отпустить тело в обычном прыжке, а с раскрытым парашютом срезать купол. Треугольник или Y — взаимодействовать и входить или выходить из машины. Квадрат или X — перезарядка. L1 и R1 — предыдущее и следующее оружие.";
+  heading.insertAdjacentElement("afterend", help);
+}
+
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const network = ctx.services.get("network");
@@ -53,6 +64,8 @@ export async function setup(ctx) {
   let interactPressed = false;
   let parachutePressed = false;
   let posePressed = false;
+
+  ensureAccessibleHelp();
 
   function emitChanged(reason, immediate = false) {
     if (!network.connected) return;
@@ -88,6 +101,7 @@ export async function setup(ctx) {
     interactPressed = false;
     parachutePressed = false;
     posePressed = false;
+    pendingAnalogNotify = false;
     ctx.events.emit("input:gamepad-turn", { turn: 0, reason });
     if (hadState) emitChanged(`gamepad:${reason}`, true);
   }
@@ -136,21 +150,17 @@ export async function setup(ctx) {
     const l1 = buttonEdge(gamepad, 4);
     const r1 = buttonEdge(gamepad, 5);
 
-    // Cross/A mirrors Space: jump on supported ground, deploy/redeploy in the air.
     if (cross.pressed) {
       parachutePressed = true;
       emitChanged("gamepad:cross", true);
     }
 
-    // Circle/B cuts an open canopy. During a normal jump it asks the existing
-    // parkour/ragdoll system to release the body; unsupported states are ignored server-side.
     if (circle.pressed) {
       if (latestParachute?.deployed) parachutePressed = true;
       else posePressed = true;
       emitChanged("gamepad:circle", true);
     }
 
-    // Square/X reloads. Triangle/Y uses the same interaction path as E, including vehicles.
     if (square.pressed) {
       reload = true;
       emitChanged("gamepad:square", true);
@@ -160,7 +170,6 @@ export async function setup(ctx) {
       emitChanged("gamepad:triangle", true);
     }
 
-    // Shoulder buttons keep weapon switching reachable without taking a thumb off the sticks.
     if (l1.pressed) {
       selectDelta = -1;
       emitChanged("gamepad:l1", true);
@@ -173,6 +182,14 @@ export async function setup(ctx) {
 
   function poll() {
     frameId = window.requestAnimationFrame(poll);
+
+    const inactive = document.hidden
+      || (typeof document.hasFocus === "function" && !document.hasFocus());
+    if (inactive) {
+      if (activeIndex != null) reset("inactive");
+      return;
+    }
+
     const gamepad = selectGamepad();
     if (!gamepad) {
       if (activeIndex != null) reset("disconnected");
