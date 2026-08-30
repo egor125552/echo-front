@@ -3,6 +3,7 @@ import { echoFrontClientPreset } from "./presets/echo-front.js";
 
 const ERROR_HISTORY_LIMIT = 8;
 const PROBE_COOLDOWN_MS = 2500;
+const NETWORK_ERROR_ATTEMPT_THRESHOLD = 3;
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message || error.name;
@@ -97,12 +98,13 @@ const startButtons = [playButton, battleRoyaleButton].filter(Boolean);
 
 let lastProbeAt = 0;
 let probePromise = null;
+let lastNetworkFailure = null;
 
 function setButtonsDisabled(value) {
   for (const button of startButtons) button.disabled = Boolean(value);
 }
 
-async function probeServerRuntime(mode, networkDetails = {}) {
+async function probeServerRuntime(mode, networkDetails = {}, { reportTransportFailure = false } = {}) {
   const now = Date.now();
   if (probePromise) return probePromise;
   if (now - lastProbeAt < PROBE_COOLDOWN_MS) return null;
@@ -117,12 +119,17 @@ async function probeServerRuntime(mode, networkDetails = {}) {
       let data = null;
       try { data = await response.json(); } catch {}
 
+      // A healthy runtime means the game server can start. A short WebSocket
+      // transport interruption is recoverable and must not become a red
+      // "Ошибка игры" on its own.
       if (data?.ok) {
-        reportError("Ошибка подключения", networkDetails.message ?? "WebSocket connection failed", {
-          ...networkDetails,
-          runtimeProbe: "server runtime starts successfully",
-          httpStatus: response.status,
-        });
+        if (reportTransportFailure) {
+          reportError("Соединение нестабильно", networkDetails.message ?? "WebSocket connection failed", {
+            ...networkDetails,
+            runtimeProbe: "server runtime starts successfully",
+            httpStatus: response.status,
+          });
+        }
         return data;
       }
 
@@ -137,10 +144,12 @@ async function probeServerRuntime(mode, networkDetails = {}) {
       });
       return data;
     } catch (error) {
-      reportError("Ошибка подключения и диагностики", error, {
-        ...networkDetails,
-        runtimeProbe: "request failed",
-      });
+      if (reportTransportFailure) {
+        reportError("Ошибка подключения и диагностики", error, {
+          ...networkDetails,
+          runtimeProbe: "request failed",
+        });
+      }
       return null;
     } finally {
       probePromise = null;
@@ -176,28 +185,45 @@ playButton?.addEventListener("click", () => start("tdm"));
 battleRoyaleButton?.addEventListener("click", () => start("battle-royale"));
 
 host.events.on("network:error", (details = {}) => {
+  lastNetworkFailure = { ...details };
+  if (connection) connection.textContent = "Соединение прервано. Переподключение";
+  // Probe silently. If the runtime is healthy, the reconnect loop gets a
+  // chance to recover before anything is presented as a game error.
   probeServerRuntime(details.mode ?? host.services.get("network").mode, details);
 });
 
 host.events.on("network:disconnected", (details = {}) => {
+  lastNetworkFailure = { ...(lastNetworkFailure ?? {}), ...details, phase: "close" };
   setButtonsDisabled(Boolean(details.willReconnect));
-  if (details.code && details.code !== 1000 && details.code !== 1001) {
-    probeServerRuntime(details.mode ?? host.services.get("network").mode, {
-      ...details,
-      phase: "close",
-      message: details.reason || `WebSocket closed with code ${details.code}`,
-    });
-  }
+  if (details.willReconnect && connection) connection.textContent = "Соединение прервано. Переподключение";
 });
 
 host.events.on("network:reconnecting", ({ attempt, delay, mode } = {}) => {
   setButtonsDisabled(true);
   if (connection) connection.textContent = `Повторное подключение, попытка ${attempt ?? "?"}`;
-  if (attempt >= 3) {
-    reportError("Соединение нестабильно", "Игра несколько раз подряд не смогла подключиться к серверу", {
+  if (attempt >= NETWORK_ERROR_ATTEMPT_THRESHOLD) {
+    const details = {
+      ...(lastNetworkFailure ?? {}),
       mode,
       attempt,
       nextDelayMs: delay,
-    });
+      message: lastNetworkFailure?.message ?? "WebSocket connection failed",
+    };
+    probeServerRuntime(mode ?? host.services.get("network").mode, details, { reportTransportFailure: true });
   }
+});
+
+host.events.on("network:reconnected", ({ resumed } = {}) => {
+  lastNetworkFailure = null;
+  setButtonsDisabled(true);
+  if (connection) {
+    connection.textContent = resumed
+      ? "Соединение восстановлено. Матч продолжен"
+      : "Соединение восстановлено";
+  }
+});
+
+host.events.on("network:welcome", () => {
+  lastNetworkFailure = null;
+  setButtonsDisabled(true);
 });
