@@ -1,12 +1,13 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.1.2",
+  version: "1.2.0",
   requires: [
     "match-api",
     "battle-royale-navigation",
     "battle-royale-navigation-face",
     "battle-royale-vehicle",
     "battle-royale-parachute",
+    "map-test-arena",
   ],
   capabilities: [
     "services.consume", "services.provide", "components.read", "events.on", "events.emit",
@@ -27,6 +28,10 @@ const LOOKAHEAD_CHECKPOINTS = 6;
 const ARRIVAL_HOLD_DISTANCE = 7.5;
 const ARRIVAL_CRAWL_DISTANCE = 4.35;
 const ARRIVAL_BRAKE_RELEASE_SPEED = 1.25;
+const VEHICLE_PARKING_CAPTURE_RADIUS = 16;
+const VEHICLE_PARKING_BUILDING_MARGIN = 5;
+const VEHICLE_PARKING_LATERAL_MARGIN = 12;
+const VEHICLE_PARKING_MAX_SPEED = 1.8;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -93,12 +98,69 @@ function routeLookahead(vehicle, state) {
   return { nearestTurn, pathDistance: cumulative };
 }
 
+function buildingBoundsFor(map, target) {
+  const buildingId = String(target?.metadata?.buildingId ?? "");
+  if (!buildingId) return null;
+  const topology = (map.navigationBuildings ?? [])
+    .find((entry) => String(entry?.id ?? "") === buildingId);
+  if (topology?.bounds) return topology.bounds;
+  if (map.building && String(map.building.id ?? "warehouse") === buildingId) return map.building;
+  return null;
+}
+
+function vehicleParkingState(map, vehicle, target) {
+  if (!vehicle || target?.kind !== "building" || !target?.metadata?.vehicleApproach) {
+    return { eligible: false, side: null, distance: Infinity };
+  }
+  const bounds = buildingBoundsFor(map, target);
+  if (!bounds) return { eligible: false, side: null, distance: Infinity };
+
+  const minX = finite(bounds.minX);
+  const maxX = finite(bounds.maxX);
+  const minZ = finite(bounds.minZ);
+  const maxZ = finite(bounds.maxZ);
+  const targetPosition = target.position ?? {};
+  const distance = distance2(vehicle, targetPosition);
+  const margin = VEHICLE_PARKING_BUILDING_MARGIN;
+  const lateral = VEHICLE_PARKING_LATERAL_MARGIN;
+  let side = null;
+  let outside = false;
+  let lateralOk = false;
+
+  if (finite(targetPosition.x) >= maxX + 0.5) {
+    side = "east";
+    outside = finite(vehicle.x) >= maxX + margin;
+    lateralOk = finite(vehicle.z) >= minZ - lateral && finite(vehicle.z) <= maxZ + lateral;
+  } else if (finite(targetPosition.x) <= minX - 0.5) {
+    side = "west";
+    outside = finite(vehicle.x) <= minX - margin;
+    lateralOk = finite(vehicle.z) >= minZ - lateral && finite(vehicle.z) <= maxZ + lateral;
+  } else if (finite(targetPosition.z) >= maxZ + 0.5) {
+    side = "south";
+    outside = finite(vehicle.z) >= maxZ + margin;
+    lateralOk = finite(vehicle.x) >= minX - lateral && finite(vehicle.x) <= maxX + lateral;
+  } else if (finite(targetPosition.z) <= minZ - 0.5) {
+    side = "north";
+    outside = finite(vehicle.z) <= minZ - margin;
+    lateralOk = finite(vehicle.x) >= minX - lateral && finite(vehicle.x) <= maxX + lateral;
+  }
+
+  return {
+    eligible: Boolean(side && outside && lateralOk && distance <= VEHICLE_PARKING_CAPTURE_RADIUS),
+    side,
+    distance,
+    outside,
+    lateralOk,
+  };
+}
+
 export async function setup(ctx) {
   const matchApi = ctx.services.get("match-api");
   const navigation = ctx.services.get("navigation");
   const navigationFace = ctx.services.get("navigation-face");
   const vehicles = ctx.services.get("vehicles");
   const parachute = ctx.services.get("parachute");
+  const map = ctx.services.get("map");
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
   const originalStep = matchApi.step.bind(matchApi);
@@ -119,6 +181,8 @@ export async function setup(ctx) {
       finalBrakeApplications: 0,
       cornerBrakeApplications: 0,
       arrivalHoldApplications: 0,
+      parkingCaptureApplications: 0,
+      parkingArrivals: 0,
       postArrivalBrakeApplications: 0,
       nitroSuppressions: 0,
       missedCheckpointRecoveries: 0,
@@ -128,6 +192,7 @@ export async function setup(ctx) {
       lastCornerSeverity: 0,
       lastCornerDistance: null,
       lastRemainingDistance: null,
+      lastParkingDistance: null,
       lastPreviewDistance: null,
       lastPreviewDirectDistance: null,
     };
@@ -187,10 +252,6 @@ export async function setup(ctx) {
   function postArrivalInput(playerId, raw = {}) {
     if (!postArrivalBrakes.has(playerId)) return null;
 
-    // Y is normally driven while the player keeps the accelerator held. After
-    // announcing arrival, keep the car stopped until a real input sample shows
-    // that the driver released the accelerator once. This prevents the restored
-    // held key from immediately launching the car into the destination wall.
     if (humanInputDepth > MANUAL_INPUT_DEPTH_NONE && Math.abs(finite(raw.forward)) <= 0.08) {
       postArrivalBrakes.delete(playerId);
       return null;
@@ -232,6 +293,9 @@ export async function setup(ctx) {
 
     const vehicle = vehicles.vehicleForDriver?.(playerId);
     if (!vehicle) return raw;
+    const activeTarget = navigation.availableTargets(playerId)
+      .find((entry) => entry.id === state.activeTargetId) ?? null;
+    const parking = vehicleParkingState(map, vehicle, activeTarget);
 
     const checkpoint = state.checkpoint;
     const speed = Math.max(0, Math.abs(finite(vehicle.forwardSpeed, vehicle.speed)));
@@ -266,7 +330,7 @@ export async function setup(ctx) {
     const desiredApproachSpeed = clamp((remainingDistance - 3.5) * 0.22, 1.1, 28);
     const needsFinalBrake = remainingDistance <= stoppingDistance
       && speed > desiredApproachSpeed + 0.8;
-    const arrivalHold = remainingDistance <= ARRIVAL_HOLD_DISTANCE;
+    const arrivalHold = parking.eligible || remainingDistance <= ARRIVAL_HOLD_DISTANCE;
 
     const nitroSafetyDistance = Math.max(170, stoppingDistance * 1.08);
     const turnNeedsNitroCut = nearestTurn
@@ -284,12 +348,16 @@ export async function setup(ctx) {
 
     if (arrivalHold) {
       fireHeld = false;
+      if (parking.eligible) steering = 0;
       if (forwardSpeed > ARRIVAL_BRAKE_RELEASE_SPEED) {
         forward = -clamp(0.42 + (speed - 1) / 10, 0.45, 1);
         braking = true;
       } else if (forwardSpeed < -ARRIVAL_BRAKE_RELEASE_SPEED) {
         forward = clamp(0.32 + speed / 16, 0.36, 0.72);
         braking = true;
+      } else if (parking.eligible) {
+        forward = 0;
+        steering = 0;
       } else if (remainingDistance > ARRIVAL_CRAWL_DISTANCE) {
         forward = 0.16;
       } else {
@@ -312,8 +380,10 @@ export async function setup(ctx) {
     stats.lastCornerSeverity = cornerSeverity;
     stats.lastCornerDistance = Number.isFinite(cornerDistance) ? cornerDistance : null;
     stats.lastRemainingDistance = remainingDistance;
+    stats.lastParkingDistance = Number.isFinite(parking.distance) ? parking.distance : null;
     if (suppressNitro) stats.nitroSuppressions += 1;
     if (arrivalHold) stats.arrivalHoldApplications += 1;
+    if (parking.eligible) stats.parkingCaptureApplications += 1;
     if (braking) {
       stats.brakeApplications += 1;
       if (needsFinalBrake || arrivalHold) stats.finalBrakeApplications += 1;
@@ -351,12 +421,39 @@ export async function setup(ctx) {
     return true;
   }
 
+  function finishParkingArrival(playerId, state, target, vehicle, parking, now) {
+    const speed = Math.max(0, Math.abs(finite(vehicle?.forwardSpeed, vehicle?.speed)));
+    if (!parking.eligible || speed > VEHICLE_PARKING_MAX_SPEED) return false;
+    const stopped = navigation.stop(playerId, now, "vehicle-parking-arrival", { announce: false });
+    if (!stopped) return false;
+    recoveryTrackers.delete(playerId);
+    const stats = statsFor(playerId);
+    stats.parkingArrivals += 1;
+    ctx.events.emit("navigation:reached", {
+      entityId: playerId,
+      targetId: target.id,
+      targetName: target.name,
+      targetKind: target.kind,
+      vehicleSpeed: speed,
+      vehicleParking: true,
+      parkingSide: parking.side,
+      parkingDistance: parking.distance,
+      now,
+    });
+    return true;
+  }
+
   function monitorVehicleRoute(playerId, vehicle, now) {
     const state = navigation.stateFor(playerId);
     if (!state?.active || !state.checkpoint || !state.activeTargetId) {
       recoveryTrackers.delete(playerId);
       return;
     }
+
+    const target = navigation.availableTargets(playerId)
+      .find((entry) => entry.id === state.activeTargetId) ?? null;
+    const parking = vehicleParkingState(map, vehicle, target);
+    if (target && finishParkingArrival(playerId, state, target, vehicle, parking, now)) return;
 
     const checkpoint = state.checkpoint;
     const distance = distance2(vehicle, checkpoint);
@@ -474,6 +571,10 @@ export async function setup(ctx) {
       autoNitroMaxSpeed: AUTO_NITRO_MAX_SPEED,
       lookaheadCheckpoints: LOOKAHEAD_CHECKPOINTS,
       arrivalHoldDistance: ARRIVAL_HOLD_DISTANCE,
+      parkingCaptureRadius: VEHICLE_PARKING_CAPTURE_RADIUS,
+      parkingBuildingMargin: VEHICLE_PARKING_BUILDING_MARGIN,
+      parkingLateralMargin: VEHICLE_PARKING_LATERAL_MARGIN,
+      parkingMaxSpeed: VEHICLE_PARKING_MAX_SPEED,
       postArrivalRequiresForwardRelease: true,
     },
   });
