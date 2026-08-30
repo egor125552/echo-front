@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -32,6 +32,7 @@ const VEHICLE_PARKING_CAPTURE_RADIUS = 16;
 const VEHICLE_PARKING_BUILDING_MARGIN = 5;
 const VEHICLE_PARKING_LATERAL_MARGIN = 12;
 const VEHICLE_PARKING_MAX_SPEED = 1.8;
+const VEHICLE_PARKING_STEERING_RELEASE_SPEED = 5;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -348,7 +349,7 @@ export async function setup(ctx) {
 
     if (arrivalHold) {
       fireHeld = false;
-      if (parking.eligible) steering = 0;
+      if (parking.eligible && speed <= VEHICLE_PARKING_STEERING_RELEASE_SPEED) steering = 0;
       if (forwardSpeed > ARRIVAL_BRAKE_RELEASE_SPEED) {
         forward = -clamp(0.42 + (speed - 1) / 10, 0.45, 1);
         braking = true;
@@ -575,6 +576,7 @@ export async function setup(ctx) {
       parkingBuildingMargin: VEHICLE_PARKING_BUILDING_MARGIN,
       parkingLateralMargin: VEHICLE_PARKING_LATERAL_MARGIN,
       parkingMaxSpeed: VEHICLE_PARKING_MAX_SPEED,
+      parkingSteeringReleaseSpeed: VEHICLE_PARKING_STEERING_RELEASE_SPEED,
       postArrivalRequiresForwardRelease: true,
     },
   });
