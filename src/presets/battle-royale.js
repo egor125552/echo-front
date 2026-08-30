@@ -49,6 +49,7 @@ import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
 import * as fleetPedestrianRagdoll from "../plugins/battle-royale-fleet-pedestrian-ragdoll/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
+import * as socialIntegration from "../plugins/social-match-integration/server.js";
 import * as networkTuning from "../plugins/network-tuning/server.js";
 import * as acousticProfile from "../plugins/battle-royale-acoustic-profile/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
@@ -120,6 +121,7 @@ export const battleRoyalePreset = [
   ragdollTuning,
   fleetPedestrianRagdoll,
   matchApi,
+  socialIntegration,
   networkTuning,
   acousticProfile,
   vehicleIntegration,
