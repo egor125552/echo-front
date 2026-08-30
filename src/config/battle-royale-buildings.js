@@ -43,11 +43,11 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
     doors: [
       {
         id: "forest-hut-front-door",
-        name: "Дверь домика лесника",
+        name: "Входная дверь домика лесника",
         floorId: "ground",
-        side: "south",
+        side: "east",
         offset: 0,
-        width: 2.2,
+        width: 3.2,
         material: "wood",
       },
     ],
@@ -102,11 +102,11 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
     doors: [
       {
         id: "loot-house-east-door",
-        name: "Восточная дверь дома с припасами",
+        name: "Входная дверь дома с припасами",
         floorId: "ground",
         side: "east",
         offset: 0,
-        width: 2.6,
+        width: 3.6,
         material: "metal",
       },
       {
@@ -179,9 +179,9 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         id: "two-storey-front-door",
         name: "Входная дверь двухэтажного дома",
         floorId: "ground",
-        side: "south",
+        side: "east",
         offset: 0,
-        width: 2.8,
+        width: 3.6,
         material: "wood",
       },
     ],
