@@ -25,8 +25,6 @@ function loadOrCreateSessionId() {
     const persistent = localStorage.getItem(PLAYER_STORAGE_KEY);
     if (isPlayerSessionId(persistent)) return persistent.toLowerCase();
 
-    // Migrate the previous tab-only identity once so existing players keep the
-    // same id when this release first loads.
     const previous = sessionStorage.getItem(SESSION_STORAGE_KEY);
     const id = isPlayerSessionId(previous) ? previous.toLowerCase() : crypto.randomUUID();
     localStorage.setItem(PLAYER_STORAGE_KEY, id);
@@ -54,6 +52,8 @@ export async function setup(ctx) {
   let desiredMode = "tdm";
   let reconnectTimer = null;
   let reconnectAttempt = 0;
+  let organizer = false;
+  let roomRules = null;
 
   function send(type, payload = {}) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -75,6 +75,8 @@ export async function setup(ctx) {
   ctx.events.on("input:changed", sendInput);
 
   function emitSnapshot(snapshot) {
+    if (snapshot?.room) organizer = Boolean(snapshot.room.organizer);
+    if (snapshot?.socialRules) roomRules = { ...snapshot.socialRules };
     if (ctx.services.has("snapshot-smoothing")) ctx.events.emit("game:snapshot:raw", snapshot);
     else ctx.events.emit("game:snapshot", snapshot);
   }
@@ -136,6 +138,10 @@ export async function setup(ctx) {
         const wasReconnect = reconnectAttempt > 0 || data.resumed === true;
         playerId = data.playerId;
         desiredMode = normalizeMode(data.mode ?? mode);
+        organizer = Boolean(data.organizer);
+        roomRules = data.socialRules && typeof data.socialRules === "object"
+          ? { ...data.socialRules }
+          : roomRules;
         reconnectAttempt = 0;
         ctx.events.emit("network:welcome", data);
         if (wasReconnect) {
@@ -152,6 +158,10 @@ export async function setup(ctx) {
         emitGamePacket(data);
       } else if (data.type === "events") {
         for (const packet of data.events ?? []) emitGamePacket(packet);
+      } else if (data.type === "room-rule-result") {
+        organizer = Boolean(data.organizer);
+        if (data.rules && typeof data.rules === "object") roomRules = { ...data.rules };
+        ctx.events.emit("network:room-rule-result", data);
       }
     });
 
@@ -159,6 +169,7 @@ export async function setup(ctx) {
       if (socket !== ws) return;
       socket = null;
       input.disable();
+      organizer = false;
       ctx.events.emit("network:disconnected", {
         room,
         mode: desiredMode,
@@ -184,6 +195,8 @@ export async function setup(ctx) {
   function disconnect() {
     desiredRoom = null;
     reconnectAttempt = 0;
+    organizer = false;
+    roomRules = null;
     clearReconnectTimer();
     const ws = socket;
     socket = null;
@@ -195,9 +208,15 @@ export async function setup(ctx) {
     connect,
     disconnect,
     send,
+    setRoomRule(key, enabled) {
+      if (!organizer) return false;
+      return send("room-rule", { key, enabled: Boolean(enabled) });
+    },
     get playerId() { return playerId; },
     get sessionId() { return sessionId; },
     get mode() { return desiredMode; },
+    get organizer() { return organizer; },
+    get roomRules() { return roomRules ? { ...roomRules } : null; },
     get connected() { return socket?.readyState === WebSocket.OPEN; },
     get reconnecting() { return Boolean(desiredRoom && !this.connected); },
   });
