@@ -538,7 +538,7 @@ export async function setup(ctx) {
     const targetPosition = custom.targetPosition
       ? localPoint(entry.spec, custom.targetPosition, finite(custom.targetPosition.y))
       : firstDoor && firstDoorFloor
-        ? doorPassagePoints(entry.spec, firstDoorFloor, firstDoor).outside
+        ? doorWorldPosition(entry.spec, firstDoorFloor, firstDoor)
         : {
           x: finite(entry.spec.x) + Math.abs(finite(entry.spec.width)) / 2 + 2,
           y: finite(entry.spec.floors?.[0]?.y),
@@ -554,7 +554,7 @@ export async function setup(ctx) {
         factory: true,
         targetPosition,
         targetOrder: finite(custom.targetOrder, 12),
-        arriveDistance: Math.max(2.5, finite(custom.arriveDistance, 4.5)),
+        arriveDistance: Math.max(1.2, finite(custom.arriveDistance, 1.6)),
       },
     };
     map.navigationBuildings.push(topology);

@@ -163,14 +163,14 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         height: 2.9,
         surface: "wood",
         acoustics: { zone: "two-storey-upper", reverbMix: 0.48 },
-        // The stair is against the east side of the house. These slabs leave a
-        // generous rectangular stairwell and a real top landing instead of a
-        // ramp poking through a solid floor.
+        // The stair now runs straight inward from the front (east) door.
+        // The opening is deliberately broad so a player can enter the house,
+        // keep walking straight, and naturally climb instead of hunting for it.
         slabs: [
-          { x: -3.0, z: 0, width: 12.0, depth: 14.0 },
-          { x: 8.2, z: 0, width: 1.6, depth: 14.0 },
-          { x: 5.2, z: -6.1, width: 4.0, depth: 1.8 },
-          { x: 5.2, z: 4.7, width: 4.0, depth: 4.6 },
+          { x: -4.5, z: 0, width: 9.0, depth: 14.0 },
+          { x: 8.0, z: 0, width: 2.0, depth: 14.0 },
+          { x: 3.5, z: -4.6, width: 7.0, depth: 4.8 },
+          { x: 3.5, z: 4.6, width: 7.0, depth: 4.8 },
         ],
       },
     ],
@@ -191,11 +191,11 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         name: "лестница на второй этаж",
         fromFloorId: "ground",
         toFloorId: "upper",
-        x: 5.2,
-        z: -1.5,
+        x: 3.5,
+        z: 0,
         run: 6.0,
-        width: 2.8,
-        risesToward: "north",
+        width: 3.2,
+        risesToward: "west",
         material: "wood",
         acoustics: { zone: "two-storey-stairs", reverbMix: 0.4 },
       },
