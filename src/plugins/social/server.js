@@ -1,6 +1,6 @@
 export const manifest = {
   id: "social",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities"],
   capabilities: ["services.consume", "services.provide", "events.on", "events.emit"],
 };
@@ -8,6 +8,7 @@ export const manifest = {
 const MAX_NAME_LENGTH = 24;
 const MAX_FRIENDS = 128;
 const DEFAULT_RULES = Object.freeze({
+  friendFireProtection: true,
   friendRamProtection: true,
 });
 
@@ -93,7 +94,7 @@ export async function setup(ctx) {
   function setRoomRule(requesterId, key, value) {
     ensureHost();
     if (!requesterId || requesterId !== hostId) return false;
-    if (key !== "friendRamProtection") return false;
+    if (!(key in rules)) return false;
     const next = Boolean(value);
     if (rules[key] === next) return true;
     rules[key] = next;
@@ -138,5 +139,11 @@ export async function setup(ctx) {
     roomState,
     roomRules() { return { ...rules }; },
     isHost(playerId) { return ensureHost() === playerId; },
+    protectsFriendlyFire(attackerId, targetId) {
+      return rules.friendFireProtection !== false && isFriend(attackerId, targetId);
+    },
+    protectsFriendlyRam(driverId, targetId) {
+      return rules.friendRamProtection !== false && isFriend(driverId, targetId);
+    },
   });
 }
