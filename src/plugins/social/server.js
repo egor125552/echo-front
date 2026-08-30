@@ -1,6 +1,6 @@
 export const manifest = {
   id: "social",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities"],
   capabilities: ["services.consume", "services.provide", "events.on", "events.emit"],
 };
@@ -31,6 +31,10 @@ function normalizeFriendIds(value, selfId) {
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const profiles = new Map();
+  const rules = {
+    friendFireProtection: true,
+    friendVehicleProtection: true,
+  };
 
   function setProfile(playerId, profile = {}) {
     const entity = entities.get(playerId);
@@ -70,6 +74,19 @@ export async function setup(ctx) {
     return isFriend(a, b) || isFriend(b, a);
   }
 
+  function setRule(key, enabled) {
+    if (!(key in rules)) return false;
+    const next = Boolean(enabled);
+    if (rules[key] === next) return true;
+    rules[key] = next;
+    ctx.events.emit("social:rule-changed", { key, enabled: next, now: Date.now() });
+    return true;
+  }
+
+  function ruleState() {
+    return { ...rules };
+  }
+
   ctx.events.on("entity:removed", ({ entityId }) => {
     profiles.delete(entityId);
   });
@@ -80,5 +97,13 @@ export async function setup(ctx) {
     isFriend,
     eitherFriend,
     normalizeName,
+    setRule,
+    ruleState,
+    protectFromFriendlyFire(attackerId, targetId) {
+      return rules.friendFireProtection && isFriend(attackerId, targetId);
+    },
+    protectFromFriendlyVehicle(driverId, targetId) {
+      return rules.friendVehicleProtection && isFriend(driverId, targetId);
+    },
   });
 }
