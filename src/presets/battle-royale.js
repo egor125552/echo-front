@@ -62,6 +62,7 @@ import * as navigation from "../plugins/battle-royale-navigation/index.js";
 import * as buildingTargets from "../plugins/battle-royale-building-targets/server.js";
 import * as airNavigation from "../plugins/battle-royale-air-navigation/server.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face/server.js";
+import * as navigationStability from "../plugins/battle-royale-navigation-stability/server.js";
 import * as navigationLifecycle from "../plugins/battle-royale-navigation-lifecycle/server.js";
 import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/server.js";
 
@@ -130,6 +131,7 @@ export const battleRoyalePreset = [
   buildingTargets,
   airNavigation,
   navigationFace,
+  navigationStability,
   navigationLifecycle,
   dropzoneVehicle,
 ];
