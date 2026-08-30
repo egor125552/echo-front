@@ -130,6 +130,7 @@ export class MatchRoom extends DurableObject {
 
   cleanupDisconnectedHumans(now = Date.now()) {
     if (!this.game) return;
+    let organizerExpired = false;
     for (const [playerId, disconnectedAt] of this.disconnectedHumans) {
       if (this.socketsForPlayer(playerId).length) {
         this.disconnectedHumans.delete(playerId);
@@ -138,7 +139,9 @@ export class MatchRoom extends DurableObject {
       if (!reconnectExpired(disconnectedAt, now)) continue;
       this.game.api.disconnectHuman(playerId);
       this.disconnectedHumans.delete(playerId);
+      if (playerId === this.organizerId) organizerExpired = true;
     }
+    if (organizerExpired) this.ensureOrganizer();
   }
 
   startGameLoop() {
@@ -327,22 +330,12 @@ export class MatchRoom extends DurableObject {
   }
 
   async webSocketClose(ws) {
-    const wasOrganizer = ws.deserializeAttachment()?.playerId === this.organizerId;
     this.markSocketDisconnected(ws);
-    if (wasOrganizer) {
-      this.ensureOrganizer(ws);
-      this.broadcastSnapshot(true);
-    }
     await this.scheduleCleanupIfEmpty(ws);
   }
 
   async webSocketError(ws) {
-    const wasOrganizer = ws.deserializeAttachment()?.playerId === this.organizerId;
     this.markSocketDisconnected(ws);
-    if (wasOrganizer) {
-      this.ensureOrganizer(ws);
-      this.broadcastSnapshot(true);
-    }
     await this.scheduleCleanupIfEmpty(ws);
   }
 
