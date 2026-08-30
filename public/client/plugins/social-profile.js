@@ -1,6 +1,6 @@
 export const manifest = {
   id: "social-profile-client",
-  requires: ["cloudflare-session", "speech-settings"],
+  requires: ["cloudflare-session", "speech-settings", "keyboard-input"],
 };
 
 const DB_NAME = "echo-front-private-profile-v1";
@@ -151,10 +151,25 @@ function createNameDialog() {
 export async function setup(ctx) {
   const network = ctx.services.get("network");
   const speech = ctx.services.get("speech");
+  const input = ctx.services.get("input");
   const dialog = createNameDialog();
+  const originalSample = input.sample.bind(input);
   let profile = null;
   let loading = null;
   let prompting = null;
+
+  function publicProfile() {
+    if (!profile) return null;
+    return {
+      name: profile.name,
+      friendIds: profile.friends.map((friend) => friend.id),
+    };
+  }
+
+  input.sample = () => ({
+    ...originalSample(),
+    socialProfile: publicProfile(),
+  });
 
   async function load() {
     if (profile) return profile;
@@ -183,19 +198,9 @@ export async function setup(ctx) {
     } catch (error) {
       console.warn("Could not persist encrypted player profile", error);
     }
-    sendProfile();
     ctx.events.emit("social:local-profile", { profile: structuredClone(profile) });
+    if (network.connected) ctx.events.emit("input:changed", { reason: "social:profile" });
     return profile;
-  }
-
-  function sendProfile() {
-    if (!profile || !network.connected) return false;
-    return network.send?.("social:profile", {
-      profile: {
-        name: profile.name,
-        friendIds: profile.friends.map((friend) => friend.id),
-      },
-    }) ?? false;
   }
 
   async function ensureProfile() {
@@ -263,15 +268,15 @@ export async function setup(ctx) {
   const originalConnect = network.connect.bind(network);
   network.connect = (...args) => ensureProfile().then(() => originalConnect(...args));
 
-  ctx.events.on("network:connected", sendProfile);
-  ctx.events.on("network:welcome", sendProfile);
+  ctx.events.on("network:connected", () => {
+    if (profile) ctx.events.emit("input:changed", { reason: "social:connected" });
+  });
 
   ctx.services.provide("social-profile", {
     ensureProfile,
     addFriend,
     removeFriend,
     isFriend,
-    sendProfile,
     get profile() { return profile ? structuredClone(profile) : null; },
     get name() { return profile?.name ?? null; },
     get friends() { return profile?.friends ? structuredClone(profile.friends) : []; },
