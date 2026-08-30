@@ -28,8 +28,25 @@ export async function setup(ctx) {
     }
   }
 
-  async function playComplete(plateNumber) {
-    const url = COMPLETE_URLS[Number(plateNumber)] ?? COMPLETE_URLS[4];
+  async function playComplete(payload = {}) {
+    const plateNumber = Number(payload.plateNumber);
+    const maximumPlates = Number(payload.maximumPlates);
+    const armor = Number(payload.armor);
+    const maximum = Number(payload.maximum);
+    const armorIsFull = (
+      Number.isFinite(armor)
+      && Number.isFinite(maximum)
+      && maximum > 0
+      && armor >= maximum
+    ) || (
+      Number.isFinite(plateNumber)
+      && Number.isFinite(maximumPlates)
+      && maximumPlates > 0
+      && plateNumber >= maximumPlates
+    );
+    const url = armorIsFull
+      ? COMPLETE_URLS[4]
+      : (COMPLETE_URLS[plateNumber] ?? COMPLETE_URLS[4]);
     try {
       await audio.playCentered(url, {
         gain: 1,
@@ -58,7 +75,7 @@ export async function setup(ctx) {
 
     if (packet.event === "armor:plating-completed") {
       audio.stopChannel("armor-plating-start");
-      void playComplete(payload.plateNumber);
+      void playComplete(payload);
       return;
     }
 
