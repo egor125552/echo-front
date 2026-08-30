@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.2.1",
+  version: "1.2.2",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -276,6 +276,7 @@ export async function setup(ctx) {
     return {
       ...raw,
       forward,
+      strafe: 0,
       sprint: false,
       fireHeld: false,
     };
@@ -512,6 +513,21 @@ export async function setup(ctx) {
     }
   }
 
+  function applyPostArrivalBrakes() {
+    for (const playerId of [...postArrivalBrakes.keys()]) {
+      if (!vehicles.isDriving?.(playerId)) {
+        postArrivalBrakes.delete(playerId);
+        continue;
+      }
+      vehicles.setInput(playerId, {
+        forward: 0,
+        strafe: 0,
+        sprint: false,
+        fireHeld: false,
+      });
+    }
+  }
+
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     humanInputDepth += 1;
     try {
@@ -526,8 +542,10 @@ export async function setup(ctx) {
   );
 
   matchApi.step = (dt, now = Date.now()) => {
+    applyPostArrivalBrakes();
     const result = originalStep(dt, now);
     monitorDrivenRoutes(now);
+    applyPostArrivalBrakes();
     return result;
   };
 
@@ -578,6 +596,7 @@ export async function setup(ctx) {
       parkingMaxSpeed: VEHICLE_PARKING_MAX_SPEED,
       parkingSteeringReleaseSpeed: VEHICLE_PARKING_STEERING_RELEASE_SPEED,
       postArrivalRequiresForwardRelease: true,
+      postArrivalContinuousHold: true,
     },
   });
 }
