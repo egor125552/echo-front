@@ -8,10 +8,13 @@ import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as gamepadHaptics from "../plugins/gamepad-haptics.js";
 import * as speechSettings from "../plugins/speech-settings.js";
+import * as socialProfile from "../plugins/social-profile.js";
+import * as accessibleMenus from "../plugins/accessible-menus.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
+import * as mapMenuActivation from "../plugins/map-menu-activation.js";
 import * as navigationStatus from "../plugins/battle-royale-navigation-status.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face.js";
 import * as parachuteAudioPreload from "../plugins/parachute-audio-preload.js";
@@ -44,10 +47,13 @@ export const echoFrontClientPreset = [
   smoothing,
   gamepadHaptics,
   speechSettings,
+  socialProfile,
+  accessibleMenus,
   speechDiagnostics,
   spatialAudio,
   audioResilience,
   navigation,
+  mapMenuActivation,
   navigationStatus,
   navigationFace,
   parachuteAudioPreload,

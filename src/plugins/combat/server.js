@@ -1,12 +1,14 @@
 export const manifest = {
   id: "combat",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["health"],
+  optional: ["social"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
 
 export async function setup(ctx) {
   const health = ctx.services.get("health");
+  const social = ctx.services.has("social") ? ctx.services.get("social") : null;
   let armorVariant = 0;
 
   function emitFeedback(recipientId, key) {
@@ -16,13 +18,34 @@ export async function setup(ctx) {
 
   ctx.services.provide("combat", {
     damage(targetId, amount, source = {}) {
+      const attackerId = source.attackerId ?? null;
+      const now = source.now ?? Date.now();
+
+      if (attackerId && social?.isFriend(attackerId, targetId)) {
+        ctx.events.emit("combat:friend-protected", {
+          attackerId,
+          targetId,
+          weaponId: source.weaponId ?? null,
+          requested: amount,
+          now,
+        });
+        return {
+          applied: 0,
+          killed: false,
+          armorAbsorbed: 0,
+          armorBroke: false,
+          spawnProtected: false,
+          friendProtected: true,
+        };
+      }
+
       const packet = {
         targetId,
         amount,
         remaining: amount,
-        attackerId: source.attackerId ?? null,
+        attackerId,
         weaponId: source.weaponId ?? null,
-        now: source.now ?? Date.now(),
+        now,
         armorAbsorbed: 0,
         armorBroke: false,
         spawnProtected: false,
@@ -39,8 +62,6 @@ export async function setup(ctx) {
           if (packet.armorBroke) emitFeedback(packet.attackerId, "armor.break");
         }
 
-        // The defender hears armor, not a flesh hit. When the last plate is
-        // broken they also get an explicit self-break cue.
         emitFeedback(targetId, armorHitKey);
         if (packet.armorBroke) emitFeedback(targetId, "armor.self-break");
       } else if (result.applied > 0) {
@@ -60,6 +81,7 @@ export async function setup(ctx) {
         armorAbsorbed: packet.armorAbsorbed,
         armorBroke: packet.armorBroke,
         spawnProtected: packet.spawnProtected,
+        friendProtected: false,
       };
       ctx.events.emit("combat:damage", {
         targetId,
@@ -70,6 +92,7 @@ export async function setup(ctx) {
         armorAbsorbed: packet.armorAbsorbed,
         armorBroke: packet.armorBroke,
         spawnProtected: packet.spawnProtected,
+        friendProtected: false,
         killed: result.killed,
         now: packet.now,
       });
