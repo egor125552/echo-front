@@ -1,0 +1,70 @@
+name: AI Source Snapshot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/ai-source-snapshot.yml
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Build source snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf ai-source-snapshot
+          mkdir -p ai-source-snapshot/.ai-snapshot
+
+          while IFS= read -r -d '' file; do
+            case "$file" in
+              *.mp3|*.wav|*.ogg|*.flac|*.m4a|*.aac|*.png|*.jpg|*.jpeg|*.webp|*.gif|*.ico|*.zip|*.7z|*.rar|*.pdf|*.woff|*.woff2|*.ttf|*.otf)
+                continue
+                ;;
+            esac
+
+            mkdir -p "ai-source-snapshot/$(dirname "$file")"
+            cp -p -- "$file" "ai-source-snapshot/$file"
+          done < <(git ls-files -z)
+
+          git rev-parse HEAD > ai-source-snapshot/.ai-snapshot/commit.txt
+          git ls-files > ai-source-snapshot/.ai-snapshot/all-tracked-files.txt
+          find ai-source-snapshot -type f -print | sort > ai-source-snapshot/.ai-snapshot/included-files.txt
+
+          {
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Commit: $GITHUB_SHA"
+            echo "Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo "Purpose: source-code snapshot for ChatGPT analysis"
+            echo "Binary media, archives, PDFs and fonts are intentionally omitted."
+          } > ai-source-snapshot/.ai-snapshot/README.txt
+
+          echo "Files in snapshot: $(find ai-source-snapshot -type f | wc -l)"
+          du -sh ai-source-snapshot
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: echo-front-source
+          path: ai-source-snapshot/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 9
+
+      - name: Summary
+        run: |
+          echo "### AI Source Snapshot" >> "$GITHUB_STEP_SUMMARY"
+          echo "Artifact: echo-front-source" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: $GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Binary media is omitted; source and text project files are included." >> "$GITHUB_STEP_SUMMARY"
