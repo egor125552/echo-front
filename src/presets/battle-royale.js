@@ -18,6 +18,7 @@ import * as teams from "../plugins/teams/server.js";
 import * as health from "../plugins/health/server.js";
 import * as ragdollDamage from "../plugins/battle-royale-ragdoll-damage/server.js";
 import * as armor from "../plugins/armor/server.js";
+import * as social from "../plugins/social/server.js";
 import * as targetAssist from "../plugins/target-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
 import * as healthRegeneration from "../plugins/health-regeneration/server.js";
@@ -88,6 +89,7 @@ export const battleRoyalePreset = [
   health,
   ragdollDamage,
   armor,
+  social,
   targetAssist,
   combat,
   healthRegeneration,
