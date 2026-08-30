@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-stability",
-  version: "1.0.1",
+  version: "1.1.0",
   requires: [
     "match-api",
     "battle-royale-navigation",
@@ -21,7 +21,9 @@ const CHECKPOINT_STALE_BEHIND_RADIANS = 2.0;
 const MIN_RECOVERY_SPEED = 4.5;
 const MIN_RECOVERY_DISTANCE = 9;
 const MIN_DISTANCE_GROWTH = 4;
-const MAX_AUTO_BRAKE_DISTANCE = 68;
+const MAX_AUTO_BRAKE_DISTANCE = 360;
+const AUTO_NITRO_MAX_SPEED = 48;
+const LOOKAHEAD_CHECKPOINTS = 6;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -63,6 +65,31 @@ function routeDistanceFrom(from, checkpoints = []) {
   return total;
 }
 
+function routeLookahead(vehicle, state) {
+  const index = Math.max(0, Number(state?.checkpointIndex) || 0);
+  const checkpoints = (state?.checkpoints ?? []).slice(index, index + LOOKAHEAD_CHECKPOINTS);
+  if (!checkpoints.length) return { nearestTurn: null, pathDistance: 0 };
+
+  let cursor = vehicle;
+  let incomingAngle = angleTo(cursor, checkpoints[0]);
+  let cumulative = distance2(cursor, checkpoints[0]);
+  let nearestTurn = null;
+
+  for (let i = 0; i < checkpoints.length - 1; i += 1) {
+    const corner = checkpoints[i];
+    const next = checkpoints[i + 1];
+    const outgoingAngle = angleTo(corner, next);
+    const severity = Math.abs(shortestAngleDelta(outgoingAngle, incomingAngle));
+    if (severity >= 0.24 && (!nearestTurn || cumulative < nearestTurn.distance)) {
+      nearestTurn = { severity, distance: cumulative, checkpointIndex: index + i };
+    }
+    incomingAngle = outgoingAngle;
+    cumulative += distance2(corner, next);
+  }
+
+  return { nearestTurn, pathDistance: cumulative };
+}
+
 export async function setup(ctx) {
   const matchApi = ctx.services.get("match-api");
   const navigation = ctx.services.get("navigation");
@@ -85,11 +112,16 @@ export async function setup(ctx) {
     stats = {
       automaticSteeringApplications: 0,
       brakeApplications: 0,
+      finalBrakeApplications: 0,
+      cornerBrakeApplications: 0,
+      nitroSuppressions: 0,
       missedCheckpointRecoveries: 0,
       lastBrakeAt: null,
       lastRecoveryAt: null,
       peakGuidedSpeed: 0,
       lastCornerSeverity: 0,
+      lastCornerDistance: null,
+      lastRemainingDistance: null,
       lastPreviewDistance: null,
       lastPreviewDirectDistance: null,
     };
@@ -159,48 +191,64 @@ export async function setup(ctx) {
     if (!vehicle) return raw;
 
     const checkpoint = state.checkpoint;
-    const currentIndex = Math.max(0, Number(state.checkpointIndex) || 0);
-    const nextCheckpoint = state.checkpoints?.[currentIndex + 1] ?? null;
     const speed = Math.max(0, Math.abs(finite(vehicle.forwardSpeed, vehicle.speed)));
     const distance = distance2(vehicle, checkpoint);
+    const remainingDistance = Math.max(distance, finite(state.remainingDistance, distance));
     const desiredAngle = angleTo(vehicle, checkpoint);
     const headingError = shortestAngleDelta(desiredAngle, finite(vehicle.angle));
 
-    const fullCommandError = clamp(0.56 - speed * 0.012, 0.21, 0.56);
+    // At speed the physical steering rack deliberately has less steering lock.
+    // Reach a full steering command sooner, while still letting vehicle physics
+    // own the actual wheel-angle limit.
+    const fullCommandError = clamp(0.56 - speed * 0.012, 0.18, 0.56);
     let steering = clamp(headingError / fullCommandError, -1, 1);
     if (Math.abs(steering) < 0.025) steering = 0;
 
-    let cornerSeverity = Math.abs(headingError) * 0.78;
-    if (nextCheckpoint) {
-      const outgoingAngle = angleTo(checkpoint, nextCheckpoint);
-      cornerSeverity = Math.max(
-        cornerSeverity,
-        Math.abs(shortestAngleDelta(outgoingAngle, desiredAngle)),
-      );
-    }
+    const lookahead = routeLookahead(vehicle, state);
+    const nearestTurn = lookahead.nearestTurn;
+    const headingSeverity = Math.abs(headingError) * 0.78;
+    const cornerSeverity = Math.max(headingSeverity, finite(nearestTurn?.severity));
+    const cornerDistance = nearestTurn?.distance ?? Infinity;
 
+    // Use the whole remaining route, not just the final checkpoint. A supercar
+    // can cover one checkpoint interval before it has physically had time to
+    // brake, so beginning the approach at the last checkpoint is much too late.
     const stoppingDistance = clamp(
-      9 + speed * 1.35 + (speed * speed) / 13,
-      11,
+      12 + speed * 1.45 + (speed * speed) / 13,
+      14,
       MAX_AUTO_BRAKE_DISTANCE,
     );
-    const finalApproach = !nextCheckpoint;
-    const finalApproachDistance = clamp(8 + speed * 1.3, 10, 42);
     const severityRatio = clamp(cornerSeverity / 1.45, 0, 1);
-    const targetTurnSpeed = clamp(17 - severityRatio * 10.5, 6.2, 17);
-    const needsCornerBrake = cornerSeverity > 0.38
-      && distance <= stoppingDistance
-      && speed > targetTurnSpeed + 1.2;
-    const needsFinalBrake = finalApproach
-      && distance <= finalApproachDistance
-      && speed > 7.5;
+    const targetTurnSpeed = clamp(22 - severityRatio * 14.5, 6.5, 22);
+    const cornerBrakeWindow = stoppingDistance * clamp(0.72 + severityRatio * 0.42, 0.72, 1.14);
+    const needsCornerBrake = cornerSeverity > 0.34
+      && cornerDistance <= cornerBrakeWindow
+      && speed > targetTurnSpeed + 1.1;
+
+    const desiredApproachSpeed = clamp((remainingDistance - 5) * 0.16, 3.5, 32);
+    const needsFinalBrake = remainingDistance <= stoppingDistance
+      && speed > desiredApproachSpeed + 1.25;
+
+    // Nitro is useful only while there is genuinely enough straight route left
+    // to spend the extra speed. This still lets a supercar accelerate hard on a
+    // long straight, but Y will not keep boosting into a bend or the destination.
+    const nitroSafetyDistance = Math.max(170, stoppingDistance * 1.08);
+    const turnNeedsNitroCut = nearestTurn
+      && nearestTurn.distance <= Math.max(150, stoppingDistance * 0.92);
+    const suppressNitro = Boolean(raw.fireHeld) && (
+      speed >= AUTO_NITRO_MAX_SPEED
+      || remainingDistance <= nitroSafetyDistance
+      || turnNeedsNitroCut
+    );
 
     let forward = raw.forward;
-    let fireHeld = raw.fireHeld;
+    let fireHeld = suppressNitro ? false : raw.fireHeld;
     let braking = false;
-    if ((needsCornerBrake || needsFinalBrake) && finite(raw.forward) > 0.08 && !raw.sprint) {
-      const desiredSpeed = needsFinalBrake ? 5.5 : targetTurnSpeed;
-      const brakeStrength = clamp(0.24 + (speed - desiredSpeed) / 16, 0.25, 0.9);
+    if ((needsCornerBrake || needsFinalBrake) && finite(raw.forward) > 0.08) {
+      const desiredSpeed = needsFinalBrake
+        ? Math.min(desiredApproachSpeed, needsCornerBrake ? targetTurnSpeed : desiredApproachSpeed)
+        : targetTurnSpeed;
+      const brakeStrength = clamp(0.28 + (speed - desiredSpeed) / 18, 0.3, 1);
       forward = -brakeStrength;
       fireHeld = false;
       braking = true;
@@ -210,8 +258,13 @@ export async function setup(ctx) {
     stats.automaticSteeringApplications += 1;
     stats.peakGuidedSpeed = Math.max(stats.peakGuidedSpeed, speed);
     stats.lastCornerSeverity = cornerSeverity;
+    stats.lastCornerDistance = Number.isFinite(cornerDistance) ? cornerDistance : null;
+    stats.lastRemainingDistance = remainingDistance;
+    if (suppressNitro) stats.nitroSuppressions += 1;
     if (braking) {
       stats.brakeApplications += 1;
+      if (needsFinalBrake) stats.finalBrakeApplications += 1;
+      if (needsCornerBrake) stats.cornerBrakeApplications += 1;
       stats.lastBrakeAt = Date.now();
     }
 
@@ -355,6 +408,8 @@ export async function setup(ctx) {
     constants: {
       missedCheckpointStaleMs: MISSED_CHECKPOINT_STALE_MS,
       maxAutoBrakeDistance: MAX_AUTO_BRAKE_DISTANCE,
+      autoNitroMaxSpeed: AUTO_NITRO_MAX_SPEED,
+      lookaheadCheckpoints: LOOKAHEAD_CHECKPOINTS,
     },
   });
 }
