@@ -1,8 +1,8 @@
 export const manifest = {
   id: "battle-royale-ragdoll-observer-events",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["match-api"],
-  capabilities: ["services.consume", "components.read"],
+  capabilities: ["services.consume", "components.read", "events.on", "events.emit"],
 };
 
 const RAGDOLL_EVENT_RADIUS = Object.freeze({
@@ -10,7 +10,10 @@ const RAGDOLL_EVENT_RADIUS = Object.freeze({
   "ragdoll:impact": 90,
   "ragdoll:ended": 90,
 });
-const RAGDOLL_SOUND_RADIUS = 55;
+const RAGDOLL_SOUND_RADIUS = 58;
+const HEAVY_IMPACT_THRESHOLD = 8.0;
+const CATASTROPHIC_IMPACT_THRESHOLD = 14.0;
+const HEAVY_SOUND_COOLDOWN_MS = 170;
 
 function finitePosition(payload = {}) {
   const x = Number(payload.x);
@@ -42,6 +45,37 @@ function sameSpatialSound(a, b) {
 export async function setup(ctx) {
   const matchApi = ctx.services.get("match-api");
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
+  const lastHeavySoundAt = new Map();
+
+  ctx.events.on("ragdoll:impact", (payload = {}) => {
+    const entityId = String(payload.entityId ?? "");
+    const severity = Math.max(0, Number(payload.severity) || 0);
+    if (!entityId || severity < HEAVY_IMPACT_THRESHOLD) return;
+
+    const now = Number(payload.now) || Date.now();
+    const previous = Number(lastHeavySoundAt.get(entityId)) || 0;
+    if (now - previous < HEAVY_SOUND_COOLDOWN_MS) return;
+    lastHeavySoundAt.set(entityId, now);
+
+    const catastrophic = severity >= CATASTROPHIC_IMPACT_THRESHOLD;
+    ctx.events.emit("sound:spatial", {
+      entityId,
+      key: "ragdoll.impact.heavy",
+      ragdollPart: payload.part ?? null,
+      intensity: Math.min(1.8, 0.9 + severity / 18),
+      severity,
+      deltaVelocity: Number(payload.deltaVelocity) || 0,
+      impactClass: catastrophic ? "catastrophic" : "heavy",
+      x: Number(payload.x) || 0,
+      y: Number(payload.y) || 0,
+      z: Number(payload.z) || 0,
+      radius: catastrophic ? 78 : 62,
+    });
+  });
+
+  ctx.events.on("entity:removed", ({ entityId } = {}) => {
+    lastHeavySoundAt.delete(String(entityId ?? ""));
+  });
 
   matchApi.eventsForPlayer = (playerId, packets = []) => {
     const selected = originalEventsForPlayer(playerId, packets);
@@ -57,14 +91,23 @@ export async function setup(ctx) {
 
       const ragdollRadius = RAGDOLL_EVENT_RADIUS[packet.event];
       if (ragdollRadius && distance3(listener, position) <= ragdollRadius) {
-        if (!result.includes(packet)) result.push(packet);
+        if (!result.includes(packet)) {
+          result.push({
+            ...packet,
+            payload: {
+              ...payload,
+              observedRagdoll: true,
+              observerDistance: distance3(listener, position),
+            },
+          });
+        }
         continue;
       }
 
       if (
         packet.event === "sound:spatial"
         && String(payload.key ?? "").startsWith("ragdoll.impact")
-        && distance3(listener, position) <= RAGDOLL_SOUND_RADIUS
+        && distance3(listener, position) <= Math.max(RAGDOLL_SOUND_RADIUS, Number(payload.radius) || 0)
       ) {
         const alreadySelected = result.some((existing) => sameSpatialSound(existing, packet));
         if (!alreadySelected) {
