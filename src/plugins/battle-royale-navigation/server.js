@@ -4,6 +4,7 @@ export const NAVIGATION_ROUTE_REPLAN_MS = 2200;
 export const NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE = 6;
 export const NAVIGATION_DETOUR_CLEARANCE = 3.2;
 export const NAVIGATION_VEHICLE_DETOUR_CLEARANCE = 7;
+export const NAVIGATION_VEHICLE_ARRIVAL_MAX_SPEED = 1.8;
 
 const MAX_ROUTE_ANCHORS = 24;
 const MAX_RAY_SKIP_HITS = 10;
@@ -15,7 +16,7 @@ const MAX_VISIBLE_VEHICLE_TARGETS = 5;
 
 export const manifest = {
   id: "battle-royale-navigation",
-  version: "1.2.1",
+  version: "1.2.2",
   requires: [
     "match-api",
     "battle-royale-ground-navigation",
@@ -363,9 +364,6 @@ export async function setup(ctx) {
       ? NAVIGATION_VEHICLE_DETOUR_CLEARANCE
       : NAVIGATION_DETOUR_CLEARANCE;
 
-    // Declarative buildings carry a buildingId. Resolve that exact building's
-    // full footprint first; the old code used the legacy warehouse rectangle
-    // for every building wall, which could turn a short route into a huge loop.
     if (kind.startsWith("building-") && object.buildingId) {
       const buildingId = String(object.buildingId);
       const topology = (map.navigationBuildings ?? [])
@@ -387,7 +385,6 @@ export async function setup(ctx) {
       }, y, clearance);
     }
 
-    // Legacy warehouse walls predate buildingId metadata.
     if (kind.startsWith("building-") && map.building) {
       return expandedCorners(map.building, y, clearance);
     }
@@ -696,6 +693,15 @@ export async function setup(ctx) {
     }
 
     if (targetReached(transform, target)) {
+      const drivenVehicle = vehicles.vehicleForDriver?.(playerId) ?? null;
+      const vehicleSpeed = drivenVehicle ? Math.max(0, finite(drivenVehicle.speed)) : 0;
+      if (drivenVehicle && vehicleSpeed > NAVIGATION_VEHICLE_ARRIVAL_MAX_SPEED) {
+        // Keep the route and Y guidance alive while the vehicle sheds its final
+        // momentum. Previously navigation announced arrival immediately on
+        // entering the radius, released auto braking, and a fast car continued
+        // straight into the target building.
+        return;
+      }
       state.activeTargetId = null;
       state.checkpoints = [];
       state.checkpointIndex = 0;
@@ -704,6 +710,7 @@ export async function setup(ctx) {
         targetId: target.id,
         targetName: target.name,
         targetKind: target.kind,
+        vehicleSpeed,
         now,
       });
       return;
@@ -868,9 +875,6 @@ export async function setup(ctx) {
           kind: "vehicle",
           order: 20,
           arriveDistance: 5.25,
-          // Navigation to a parked car is a ground-level task. Using the chassis
-          // centre here made an upper-floor player close enough vertically to
-          // falsely "reach" a car directly underneath the floor.
           position: { x: vehicle.x, y: 0, z: vehicle.z },
           vehicleId: vehicle.id,
           metadata: {
@@ -953,6 +957,7 @@ export async function setup(ctx) {
       checkpointReached: NAVIGATION_CHECKPOINT_REACHED,
       routeReplanMs: NAVIGATION_ROUTE_REPLAN_MS,
       vehicleDetourClearance: NAVIGATION_VEHICLE_DETOUR_CLEARANCE,
+      vehicleArrivalMaxSpeed: NAVIGATION_VEHICLE_ARRIVAL_MAX_SPEED,
     },
   });
 }
