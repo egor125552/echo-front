@@ -19,6 +19,7 @@ import * as health from "../plugins/health/server.js";
 import * as ragdollDamage from "../plugins/battle-royale-ragdoll-damage/server.js";
 import * as armor from "../plugins/armor/server.js";
 import * as social from "../plugins/social/server.js";
+import * as sharedHumanSpawn from "../plugins/battle-royale-shared-human-spawn/server.js";
 import * as targetAssist from "../plugins/target-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
 import * as healthRegeneration from "../plugins/health-regeneration/server.js";
@@ -48,6 +49,7 @@ import * as objectAffordances from "../plugins/battle-royale-object-affordances/
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
 import * as fleetPedestrianRagdoll from "../plugins/battle-royale-fleet-pedestrian-ragdoll/server.js";
+import * as socialRagdollProtection from "../plugins/social-ragdoll-protection/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
 import * as socialIntegration from "../plugins/social-match-integration/server.js";
 import * as networkTuning from "../plugins/network-tuning/server.js";
@@ -92,6 +94,7 @@ export const battleRoyalePreset = [
   ragdollDamage,
   armor,
   social,
+  sharedHumanSpawn,
   targetAssist,
   combat,
   healthRegeneration,
@@ -121,6 +124,7 @@ export const battleRoyalePreset = [
   ragdoll,
   ragdollTuning,
   fleetPedestrianRagdoll,
+  socialRagdollProtection,
   matchApi,
   socialIntegration,
   networkTuning,
