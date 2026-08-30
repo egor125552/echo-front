@@ -5,7 +5,7 @@ export const manifest = {
 
 export const SESSION_STORAGE_KEY = "echo-front-player-session-v1";
 export const PLAYER_STORAGE_KEY = "echo-front-player-id-v1";
-export const RECONNECT_DELAYS_MS = [500, 1000, 2000, 3000, 5000];
+export const RECONNECT_DELAYS_MS = [150, 500, 1000, 2000, 5000];
 
 export function isPlayerSessionId(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? ""));
