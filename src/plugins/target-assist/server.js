@@ -1,6 +1,6 @@
 export const manifest = {
   id: "target-assist",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: ["entities", "teams", "rapier-physics", "movement"],
   optional: ["social"],
   capabilities: ["services.consume", "services.provide", "components.read"],
@@ -36,7 +36,7 @@ export async function setup(ctx) {
 
     for (const enemy of teams.enemiesOf(entityId)) {
       if (!enemy?.alive) continue;
-      if (!bot && social?.isFriend(entityId, enemy.id)) continue;
+      if (!bot && social?.protectFromFriendlyFire?.(entityId, enemy.id)) continue;
       const target = ctx.components.get(enemy.id, "Transform");
       if (!target) continue;
 
