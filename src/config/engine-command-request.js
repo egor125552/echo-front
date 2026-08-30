@@ -1,33 +1,63 @@
-const START = 2000021700000;
-const CASES = Object.freeze([
-  { player: "ragdoll-speed-15", speedKph: 15, x: -24 },
-  { player: "ragdoll-speed-50", speedKph: 50, x: -8 },
-  { player: "ragdoll-speed-100", speedKph: 100, x: 8 },
-  { player: "ragdoll-speed-150", speedKph: 150, x: 24 },
-]);
-
+const START = 2000021800000;
+const PLAYER = "transcript-fixes-218";
 const commands = [];
-for (const [index, test] of CASES.entries()) {
-  const speed = test.speedKph / 3.6;
+
+commands.push(
+  { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [PLAYER] } },
+
+  // Crate probe: approach the ground-floor rifle crate slightly off-centre.
+  // With no strafe, the player must stop instead of silently sliding around it.
+  { command: "service.call", args: { service: "movement", method: "teleport", arguments: [PLAYER, { x: 131.5, y: 0, z: 124.8, angle: -Math.PI / 2 }] } },
+  { command: "service.call", args: { service: "movement", method: "setInput", arguments: [PLAYER, { forward: 1, strafe: 0 }] } },
+);
+for (let i = 0; i < 14; i += 1) {
+  commands.push({ command: "service.call", args: { service: "movement", method: "tick", arguments: [0.05, START + i * 50] } });
+}
+commands.push(
+  { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: [PLAYER, START + 800] } },
+
+  // Deliberate strafe must still let the player choose to move around the crate.
+  { command: "service.call", args: { service: "movement", method: "setInput", arguments: [PLAYER, { forward: 1, strafe: 0.8 }] } },
+);
+for (let i = 0; i < 10; i += 1) {
+  commands.push({ command: "service.call", args: { service: "movement", method: "tick", arguments: [0.05, START + 900 + i * 50] } });
+}
+commands.push(
+  { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: [PLAYER, START + 1500] } },
+
+  // Generic location speech: specific floor first, building second.
+  { command: "service.call", args: { service: "movement", method: "teleport", arguments: [PLAYER, { x: 129, y: 3.2, z: 120, angle: 0 }] } },
+  { command: "service.call", args: { service: "match-api", method: "snapshotFor", arguments: [PLAYER, START + 1600] } },
+
+  // A near-boundary route must never explode into kilometre-scale detours.
+  { command: "service.call", args: { service: "navigation", method: "buildRoute", arguments: [
+    { x: 627.849, y: 0, z: 826.165 },
+    { id: "journal-boundary-probe", name: "Журнальная цель", kind: "vehicle", position: { x: 669, y: 0, z: 988.7 }, mode: "foot" }
+  ] } },
+);
+
+for (const [index, speedKph] of [30, 80, 140].entries()) {
+  const id = `vehicle-crash-${speedKph}`;
+  const speed = speedKph / 3.6;
   commands.push(
-    { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [test.player] } },
-    { command: "service.call", args: { service: "movement", method: "teleport", arguments: [test.player, { x: test.x, y: 30, z: -60, angle: 0 }] } },
-    { command: "service.call", args: { service: "ragdoll", method: "activate", arguments: [test.player, { reason: "vehicle-eject", velocity: { x: speed, y: 5, z: 0 } }, START + index] } },
-    { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: [test.player] } },
+    { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [id] } },
+    { command: "service.call", args: { service: "movement", method: "teleport", arguments: [id, { x: -30 + index * 15, y: 30, z: -90, angle: 0 }] } },
+    { command: "service.call", args: { service: "ragdoll", method: "activate", arguments: [id, { reason: "vehicle-crash", velocity: { x: speed, y: 3, z: 0 } }, START + 2000 + index] } },
+    { command: "service.call", args: { service: "ragdoll-tuning", method: "stateFor", arguments: [id] } },
   );
 }
 commands.push(
-  { command: "service.call", args: { service: "ragdoll-tuning", method: "currentReason", arguments: ["vehicle-eject"] } },
   { command: "service.call", args: { service: "ragdoll-stability", method: "summary", arguments: [] } },
+  { command: "service.call", args: { service: "match-api", method: "disconnectHuman", arguments: [PLAYER] } },
 );
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 217,
+  id: 218,
   mode: "battle-royale",
-  room: "ragdoll-speed-scaling-217",
+  room: "transcript-fixes-218",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
   args: { commands },
-  requestedAt: "2026-08-30T22:21:00+03:00"
+  requestedAt: "2026-08-30T22:50:00+03:00"
 });
