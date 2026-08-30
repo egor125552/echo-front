@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-navigation-client",
-  version: "1.3.0",
+  version: "1.3.1",
   requires: [
     "keyboard-input",
     "cloudflare-session",
@@ -184,15 +184,30 @@ export async function setup(ctx) {
       return;
     }
 
-    const previousActive = Boolean(latestNavigation?.active);
+    const previousNavigation = latestNavigation;
+    const previousActive = Boolean(previousNavigation?.active);
+    const previousTargetId = previousNavigation?.active ? previousNavigation?.target?.id ?? null : null;
+    const previousDetours = Math.max(0, Number(previousNavigation?.route?.detours) || 0);
     const nextNavigation = snapshot.navigation ?? null;
     const selected = nextNavigation?.selected ?? null;
     const activeTarget = nextNavigation?.target ?? null;
     const selectedId = selected?.id ?? null;
     const activeId = nextNavigation?.active ? activeTarget?.id ?? null : null;
+    const nextDetours = Math.max(0, Number(nextNavigation?.route?.detours) || 0);
 
     latestNavigation = nextNavigation;
     latestSelf = snapshot?.entities?.find((entity) => entity.id === network.playerId) ?? null;
+
+    if (
+      previousActive
+      && nextNavigation?.active
+      && activeId
+      && activeId === previousTargetId
+      && previousDetours > 0
+      && nextDetours === 0
+    ) {
+      announce("Обход завершён. Препятствие позади. Снова прямо.", { interrupt: false });
+    }
 
     if (selectedId && selectedId !== lastSelectedId) {
       announce(`${selected.name || "Цель"}. ${roundedMeters(selected.distance)} метров. Enter — выбрать.`);
