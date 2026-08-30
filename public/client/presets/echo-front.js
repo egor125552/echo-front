@@ -10,6 +10,7 @@ import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
+import * as navigationStatus from "../plugins/battle-royale-navigation-status.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face.js";
 import * as parachuteAudioPreload from "../plugins/parachute-audio-preload.js";
 import * as soundPack from "../plugins/core-sound-pack.js";
@@ -43,6 +44,7 @@ export const echoFrontClientPreset = [
   spatialAudio,
   audioResilience,
   navigation,
+  navigationStatus,
   navigationFace,
   parachuteAudioPreload,
   soundPack,
