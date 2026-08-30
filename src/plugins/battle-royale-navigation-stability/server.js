@@ -481,7 +481,11 @@ export async function setup(ctx) {
     const growth = distance - tracker.minimumDistance;
     const increasing = distance > tracker.lastDistance + 0.2;
     const elapsed = now - tracker.firstAt;
-    const cooldownReady = now - tracker.lastReplanAt >= MISSED_CHECKPOINT_REPLAN_COOLDOWN_MS;
+    const stats = statsFor(playerId);
+    const lastRecoveryAt = Number(stats.lastRecoveryAt);
+    const globalRecoveryAt = Number.isFinite(lastRecoveryAt) ? lastRecoveryAt : -Infinity;
+    const cooldownReady = now - Math.max(tracker.lastReplanAt, globalRecoveryAt)
+      >= MISSED_CHECKPOINT_REPLAN_COOLDOWN_MS;
     const passedCloseEnough = tracker.minimumDistance <= Math.max(18, speed * 1.15);
     const clearlyPassed = error >= CHECKPOINT_BEHIND_RADIANS
       && passedCloseEnough

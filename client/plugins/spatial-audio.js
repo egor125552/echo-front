@@ -123,6 +123,8 @@ export async function setup(ctx) {
   let environmentReverbMix = 0;
   let reverbMix = 0;
   let muffleCutoff = MASTER_FILTER_MAX_HZ;
+  let cabinMuffleCutoff = MASTER_FILTER_MAX_HZ;
+  let effectiveMuffleCutoff = MASTER_FILTER_MAX_HZ;
   let foregroundMuffleCutoff = MASTER_FILTER_MAX_HZ;
 
   const masterInput = audioContext.createGain();
@@ -210,15 +212,29 @@ export async function setup(ctx) {
     applyReverbMix();
   }
 
-  function setMuffleCutoff(value) {
+  function normalizedMuffleCutoff(value) {
     const numeric = Number(value);
-    muffleCutoff = Math.max(
+    return Math.max(
       MASTER_FILTER_MIN_HZ,
       Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
     );
-    foregroundMuffleCutoff = softenedMuffleCutoff(muffleCutoff);
-    targetParam(masterLowpass.frequency, muffleCutoff, 0.36);
-    targetParam(foregroundLowpass.frequency, foregroundMuffleCutoff, 0.22);
+  }
+
+  function applyMuffleCutoffs() {
+    effectiveMuffleCutoff = Math.min(muffleCutoff, cabinMuffleCutoff);
+    foregroundMuffleCutoff = softenedMuffleCutoff(effectiveMuffleCutoff);
+    targetParam(masterLowpass.frequency, effectiveMuffleCutoff, 0.22);
+    targetParam(foregroundLowpass.frequency, foregroundMuffleCutoff, 0.18);
+  }
+
+  function setMuffleCutoff(value) {
+    muffleCutoff = normalizedMuffleCutoff(value);
+    applyMuffleCutoffs();
+  }
+
+  function setCabinMuffleCutoff(value) {
+    cabinMuffleCutoff = normalizedMuffleCutoff(value);
+    applyMuffleCutoffs();
   }
 
   function playCenteredBuffer(buffer, {
@@ -358,6 +374,9 @@ export async function setup(ctx) {
     getEnvironmentReverbMix() { return environmentReverbMix; },
     setMuffleCutoff,
     getMuffleCutoff() { return muffleCutoff; },
+    setCabinMuffleCutoff,
+    getCabinMuffleCutoff() { return cabinMuffleCutoff; },
+    getEffectiveMuffleCutoff() { return effectiveMuffleCutoff; },
     getForegroundMuffleCutoff() { return foregroundMuffleCutoff; },
     async playCentered(url, options = {}) {
       const buffer = await load(url);

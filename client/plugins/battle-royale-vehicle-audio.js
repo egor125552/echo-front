@@ -9,6 +9,9 @@ const TRUCK_ENGINE_RADIUS = 170;
 const SPORT_ENGINE_RADIUS = 220;
 const BRAKE_RADIUS = 105;
 const CRASH_RADIUS = 120;
+const CABIN_TRUCK_CUTOFF_HZ = 3600;
+const CABIN_SPORT_CUTOFF_HZ = 4600;
+const CABIN_OPEN_CUTOFF_HZ = 18000;
 const TRUCK_ENGINE_URL = "/audio/vehicles/ts3/ts3_truck_engine.mp3";
 const SPORT_ENGINE_URL = "/audio/vehicles/ts3/ts3_sport_engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
@@ -69,11 +72,27 @@ export async function setup(ctx) {
     brakingActive = false;
   }
 
-  function playerFor(snapshot) {
-    const observedId = snapshot?.spectator?.active
+  function observedPlayerId(snapshot) {
+    return snapshot?.spectator?.active
       ? snapshot.spectator.targetId
       : network.playerId;
+  }
+
+  function playerFor(snapshot) {
+    const observedId = observedPlayerId(snapshot);
     return snapshot?.entities?.find((entity) => entity.id === observedId) ?? null;
+  }
+
+  function updateCabinMuffle(snapshot) {
+    const observedId = observedPlayerId(snapshot);
+    const driven = (Array.isArray(snapshot?.vehicles) ? snapshot.vehicles : [])
+      .find((vehicle) => vehicle?.driverId === observedId) ?? null;
+    const cutoff = !driven
+      ? CABIN_OPEN_CUTOFF_HZ
+      : profileFor(driven) === "sport"
+        ? CABIN_SPORT_CUTOFF_HZ
+        : CABIN_TRUCK_CUTOFF_HZ;
+    audio.setCabinMuffleCutoff?.(cutoff);
   }
 
   function distance2(a, b) {
@@ -121,9 +140,11 @@ export async function setup(ctx) {
 
   function updateEngine(snapshot) {
     if (snapshot?.mode !== "battle-royale") {
+      audio.setCabinMuffleCutoff?.(CABIN_OPEN_CUTOFF_HZ);
       stopEngine();
       return;
     }
+    updateCabinMuffle(snapshot);
     const listener = playerFor(snapshot);
     const vehicle = listener ? nearestAudibleVehicle(snapshot, listener) : null;
     if (!listener || !vehicle) {
@@ -188,6 +209,7 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("network:disconnected", () => {
+    audio.setCabinMuffleCutoff?.(CABIN_OPEN_CUTOFF_HZ);
     audio.stopChannel(BRAKE_CHANNEL);
     stopEngine();
   });

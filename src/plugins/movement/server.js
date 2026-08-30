@@ -32,6 +32,10 @@ function blockageFromRapier(attempted, moved) {
   for (const collision of collisions) {
     const worldObject = collision?.worldObject;
     if (!worldObject) continue;
+    // Floors and stair ramps are support surfaces, not obstacles. Rapier may
+    // report them while resolving slope/ground contact; announcing them as a
+    // blocked move produces the misleading “Здесь лестница” loop.
+    if (NAVIGABLE_SUPPORT_KINDS.has(String(worldObject.kind ?? ""))) continue;
     const explicitSpeech = String(worldObject.accessibleSpeech ?? "").trim();
     const accessibleName = String(worldObject.accessibleName ?? "").trim();
     if (!explicitSpeech && !accessibleName) continue;
@@ -65,7 +69,7 @@ function blockageKey(blockage) {
 
 export const manifest = {
   id: "movement",
-  version: "2.2.0",
+  version: "2.2.1",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",

@@ -1,9 +1,9 @@
-export const DROPZONE_VEHICLE_ID = "br-jeep-2";
+export const DROPZONE_VEHICLE_ID = "br-supercar-1";
 export const DROPZONE_VEHICLE_OFFSET = 12;
 
 export const manifest = {
   id: "battle-royale-dropzone-vehicle",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "battle-royale-parachute",
     "battle-royale-vehicle-fleet",
@@ -75,10 +75,7 @@ export async function setup(ctx) {
     }
 
     const candidates = (vehicles.snapshot?.() ?? [])
-      .filter((vehicle) => vehicle.kind === "offroad")
-      // Leave the original primary jeep alone because it is also the legacy
-      // integration anchor. The seven fleet jeeps are safe to relocate.
-      .filter((vehicle) => vehicle.id !== vehicles.vehicleId)
+      .filter((vehicle) => vehicle.kind === "supercar")
       .filter((vehicle) => !vehicle.occupied)
       .filter((vehicle) => !assignedVehicles.has(vehicle.id))
       .sort((a, b) => {
@@ -128,7 +125,7 @@ export async function setup(ctx) {
       entityId,
       vehicleId: vehicle.id,
       vehicleKind: state?.kind ?? vehicle.kind,
-      vehicleName: state?.accessibleName ?? vehicle.accessibleName ?? "внедорожник",
+      vehicleName: state?.accessibleName ?? vehicle.accessibleName ?? "суперкар",
       x: state?.x ?? parking.x,
       y: state?.y ?? parking.y + bodyHeight,
       z: state?.z ?? parking.z,
@@ -146,7 +143,7 @@ export async function setup(ctx) {
   function assertNear(position, maximumDistance = 18, entityId = null) {
     const states = entityId && assignedByPlayer.has(entityId)
       ? [assignedFor(entityId)].filter(Boolean)
-      : (vehicles.snapshot?.() ?? []).filter((vehicle) => vehicle.kind === "offroad");
+      : (vehicles.snapshot?.() ?? []).filter((vehicle) => vehicle.kind === "supercar");
     const nearest = states
       .map((vehicle) => ({ vehicle, distance: distance2(position, vehicle) }))
       .sort((a, b) => a.distance - b.distance)[0] ?? null;
