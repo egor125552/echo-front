@@ -1,0 +1,75 @@
+name: Fix navigation detour sanity
+
+on:
+  push:
+    paths:
+      - '.github/workflows/fix-navigation-detour-sanity.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch pathological semantic detours
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/plugins/battle-royale-navigation/server.js')
+          text = path.read_text()
+          old = '''    let best = null;
+    let bestScore = Infinity;
+    for (const candidate of candidates) {
+      const p = candidate.point;
+      const key = `${Math.round(p.x * 10)}:${Math.round(p.y * 10)}:${Math.round(p.z * 10)}`;
+      if (used.has(key)) continue;
+      const candidateTarget = p.doorId ? { ...target, allowDoorId: p.doorId } : target;
+      if (!segmentClear(from, p, candidateTarget)) continue;
+      const score = distance3(from, p)
+        + distance3(p, target.position)
+        + (candidate.semantic ? -2.5 : 0);
+      if (score >= bestScore) continue;
+      best = { ...p, key };
+      bestScore = score;
+    }
+'''
+          new = '''    let best = null;
+    let bestScore = Infinity;
+    const directDistance = distance3(from, target.position);
+    for (const candidate of candidates) {
+      const p = candidate.point;
+      const key = `${Math.round(p.x * 10)}:${Math.round(p.y * 10)}:${Math.round(p.z * 10)}`;
+      if (used.has(key)) continue;
+      const candidateTarget = p.doorId ? { ...target, allowDoorId: p.doorId } : target;
+      if (!segmentClear(from, p, candidateTarget)) continue;
+      const candidateDistance = distance3(from, p);
+      const projectedDistance = candidateDistance + distance3(p, target.position);
+
+      // Ground-navigation waypoints are hints, not mandatory topology. A stale or
+      // badly chosen hint must never turn a nearby target into a hundreds-of-metres
+      // detour. Keep generous headroom for real obstacles, but reject semantic
+      // candidates whose one-hop route is already wildly worse than going direct.
+      if (candidate.semantic) {
+        const semanticLimit = directDistance + Math.max(36, directDistance * 2.5);
+        if (projectedDistance > semanticLimit) continue;
+      }
+
+      const score = projectedDistance + (candidate.semantic ? -2.5 : 0);
+      if (score >= bestScore) continue;
+      best = { ...p, key };
+      bestScore = score;
+    }
+'''
+          if old not in text:
+              raise SystemExit('target block not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+      - name: Commit fix
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/plugins/battle-royale-navigation/server.js
+          git commit -m 'Reject pathological navigation detours'
+          git push
