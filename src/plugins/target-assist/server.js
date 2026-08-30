@@ -1,7 +1,8 @@
 export const manifest = {
   id: "target-assist",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["entities", "teams", "rapier-physics", "movement"],
+  optional: ["social"],
   capabilities: ["services.consume", "services.provide", "components.read"],
 };
 
@@ -20,6 +21,7 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
+  const social = ctx.services.has("social") ? ctx.services.get("social") : null;
 
   function selectTarget(entityId, direction, maxDistance) {
     const shooter = entities.get(entityId);
@@ -34,6 +36,7 @@ export async function setup(ctx) {
 
     for (const enemy of teams.enemiesOf(entityId)) {
       if (!enemy?.alive) continue;
+      if (!bot && social?.isFriend(entityId, enemy.id)) continue;
       const target = ctx.components.get(enemy.id, "Transform");
       if (!target) continue;
 
@@ -49,10 +52,6 @@ export async function setup(ctx) {
       const tz = dz / distance;
       const frontness = Math.max(-1, Math.min(1, facing.x * tx + facing.y * ty + facing.z * tz));
 
-      // Bots already have their own target choice and horizontal reaction logic.
-      // Only grant vertical correction when that target is actually in their
-      // narrow forward cone, so multi-floor combat works without aim snapping
-      // to an unrelated enemy somewhere else in the room.
       if (bot && frontness < BOT_ASSIST_MIN_FRONTNESS) continue;
 
       const score = bot
