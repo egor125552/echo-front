@@ -2,9 +2,11 @@ import * as input from "../plugins/input.js";
 import * as network from "../plugins/network.js";
 import * as parachuteInput from "../plugins/parachute-input.js";
 import * as parkourInput from "../plugins/parkour-input.js";
+import * as gamepadInput from "../plugins/gamepad-input.js";
 import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
+import * as gamepadHaptics from "../plugins/gamepad-haptics.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
@@ -36,9 +38,11 @@ export const echoFrontClientPreset = [
   network,
   parachuteInput,
   parkourInput,
+  gamepadInput,
   iphoneGestures,
   journal,
   smoothing,
+  gamepadHaptics,
   speechSettings,
   speechDiagnostics,
   spatialAudio,
