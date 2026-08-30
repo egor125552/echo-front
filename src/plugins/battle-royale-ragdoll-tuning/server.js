@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.7.0",
+  version: "1.8.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -38,9 +38,12 @@ const DEFAULT_PROFILES = Object.freeze({
     speedMode: "horizontal", scaleStartKph: 8, scaleSpanKph: 46, scaleMaxExtra: 3.0,
   }),
   "vehicle-crash": Object.freeze({
-    ...BASE_PHYSICS,
-    x: 0.70, y: 0.12, z: 0.54,
-    speedMode: "none", scaleStartKph: 0, scaleSpanKph: 100, scaleMaxExtra: 0,
+    linearDamping: 0.016,
+    angularDamping: 0.011,
+    headAngularDamping: 0.016,
+    friction: 0.32,
+    x: 3.6, y: 0.40, z: 3.0,
+    speedMode: "horizontal", scaleStartKph: 20, scaleSpanKph: 90, scaleMaxExtra: 2.5,
   }),
   "vehicle-hit": Object.freeze({
     ...BASE_PHYSICS,

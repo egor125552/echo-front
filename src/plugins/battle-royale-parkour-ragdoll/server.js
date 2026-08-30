@@ -10,7 +10,7 @@ export const PARKOUR_TUCK_SPEED = 4.2;
 
 export const manifest = {
   id: "battle-royale-parkour-ragdoll",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "match-api",
     "battle-royale",
@@ -409,7 +409,7 @@ export async function setup(ctx) {
       const angle = Number(vehicle.angle) || 0;
       const axes = basis(angle);
       const direction = Number(vehicle.forwardSpeed) < -0.25 ? -1 : 1;
-      const carrySpeed = Math.min(18, impact.speedBefore * 0.78);
+      const carrySpeed = Math.min(55, impact.speedBefore * 0.62);
       const upward = 1.2 + Math.min(3.8, impact.deltaSpeed * 0.24);
 
       if (!vehicles.exit(impact.entityId, now, "crash-eject")) continue;

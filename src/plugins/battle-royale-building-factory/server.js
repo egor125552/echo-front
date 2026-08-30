@@ -2,7 +2,7 @@ import { BATTLE_ROYALE_BUILDINGS } from "../../config/battle-royale-buildings.js
 
 export const manifest = {
   id: "battle-royale-building-factory",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["rapier-physics", "map-test-arena"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -694,11 +694,11 @@ export async function setup(ctx) {
     const entry = buildingAt(position);
     if (!entry) return originalLocationAt?.(position) ?? "Карта";
     const stair = stairAt(entry, position);
-    if (stair) return `${entry.name}, ${stair.spec.name ?? "лестница"}`;
+    if (stair) return `${stair.spec.name ?? "лестница"}, ${entry.name}`;
     const floor = floorAt(entry, position);
     const room = roomAt(entry, floor, position);
-    if (room) return `${entry.name}, ${room.name ?? room.id}`;
-    if (floor) return `${entry.name}, ${floor.name ?? floor.id}`;
+    if (room) return `${room.name ?? room.id}, ${entry.name}`;
+    if (floor) return `${floor.name ?? floor.id}, ${entry.name}`;
     return entry.name;
   }
 

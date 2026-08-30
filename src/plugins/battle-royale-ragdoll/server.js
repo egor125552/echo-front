@@ -7,7 +7,7 @@ export const RAGDOLL_TARGET_MASS = 20;
 
 export const manifest = {
   id: "battle-royale-ragdoll",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "rapier-physics",
     "movement",
@@ -594,9 +594,17 @@ export async function setup(ctx) {
     detectVehiclePedestrianHits(frameNow);
   }
 
-  function impactDamage(impact) {
-    const excess = Math.max(0, Number(impact?.severity) - 3.6);
-    return Math.min(90, Math.round(excess * excess * 1.25));
+  function impactDamage(impact, reason = "default") {
+    const severity = Math.max(0, Number(impact?.severity) || 0);
+    const excess = Math.max(0, severity - 3.6);
+    let damage = excess * excess * 1.25;
+    if (reason === "vehicle-eject" || reason === "vehicle-crash" || reason === "vehicle-hit") {
+      // Boost only moderate impacts. Very hard impacts keep the old curve, so an
+      // already-epic crash does not suddenly become an unavoidable one-shot.
+      const moderateBoost = clamp((8 - severity) / 4, 0, 1);
+      damage += excess * 3 * moderateBoost;
+    }
+    return Math.min(90, Math.round(damage));
   }
 
   function flushImpact(entry, now) {
@@ -638,7 +646,7 @@ export async function setup(ctx) {
 
     const entity = entities.get(entry.entityId);
     if (!entry.dead && entity?.alive && entry.damageCooldown <= 0 && impact.severity >= IMPACT_DAMAGE_THRESHOLD) {
-      const damage = impactDamage(impact);
+      const damage = impactDamage(impact, entry.reason);
       if (damage > 0) {
         const result = health.applyDamage(entry.entityId, damage, {
           attackerId: null,

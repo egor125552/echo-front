@@ -14,10 +14,11 @@ const TARGET_REACHED_DEFAULT = 5.5;
 const TARGET_VERTICAL_TOLERANCE = 2.15;
 const CHECKPOINT_VERTICAL_TOLERANCE = 1.2;
 const MAX_VISIBLE_VEHICLE_TARGETS = 5;
+const NON_DETOUR_OBSTACLE_KINDS = new Set(["world-boundary"]);
 
 export const manifest = {
   id: "battle-royale-navigation",
-  version: "1.3.0",
+  version: "1.3.1",
   requires: [
     "match-api",
     "battle-royale-ground-navigation",
@@ -409,6 +410,7 @@ export async function setup(ctx) {
     if (!object) return [];
     const y = Math.max(0, finite(from?.y));
     const kind = String(object.kind ?? "");
+    if (NON_DETOUR_OBSTACLE_KINDS.has(kind)) return [];
     const clearance = options.mode === "vehicle"
       ? NAVIGATION_VEHICLE_DETOUR_CLEARANCE
       : NAVIGATION_DETOUR_CLEARANCE;
@@ -464,6 +466,11 @@ export async function setup(ctx) {
       const candidateTarget = p.doorId ? { ...target, allowDoorId: p.doorId } : target;
       if (!segmentClear(from, p, candidateTarget)) continue;
       const projectedDistance = distance3(from, p) + distance3(p, target.position);
+      const genericLimit = directDistance + Math.max(
+        options.mode === "vehicle" ? 100 : 60,
+        directDistance * (options.mode === "vehicle" ? 1.25 : 1.0),
+      );
+      if (projectedDistance > genericLimit) continue;
       if (candidate.semantic) {
         const semanticLimit = directDistance + Math.max(36, directDistance * 2.5);
         if (projectedDistance > semanticLimit) continue;

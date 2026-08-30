@@ -7,6 +7,7 @@ export const CHARACTER_GRAVITY = 18;
 export const CHARACTER_MAX_FALL_SPEED = 16;
 
 const NAVIGABLE_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
+const STICKY_OBSTACLE_KINDS = new Set(["crate", "loot-crate"]);
 
 export function normalizeFootstepSurface(value) {
   const surface = String(value ?? "default").trim().toLowerCase();
@@ -67,9 +68,14 @@ function blockageKey(blockage) {
   ].join(":");
 }
 
+function hasStickyObstacleCollision(moved = {}) {
+  return (moved.collisions ?? []).some((collision) =>
+    STICKY_OBSTACLE_KINDS.has(String(collision?.worldObject?.kind ?? "")));
+}
+
 export const manifest = {
   id: "movement",
-  version: "2.2.1",
+  version: "2.3.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -211,7 +217,25 @@ export async function setup(ctx) {
             previousVerticalVelocity - CHARACTER_GRAVITY * safeDt,
           );
           const dy = verticalVelocity * safeDt;
-          const moved = physics.move(entityId, dx, dz, dy);
+          const beforeMove = { x: transform.x, y: transform.y, z: transform.z };
+          let moved = physics.move(entityId, dx, dz, dy);
+
+          // Do not let Rapier silently slide a human around loot crates when the
+          // player only asked to walk straight. Preserve vertical correction, but
+          // cancel the horizontal slide. A deliberate strafe still works.
+          if (!entity.bot
+            && Math.abs(rawStrafe) <= 0.08
+            && Math.hypot(dx, dz) > 0.01
+            && hasStickyObstacleCollision(moved)) {
+            const current = physics.position(entityId);
+            physics.teleport(entityId, {
+              x: beforeMove.x,
+              y: current?.y ?? beforeMove.y,
+              z: beforeMove.z,
+            });
+            moved = { ...moved, x: 0, z: 0 };
+          }
+
           transform.grounded = Boolean(moved.grounded);
           transform.verticalVelocity = moved.grounded ? 0 : verticalVelocity;
 
