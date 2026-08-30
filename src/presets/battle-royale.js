@@ -48,6 +48,7 @@ import * as vehicleFleet from "../plugins/battle-royale-vehicle-fleet/server.js"
 import * as objectAffordances from "../plugins/battle-royale-object-affordances/server.js";
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
+import * as deathFallTuning from "../plugins/battle-royale-death-fall-tuning/server.js";
 import * as fleetPedestrianRagdoll from "../plugins/battle-royale-fleet-pedestrian-ragdoll/server.js";
 import * as socialRagdollProtection from "../plugins/social-ragdoll-protection/server.js";
 import * as matchApi from "../plugins/battle-royale-match-api/server.js";
@@ -124,6 +125,7 @@ export const battleRoyalePreset = [
   objectAffordances,
   ragdoll,
   ragdollTuning,
+  deathFallTuning,
   fleetPedestrianRagdoll,
   socialRagdollProtection,
   matchApi,
