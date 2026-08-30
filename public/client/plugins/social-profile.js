@@ -157,6 +157,7 @@ export async function setup(ctx) {
   let profile = null;
   let loading = null;
   let prompting = null;
+  let profilePending = false;
 
   function publicProfile() {
     if (!profile) return null;
@@ -166,10 +167,21 @@ export async function setup(ctx) {
     };
   }
 
-  input.sample = () => ({
-    ...originalSample(),
-    socialProfile: publicProfile(),
-  });
+  input.sample = () => {
+    const sampled = originalSample();
+    if (!profilePending || !profile) return sampled;
+    profilePending = false;
+    return {
+      ...sampled,
+      socialProfile: publicProfile(),
+    };
+  };
+
+  function queueProfile(reason) {
+    if (!profile || !network.connected) return;
+    profilePending = true;
+    ctx.events.emit("input:changed", { reason });
+  }
 
   async function load() {
     if (profile) return profile;
@@ -199,7 +211,7 @@ export async function setup(ctx) {
       console.warn("Could not persist encrypted player profile", error);
     }
     ctx.events.emit("social:local-profile", { profile: structuredClone(profile) });
-    if (network.connected) ctx.events.emit("input:changed", { reason: "social:profile" });
+    queueProfile("social:profile");
     return profile;
   }
 
@@ -269,7 +281,7 @@ export async function setup(ctx) {
   network.connect = (...args) => ensureProfile().then(() => originalConnect(...args));
 
   ctx.events.on("network:connected", () => {
-    if (profile) ctx.events.emit("input:changed", { reason: "social:connected" });
+    queueProfile("social:connected");
   });
 
   ctx.services.provide("social-profile", {
