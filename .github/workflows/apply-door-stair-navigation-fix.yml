@@ -1,0 +1,107 @@
+name: Apply door-aligned navigation and stair layout fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-door-stair-navigation-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Patch building navigation and two-storey stair
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected text not found in {path}: {old[:100]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          buildings = 'src/config/battle-royale-buildings.js'
+          replace_once(
+              buildings,
+              '''        // The stair is against the east side of the house. These slabs leave a\n        // generous rectangular stairwell and a real top landing instead of a\n        // ramp poking through a solid floor.\n        slabs: [\n          { x: -3.0, z: 0, width: 12.0, depth: 14.0 },\n          { x: 8.2, z: 0, width: 1.6, depth: 14.0 },\n          { x: 5.2, z: -6.1, width: 4.0, depth: 1.8 },\n          { x: 5.2, z: 4.7, width: 4.0, depth: 4.6 },\n        ],''',
+              '''        // The stair now runs straight inward from the front (east) door.\n        // The opening is deliberately broad so a player can enter the house,\n        // keep walking straight, and naturally climb instead of hunting for it.\n        slabs: [\n          { x: -4.5, z: 0, width: 9.0, depth: 14.0 },\n          { x: 8.0, z: 0, width: 2.0, depth: 14.0 },\n          { x: 3.5, z: -4.6, width: 7.0, depth: 4.8 },\n          { x: 3.5, z: 4.6, width: 7.0, depth: 4.8 },\n        ],'''
+          )
+          replace_once(
+              buildings,
+              '''        x: 5.2,\n        z: -1.5,\n        run: 6.0,\n        width: 2.8,\n        risesToward: "north",''',
+              '''        x: 3.5,\n        z: 0,\n        run: 6.0,\n        width: 3.2,\n        risesToward: "west",'''
+          )
+
+          factory = 'src/plugins/battle-royale-building-factory/server.js'
+          replace_once(
+              factory,
+              '? doorPassagePoints(entry.spec, firstDoorFloor, firstDoor).outside',
+              '? doorWorldPosition(entry.spec, firstDoorFloor, firstDoor)'
+          )
+          replace_once(
+              factory,
+              'arriveDistance: Math.max(2.5, finite(custom.arriveDistance, 4.5)),',
+              'arriveDistance: Math.max(1.2, finite(custom.arriveDistance, 1.6)),'
+          )
+
+          targets = 'src/plugins/battle-royale-building-targets/server.js'
+          replace_once(
+              targets,
+              'arriveDistance: Math.max(2.5, finite(building.metadata?.arriveDistance, 4.5)),',
+              'arriveDistance: Math.max(1.2, finite(building.metadata?.arriveDistance, 1.6)),'
+          )
+
+          navigation = 'src/plugins/battle-royale-navigation/server.js'
+          replace_once(
+              navigation,
+              'export const NAVIGATION_VEHICLE_BUILDING_STANDOFF = 10;',
+              'export const NAVIGATION_VEHICLE_BUILDING_STANDOFF = 8;'
+          )
+
+          stability = 'src/plugins/battle-royale-navigation-stability/server.js'
+          replace_once(
+              stability,
+              'const VEHICLE_PARKING_CAPTURE_RADIUS = 16;',
+              'const VEHICLE_PARKING_CAPTURE_RADIUS = 4.5;'
+          )
+          replace_once(
+              stability,
+              'const VEHICLE_PARKING_LATERAL_MARGIN = 12;',
+              'const VEHICLE_PARKING_LATERAL_MARGIN = 4.5;'
+          )
+          PY
+
+      - name: Syntax checks
+        run: |
+          node --check src/config/battle-royale-buildings.js
+          node --check src/plugins/battle-royale-building-factory/server.js
+          node --check src/plugins/battle-royale-building-targets/server.js
+          node --check src/plugins/battle-royale-navigation/server.js
+          node --check src/plugins/battle-royale-navigation-stability/server.js
+
+      - name: Commit fixes and remove one-time workflow
+        shell: bash
+        run: |
+          rm -f .github/workflows/apply-door-stair-navigation-fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/config/battle-royale-buildings.js \
+                  src/plugins/battle-royale-building-factory/server.js \
+                  src/plugins/battle-royale-building-targets/server.js \
+                  src/plugins/battle-royale-navigation/server.js \
+                  src/plugins/battle-royale-navigation-stability/server.js
+          git add -u .github/workflows/apply-door-stair-navigation-fix.yml
+          git commit -m 'Align building navigation with doors and stairs'
+          git push
