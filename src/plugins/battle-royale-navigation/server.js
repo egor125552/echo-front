@@ -15,7 +15,7 @@ const MAX_VISIBLE_VEHICLE_TARGETS = 5;
 
 export const manifest = {
   id: "battle-royale-navigation",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: [
     "match-api",
     "battle-royale-ground-navigation",
@@ -362,9 +362,17 @@ export async function setup(ctx) {
     const clearance = options.mode === "vehicle"
       ? NAVIGATION_VEHICLE_DETOUR_CLEARANCE
       : NAVIGATION_DETOUR_CLEARANCE;
-    if (kind.startsWith("building-") && map.building) {
-      return expandedCorners(map.building, y, clearance);
+
+    // Declarative buildings carry a buildingId. Resolve that exact building's
+    // full footprint first; the old code used the legacy warehouse rectangle
+    // for every building wall, which could turn a short route into a huge loop.
+    if (kind.startsWith("building-") && object.buildingId) {
+      const buildingId = String(object.buildingId);
+      const topology = (map.navigationBuildings ?? [])
+        .find((entry) => String(entry?.id ?? "") === buildingId);
+      if (topology?.bounds) return expandedCorners(topology.bounds, y, clearance);
     }
+
     if (
       Number.isFinite(Number(object.x))
       && Number.isFinite(Number(object.z))
@@ -377,6 +385,11 @@ export async function setup(ctx) {
         minZ: Number(object.z) - Math.abs(Number(object.hz)),
         maxZ: Number(object.z) + Math.abs(Number(object.hz)),
       }, y, clearance);
+    }
+
+    // Legacy warehouse walls predate buildingId metadata.
+    if (kind.startsWith("building-") && map.building) {
+      return expandedCorners(map.building, y, clearance);
     }
     return [];
   }
@@ -855,12 +868,15 @@ export async function setup(ctx) {
           kind: "vehicle",
           order: 20,
           arriveDistance: 5.25,
-          position: { x: vehicle.x, y: vehicle.y ?? 0, z: vehicle.z },
+          // Navigation to a parked car is a ground-level task. Using the chassis
+          // centre here made an upper-floor player close enough vertically to
+          // falsely "reach" a car directly underneath the floor.
+          position: { x: vehicle.x, y: 0, z: vehicle.z },
           vehicleId: vehicle.id,
           metadata: {
             vehicleKind: kind,
             occupiedByOther: Boolean(vehicle.occupied && vehicle.driverId !== playerId),
-            verticalTolerance: 2.2,
+            verticalTolerance: 1.25,
           },
         };
       });
