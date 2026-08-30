@@ -4,6 +4,7 @@ export const manifest = {
 };
 
 export const SESSION_STORAGE_KEY = "echo-front-player-session-v1";
+export const PLAYER_STORAGE_KEY = "echo-front-player-id-v1";
 export const RECONNECT_DELAYS_MS = [500, 1000, 2000, 3000, 5000];
 
 export function isPlayerSessionId(value) {
@@ -21,13 +22,26 @@ function normalizeMode(value) {
 
 function loadOrCreateSessionId() {
   try {
-    const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (isPlayerSessionId(stored)) return stored.toLowerCase();
-    const created = crypto.randomUUID();
-    sessionStorage.setItem(SESSION_STORAGE_KEY, created);
-    return created;
+    const persistent = localStorage.getItem(PLAYER_STORAGE_KEY);
+    if (isPlayerSessionId(persistent)) return persistent.toLowerCase();
+
+    // Migrate the previous tab-only identity once so existing players keep the
+    // same id when this release first loads.
+    const previous = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const id = isPlayerSessionId(previous) ? previous.toLowerCase() : crypto.randomUUID();
+    localStorage.setItem(PLAYER_STORAGE_KEY, id);
+    sessionStorage.setItem(SESSION_STORAGE_KEY, id);
+    return id;
   } catch {
-    return crypto.randomUUID();
+    try {
+      const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (isPlayerSessionId(stored)) return stored.toLowerCase();
+      const created = crypto.randomUUID();
+      sessionStorage.setItem(SESSION_STORAGE_KEY, created);
+      return created;
+    } catch {
+      return crypto.randomUUID();
+    }
   }
 }
 
@@ -41,11 +55,21 @@ export async function setup(ctx) {
   let reconnectTimer = null;
   let reconnectAttempt = 0;
 
+  function send(type, payload = {}) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    try {
+      socket.send(JSON.stringify({ type, ...payload }));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   function sendInput() {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const sampled = input.sample();
     ctx.events.emit("network:input-sampled", { input: sampled });
-    socket.send(JSON.stringify({ type: "input", input: sampled }));
+    send("input", { input: sampled });
   }
 
   ctx.events.on("input:changed", sendInput);
@@ -58,8 +82,6 @@ export async function setup(ctx) {
   function emitGamePacket(packet) {
     if (!packet?.event) return;
     ctx.events.emit("game:event", packet);
-    // Inputs are transition-driven. Deployment intentionally discards them on
-    // the server, so resend the current held state exactly when combat unlocks.
     if (packet.event === "battle-royale:started") sendInput();
   }
 
@@ -172,6 +194,7 @@ export async function setup(ctx) {
   ctx.services.provide("network", {
     connect,
     disconnect,
+    send,
     get playerId() { return playerId; },
     get sessionId() { return sessionId; },
     get mode() { return desiredMode; },
