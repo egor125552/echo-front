@@ -8,6 +8,8 @@ import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as gamepadHaptics from "../plugins/gamepad-haptics.js";
 import * as speechSettings from "../plugins/speech-settings.js";
+import * as socialProfile from "../plugins/social-profile.js";
+import * as accessibleMenus from "../plugins/accessible-menus.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
@@ -44,6 +46,8 @@ export const echoFrontClientPreset = [
   smoothing,
   gamepadHaptics,
   speechSettings,
+  socialProfile,
+  accessibleMenus,
   speechDiagnostics,
   spatialAudio,
   audioResilience,
