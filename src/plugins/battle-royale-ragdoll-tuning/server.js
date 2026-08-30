@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-tuning",
-  version: "1.6.0",
+  version: "1.7.0",
   requires: ["battle-royale-ragdoll", "rapier-physics"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -27,9 +27,15 @@ const BASE_PHYSICS = Object.freeze({
 
 const DEFAULT_PROFILES = Object.freeze({
   "vehicle-eject": Object.freeze({
-    ...BASE_PHYSICS,
-    x: 4.8, y: 0.55, z: 3.8,
-    speedMode: "horizontal", scaleStartKph: 10, scaleSpanKph: 70, scaleMaxExtra: 2.5,
+    // Ejection spin is intentionally tied to the inherited horizontal vehicle
+    // speed. A slow jump-out still tumbles, but faster cars create proportionally
+    // stronger pitch/roll and keep that rotation longer in the air.
+    linearDamping: 0.014,
+    angularDamping: 0.008,
+    headAngularDamping: 0.012,
+    friction: 0.28,
+    x: 5.0, y: 0.60, z: 4.1,
+    speedMode: "horizontal", scaleStartKph: 8, scaleSpanKph: 46, scaleMaxExtra: 3.0,
   }),
   "vehicle-crash": Object.freeze({
     ...BASE_PHYSICS,
