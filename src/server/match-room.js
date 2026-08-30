@@ -10,6 +10,8 @@ import {
 } from "./room-lifecycle.js";
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
 
+const HOT_RECONNECT_KEEPALIVE_MS = 8000;
+
 function monotonicNow() {
   return typeof performance !== "undefined" && typeof performance.now === "function"
     ? performance.now()
@@ -40,6 +42,7 @@ export class MatchRoom extends DurableObject {
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
     this.disconnectedHumans = new Map();
+    this.hotReconnectUntil = 0;
     this.diagnosticsStats = freshDiagnosticsStats();
 
     ctx.blockConcurrencyWhile(async () => {
@@ -57,6 +60,7 @@ export class MatchRoom extends DurableObject {
         if (!attachment?.playerId) continue;
         try { this.game.api.connectHuman(attachment.playerId); } catch {}
       }
+      this.hotReconnectUntil = 0;
       this.startGameLoop();
     });
   }
@@ -134,11 +138,19 @@ export class MatchRoom extends DurableObject {
 
   runGameLoopTick() {
     if (!this.game) return;
+    const now = Date.now();
     if (!activeSocketCount(this.ctx.getWebSockets())) {
+      if (now < this.hotReconnectUntil) {
+        // Keep the Durable Object hot for a few seconds so a transient client
+        // network drop can reconnect to the same in-memory match. Pause game
+        // time while nobody is connected to avoid a large catch-up step.
+        this.lastStepAt = now;
+        return;
+      }
       this.stopGameLoop();
       return;
     }
-    const now = Date.now();
+    this.hotReconnectUntil = 0;
     const startedAt = monotonicNow();
     try {
       this.cleanupDisconnectedHumans(now);
@@ -183,6 +195,7 @@ export class MatchRoom extends DurableObject {
       sockets: activeSocketCount(this.ctx.getWebSockets()),
       disconnectedHumans: this.disconnectedHumans.size,
       loopRunning: Boolean(this.gameLoopTimer),
+      hotReconnectMsRemaining: Math.max(0, this.hotReconnectUntil - Date.now()),
       lastStepAt: this.lastStepAt,
       lastSnapshotAt: this.lastSnapshotAt,
       room: this.diagnosticsStats,
@@ -202,6 +215,8 @@ export class MatchRoom extends DurableObject {
     const mode = normalizeGameMode(requestUrl.searchParams.get("mode"));
     await this.ctx.storage.deleteAlarm();
     await this.ensureGame(mode);
+    this.hotReconnectUntil = 0;
+    this.lastStepAt = Date.now();
     this.cleanupDisconnectedHumans();
 
     const requestedPlayerId = normalizePlayerSessionId(requestUrl.searchParams.get("player"));
@@ -271,13 +286,15 @@ export class MatchRoom extends DurableObject {
   async scheduleCleanupIfEmpty(closingSocket = null) {
     const sockets = this.ctx.getWebSockets();
     if (activeSocketCount(sockets, closingSocket) > 0) return;
-    this.stopGameLoop();
+    this.hotReconnectUntil = Math.max(this.hotReconnectUntil, Date.now() + HOT_RECONNECT_KEEPALIVE_MS);
+    this.startGameLoop();
     await this.ctx.storage.setAlarm(cleanupDeadline());
   }
 
   async alarm() {
     if (activeSocketCount(this.ctx.getWebSockets()) > 0) {
       await this.ctx.storage.deleteAlarm();
+      this.hotReconnectUntil = 0;
       this.startGameLoop();
       return;
     }
@@ -288,6 +305,7 @@ export class MatchRoom extends DurableObject {
     }
     this.mode = null;
     this.disconnectedHumans.clear();
+    this.hotReconnectUntil = 0;
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
     this.diagnosticsStats = freshDiagnosticsStats();
