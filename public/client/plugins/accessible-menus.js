@@ -98,6 +98,7 @@ export async function setup(ctx) {
   let index = 0;
   let stack = [];
   let pendingNavigation = null;
+  let pendingRoomRule = null;
   let gamepadFrame = 0;
   let previousPadButtons = new Map();
   let twoFingerTimer = null;
@@ -190,6 +191,19 @@ export async function setup(ctx) {
     render({ announceTitle: true });
   }
 
+  function roomSocial() {
+    return latestSnapshot?.social ?? null;
+  }
+
+  function isRoomHost() {
+    const state = roomSocial();
+    return Boolean(state?.isHost || (state?.hostId && state.hostId === network.playerId));
+  }
+
+  function friendRamProtectionEnabled() {
+    return roomSocial()?.rules?.friendRamProtection !== false;
+  }
+
   function nearbyPlayers() {
     const self = latestSnapshot?.entities?.find((entity) => entity.id === network.playerId) ?? null;
     return (latestSnapshot?.entities ?? [])
@@ -203,12 +217,40 @@ export async function setup(ctx) {
   }
 
   function mainScreen() {
+    const items = [
+      { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
+    ];
+    if (isRoomHost()) {
+      items.push({ label: "Настройки комнаты", action: () => show(roomSettingsScreen(), { push: true }) });
+    }
+    items.push({ label: "Продолжить игру", action: () => closeMenu() });
     return {
       id: "main",
       title: "Главное меню",
+      items,
+    };
+  }
+
+  function roomSettingsScreen() {
+    const enabled = friendRamProtectionEnabled();
+    return {
+      id: "room-settings",
+      title: "Настройки комнаты. Вы главный организатор",
       items: [
-        { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
-        { label: "Продолжить игру", action: () => closeMenu() },
+        {
+          label: `Защита друзей от тарана: ${enabled ? "включена" : "выключена"}`,
+          action: () => {
+            const next = !friendRamProtectionEnabled();
+            pendingRoomRule = { key: "friendRamProtection", value: next };
+            if (latestSnapshot?.social?.rules) latestSnapshot.social.rules.friendRamProtection = next;
+            ctx.events.emit("input:changed", { reason: "social:room-rule:friendRamProtection" });
+            announce(`Защита друзей от тарана ${next ? "включена" : "выключена"}.`);
+            screen = roomSettingsScreen();
+            index = 0;
+            render();
+          },
+        },
+        { label: "Назад", action: goBack },
       ],
     };
   }
@@ -295,6 +337,7 @@ export async function setup(ctx) {
       title: "Карта",
       items: items.length
         ? items.map((target) => ({
+          targetId: String(target.id),
           label: `${target.name || "Точка"}. ${Math.max(0, Math.round(Number(target.distance) || 0))} метров${target.outsideSafeZone ? ". За пределами безопасной зоны" : ""}`,
           action: () => {
             pendingNavigation = {
@@ -350,13 +393,17 @@ export async function setup(ctx) {
 
   input.sample = () => {
     const base = open ? neutralizeGameplay(originalSample()) : originalSample();
-    const pending = pendingNavigation;
+    const navigation = pendingNavigation;
+    const roomRule = pendingRoomRule;
     pendingNavigation = null;
-    if (!pending) return base;
+    pendingRoomRule = null;
     return {
       ...base,
-      navigationSelectTargetId: pending.targetId,
-      navigationTogglePressed: Boolean(pending.activate),
+      ...(navigation ? {
+        navigationSelectTargetId: navigation.targetId,
+        navigationTogglePressed: Boolean(navigation.activate),
+      } : {}),
+      ...(roomRule ? { socialRoomRule: roomRule } : {}),
     };
   };
 
@@ -378,7 +425,6 @@ export async function setup(ctx) {
       return;
     }
     if (!open && event.code === "Enter") {
-      // Enter only confirms a choice inside the new menu system.
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
@@ -408,8 +454,8 @@ export async function setup(ctx) {
   mobile.menu?.addEventListener("click", () => open ? closeMenu() : openMain());
   mobile.map?.addEventListener("click", openMap);
 
-  function padButton(gamepad, index) {
-    return Boolean(gamepad?.buttons?.[index]?.pressed || (Number(gamepad?.buttons?.[index]?.value) || 0) >= 0.5);
+  function padButton(gamepad, buttonIndex) {
+    return Boolean(gamepad?.buttons?.[buttonIndex]?.pressed || (Number(gamepad?.buttons?.[buttonIndex]?.value) || 0) >= 0.5);
   }
 
   function padEdge(gamepad, buttonIndex) {
@@ -489,18 +535,33 @@ export async function setup(ctx) {
 
   ctx.events.on("game:snapshot", (snapshot) => {
     latestSnapshot = snapshot;
-    if (open && screen?.id === "map") {
+    if (!open) return;
+
+    if (screen?.id === "map") {
       const selectedId = selectedItem()?.targetId;
       screen = mapScreen();
       if (selectedId) {
         const found = currentItems().findIndex((item) => item.targetId === selectedId);
         if (found >= 0) index = found;
       }
+      return;
+    }
+
+    if (screen?.id === "room-settings") {
+      if (!isRoomHost()) {
+        screen = mainScreen();
+        index = 0;
+        announce("Вы больше не главный организатор комнаты.");
+      } else {
+        screen = roomSettingsScreen();
+      }
     }
   });
 
   ctx.events.on("network:disconnected", () => {
     latestSnapshot = null;
+    pendingNavigation = null;
+    pendingRoomRule = null;
     cancelTwoFingerHold();
     closeMenu({ announceClose: false });
   });
@@ -511,6 +572,7 @@ export async function setup(ctx) {
     close: closeMenu,
     get open() { return open; },
     get screen() { return screen?.id ?? null; },
+    get isRoomHost() { return isRoomHost(); },
   });
 
   gamepadFrame = requestAnimationFrame(pollGamepad);
