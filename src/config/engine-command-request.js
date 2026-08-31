@@ -1,11 +1,11 @@
-const TEST_HUMAN = "force-crash-test-human";
+const TEST_HUMAN = "force-crash-test-driver";
 const VEHICLE = "br-jeep-1";
-const TEST_NOW = 1788170700000;
+const TEST_NOW = 1788171000000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 227,
+  id: 228,
   mode: "battle-royale",
-  room: "force-crash-e2e-227",
+  room: "force-crash-e2e-228",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -19,8 +19,8 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
           method: "spawn",
           arguments: [{
             id: TEST_HUMAN,
-            kind: "human",
-            name: "Force Crash Test Human",
+            kind: "diagnostic-human",
+            name: "Force Crash Test Driver",
             bot: false,
             alive: true,
             health: 100,
@@ -58,5 +58,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "physics.stats", args: {} }
     ]
   },
-  requestedAt: "2026-08-31T13:00:00+03:00"
+  requestedAt: "2026-08-31T13:05:00+03:00"
 });
