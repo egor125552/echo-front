@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "3.2.0",
+  version: "3.3.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -459,6 +459,29 @@ async function createRapierPhysics() {
     return dynamicBodies.get(bodyId)?.body ?? null;
   }
 
+  function setDynamicBodyTranslation(bodyId, position = {}, wake = true) {
+    const body = dynamicBodies.get(bodyId)?.body;
+    if (!body) return null;
+    body.setTranslation({
+      x: Number(position.x) || 0,
+      y: Number(position.y) || 0,
+      z: Number(position.z) || 0,
+    }, Boolean(wake));
+    world.propagateModifiedBodyPositionsToColliders?.();
+    return dynamicBodyState(bodyId);
+  }
+
+  function setDynamicBodyLinearVelocity(bodyId, velocity = {}, wake = true) {
+    const body = dynamicBodies.get(bodyId)?.body;
+    if (!body) return null;
+    body.setLinvel({
+      x: Number(velocity.x) || 0,
+      y: Number(velocity.y) || 0,
+      z: Number(velocity.z) || 0,
+    }, Boolean(wake));
+    return dynamicBodyState(bodyId);
+  }
+
   function dynamicBodyState(bodyId) {
     const body = dynamicBody(bodyId);
     if (!body) return null;
@@ -732,6 +755,8 @@ async function createRapierPhysics() {
     addDynamicCuboidCollider,
     dynamicBody,
     dynamicBodyState,
+    setDynamicBodyTranslation,
+    setDynamicBodyLinearVelocity,
     removeDynamicBody,
     step,
     contactForceCursor() {
