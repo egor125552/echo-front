@@ -1,4 +1,4 @@
-const TEST_NOW = 1788171900000;
+const TEST_NOW = 1788172200000;
 const CASES = Object.freeze([
   { id: "br-jeep-1", z: 760, speed: 3 },
   { id: "br-jeep-2", z: 800, speed: 6 },
@@ -7,9 +7,9 @@ const CASES = Object.freeze([
 ]);
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 231,
+  id: 232,
   mode: "battle-royale",
-  room: "force-crash-low-speed-calibration-231",
+  room: "force-crash-shell-calibration-232",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -23,7 +23,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "game.step", args: { dt: 0.1, steps: 1, now: TEST_NOW } },
       ...CASES.map(({ id }) => ({
         command: "physics.contact-forces",
-        args: { limit: 16, bodyId: id, kind: "vehicle-chassis", impactsOnly: true }
+        args: { limit: 16, bodyId: id, kind: "vehicle-presence", impactsOnly: true }
       })),
       ...CASES.map(({ id }) => ({
         command: "service.call",
@@ -31,5 +31,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       }))
     ]
   },
-  requestedAt: "2026-08-31T13:20:00+03:00"
+  requestedAt: "2026-08-31T13:25:00+03:00"
 });
