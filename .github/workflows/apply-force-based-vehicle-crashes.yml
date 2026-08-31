@@ -1,0 +1,497 @@
+name: Apply force-based vehicle crashes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-force-based-vehicle-crashes.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply force-based crash integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def sub(path, pattern, replacement, flags=0):
+              p = Path(path)
+              text = p.read_text()
+              updated, count = re.subn(pattern, replacement, text, count=1, flags=flags)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected 1 replacement, got {count}: {pattern[:100]}")
+              p.write_text(updated)
+
+          # 1. Give every Rapier contact-force event a stable cursor so gameplay can
+          # consume exactly the contacts produced by one simulation tick.
+          p = 'src/plugins/rapier-physics/server.js'
+          sub(p, r'version: "3\.1\.0"', 'version: "3.2.0"')
+          sub(p, r'const record = \{\n        at: Date\.now\(\),', 'const record = {\n        sequence: contactForceEventCount + 1,\n        at: Date.now(),')
+          sub(p, r'    contactForces\(limit = 16, options = \{\}\) \{', '    contactForceCursor() { return contactForceEventCount; },\n    contactForces(limit = 16, options = {}) {')
+
+          # 2. Primary vehicle: convert real solver force into one shared crash severity.
+          p = 'src/plugins/battle-royale-vehicle/server.js'
+          sub(p, r'export const VEHICLE_PHYSICS_STEP = 1 / 60;\n', '''export const VEHICLE_PHYSICS_STEP = 1 / 60;
+export const VEHICLE_TOTAL_MASS = VEHICLE_CHASSIS_MASS + 420;
+export const VEHICLE_FORCE_EVENT_MIN_SPEED = 2.5;
+
+export function vehicleCrashMetrics(forceMagnitude, {
+  totalMass = VEHICLE_TOTAL_MASS,
+  deltaSpeed = 0,
+  speedBefore = 0,
+} = {}) {
+  const mass = Math.max(1, Number(totalMass) || VEHICLE_TOTAL_MASS);
+  const force = Math.max(0, Number(forceMagnitude) || 0);
+  const forceRatio = force / (mass * 9.81);
+  // Force is the primary signal. Speed terms only stabilize gameplay around
+  // glancing contacts and solver spikes; they no longer define the crash alone.
+  const forceSeverity = Math.max(0, forceRatio - 1.25) * 5.2;
+  const deltaBias = clamp((Number(deltaSpeed) || 0) * 0.18, 0, 3);
+  const speedBias = clamp(((Number(speedBefore) || 0) - 12) * 0.06, 0, 2);
+  const severity = clamp(forceSeverity + deltaBias + speedBias, 0, 45);
+  const tier = severity >= 28 ? "critical"
+    : severity >= 16 ? "severe"
+      : severity >= 8 ? "moderate"
+        : severity >= 4 ? "light"
+          : "bump";
+  return { force, forceRatio, severity, tier };
+}
+''')
+          sub(p, r'  function tickPhysics\(dt, now = Date\.now\(\)\) \{.*?\n  \}\n\n  ctx\.events\.on\("entity:died"', '''  function tickPhysics(dt, now = Date.now()) {
+    const safeDt = clamp(dt, 0, 0.1);
+    if (!(safeDt > 0)) return;
+    const contactCursor = Number(physics.contactForceCursor?.()) || 0;
+    const speedBeforeTick = previousSpeed;
+    updateNitroState(safeDt, now);
+    const substeps = Math.max(1, Math.min(6, Math.ceil(safeDt / VEHICLE_PHYSICS_STEP)));
+    const subDt = safeDt / substeps;
+    for (let i = 0; i < substeps; i += 1) {
+      applyWheelControls();
+      controller.updateVehicle(
+        subDt,
+        RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined,
+        collider => !physics.isCharacterCollider(collider),
+      );
+      physics.step(subDt);
+      physicsFrames += 1;
+    }
+
+    const speed = speedMetersPerSecond();
+    const delta = Math.max(0, speedBeforeTick - speed);
+    peakImpactDelta = Math.max(peakImpactDelta * 0.985, delta);
+
+    const forceImpact = (physics.contactForces?.(64, {
+      bodyId: VEHICLE_ID,
+      impactsOnly: true,
+    }) ?? [])
+      .filter((record) => (Number(record.sequence) || 0) > contactCursor)
+      .sort((a, b) => (Number(b.totalForceMagnitude) || 0) - (Number(a.totalForceMagnitude) || 0))[0] ?? null;
+
+    const metrics = forceImpact
+      ? vehicleCrashMetrics(forceImpact.totalForceMagnitude, {
+        totalMass: VEHICLE_TOTAL_MASS,
+        deltaSpeed: delta,
+        speedBefore: speedBeforeTick,
+      })
+      : null;
+    const forceBacked = Boolean(
+      driverId
+      && speedBeforeTick >= VEHICLE_FORCE_EVENT_MIN_SPEED
+      && metrics
+      && metrics.severity >= 1.25
+    );
+    const speedFallback = Boolean(
+      driverId
+      && !forceImpact
+      && delta >= 5.5
+      && speedBeforeTick >= 7
+    );
+
+    if (forceBacked || speedFallback) {
+      const body = bodyState();
+      const fallbackSeverity = clamp(delta * 1.1, 0, 45);
+      ctx.events.emit("vehicle:impact", {
+        vehicleId: VEHICLE_ID,
+        driverId,
+        impactSource: forceBacked ? "rapier-contact-force" : "speed-fallback",
+        crashSeverity: forceBacked ? metrics.severity : fallbackSeverity,
+        crashTier: forceBacked ? metrics.tier : (fallbackSeverity >= 16 ? "severe" : fallbackSeverity >= 8 ? "moderate" : "light"),
+        contactForceMagnitude: forceBacked ? metrics.force : null,
+        maxContactForceMagnitude: forceBacked ? (Number(forceImpact.maxForceMagnitude) || 0) : null,
+        forceRatio: forceBacked ? metrics.forceRatio : null,
+        contactSequence: forceBacked ? forceImpact.sequence : null,
+        contactDirection: forceBacked ? forceImpact.maxForceDirection ?? null : null,
+        deltaSpeed: delta,
+        speedBefore: speedBeforeTick,
+        speedAfter: speed,
+        x: body?.x ?? 0,
+        y: body?.y ?? 0,
+        z: body?.z ?? 0,
+        now,
+      });
+    }
+    previousSpeed = speed;
+    syncDriver();
+  }
+
+  ctx.events.on("entity:died"''', flags=re.S)
+          sub(p, r'    tickPhysics,\n    isDriving', '''    tickPhysics,
+    crashMetricsForForce(forceMagnitude, options = {}) {
+      return vehicleCrashMetrics(forceMagnitude, options);
+    },
+    isDriving''')
+
+          # 3. Fleet vehicles use the same primary service formula and emit only one
+          # strongest solver-backed crash per game tick.
+          p = 'src/plugins/battle-royale-vehicle-fleet/server.js'
+          sub(p, r'  function finishExtraSubstep\(entry, now\) \{.*?\n  function driverId\(vehicleId = primaryId\)', '''  function finishExtraSubstep(entry) {
+    const speed = speedMetersPerSecond(entry);
+    const delta = Math.max(0, entry.previousSpeed - speed);
+    entry.tickPeakDelta = Math.max(Number(entry.tickPeakDelta) || 0, delta);
+    entry.peakImpactDelta = Math.max(entry.peakImpactDelta * 0.985, delta);
+    entry.previousSpeed = speed;
+    entry.physicsFrames += 1;
+  }
+
+  function emitExtraCrash(entry, speedBefore, speedAfter, contactCursor, now) {
+    if (!entry.driverId) return;
+    const delta = Math.max(0, Number(entry.tickPeakDelta) || 0, speedBefore - speedAfter);
+    const forceImpact = (physics.contactForces?.(64, {
+      bodyId: entry.id,
+      impactsOnly: true,
+    }) ?? [])
+      .filter((record) => (Number(record.sequence) || 0) > contactCursor)
+      .sort((a, b) => (Number(b.totalForceMagnitude) || 0) - (Number(a.totalForceMagnitude) || 0))[0] ?? null;
+    const totalMass = entry.tuning.chassis.mass + entry.tuning.chassis.ballastMass;
+    const metrics = forceImpact
+      ? vehicles.crashMetricsForForce?.(forceImpact.totalForceMagnitude, {
+        totalMass,
+        deltaSpeed: delta,
+        speedBefore,
+      })
+      : null;
+    const forceBacked = Boolean(speedBefore >= 2.5 && metrics && metrics.severity >= 1.25);
+    const speedFallback = Boolean(!forceImpact && delta >= 5.5 && speedBefore >= 7);
+    if (!forceBacked && !speedFallback) return;
+
+    const body = bodyState(entry);
+    const fallbackSeverity = clamp(delta * 1.1, 0, 45);
+    ctx.events.emit("vehicle:impact", {
+      vehicleId: entry.id,
+      vehicleKind: entry.tuning.kind,
+      driverId: entry.driverId,
+      impactSource: forceBacked ? "rapier-contact-force" : "speed-fallback",
+      crashSeverity: forceBacked ? metrics.severity : fallbackSeverity,
+      crashTier: forceBacked ? metrics.tier : (fallbackSeverity >= 16 ? "severe" : fallbackSeverity >= 8 ? "moderate" : "light"),
+      contactForceMagnitude: forceBacked ? metrics.force : null,
+      maxContactForceMagnitude: forceBacked ? (Number(forceImpact.maxForceMagnitude) || 0) : null,
+      forceRatio: forceBacked ? metrics.forceRatio : null,
+      contactSequence: forceBacked ? forceImpact.sequence : null,
+      contactDirection: forceBacked ? forceImpact.maxForceDirection ?? null : null,
+      deltaSpeed: delta,
+      speedBefore,
+      speedAfter,
+      x: body?.x ?? 0,
+      y: body?.y ?? 0,
+      z: body?.z ?? 0,
+      now,
+    });
+  }
+
+  function tickPhysics(dt, now = Date.now()) {
+    const safeDt = clamp(dt, 0, 0.1);
+    if (!(safeDt > 0)) return;
+    const contactCursor = Number(physics.contactForceCursor?.()) || 0;
+    const speedBeforeTick = new Map();
+    for (const entry of extras.values()) {
+      updateExtraNitro(entry, safeDt, now);
+      speedBeforeTick.set(entry.id, entry.previousSpeed);
+      entry.tickPeakDelta = 0;
+    }
+
+    // The original jeep owns the shared physics stepping loop. Wrap each one of
+    // those real Rapier substeps so every additional vehicle controller computes
+    // wheel forces before the world advances. The world itself still steps once.
+    const originalPhysicsStep = physics.step;
+    physics.step = (subDt = PHYSICS_STEP) => {
+      for (const entry of extras.values()) {
+        applyExtraWheelControls(entry);
+        entry.controller.updateVehicle(
+          subDt,
+          RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC | RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+          undefined,
+          collider => !physics.isCharacterCollider(collider),
+        );
+      }
+      const result = originalPhysicsStep(subDt);
+      for (const entry of extras.values()) finishExtraSubstep(entry);
+      return result;
+    };
+    try {
+      originalTickPhysics(safeDt, now);
+    } finally {
+      physics.step = originalPhysicsStep;
+    }
+
+    for (const entry of extras.values()) {
+      emitExtraCrash(
+        entry,
+        Math.max(0, Number(speedBeforeTick.get(entry.id)) || 0),
+        speedMetersPerSecond(entry),
+        contactCursor,
+        now,
+      );
+      syncExtraDriver(entry);
+    }
+  }
+
+  function driverId(vehicleId = primaryId)''', flags=re.S)
+
+          # 4. Parkour/ejection uses force severity when present; old speed thresholds
+          # remain as a compatibility fallback.
+          p = 'src/plugins/battle-royale-parkour-ragdoll/server.js'
+          sub(p, r'export const VEHICLE_CRASH_MIN_DELTA = 6\.5;\n', '''export const VEHICLE_CRASH_MIN_DELTA = 6.5;
+export const VEHICLE_CRASH_FORCE_MIN_SPEED = 5.0;
+export const VEHICLE_CRASH_FORCE_MIN_SEVERITY = 6.5;
+''')
+          sub(p, r'  ctx\.events\.on\("vehicle:impact", \(payload = \{\}\) => \{.*?\n  \}\);\n\n  function processBuildingImpacts', '''  ctx.events.on("vehicle:impact", (payload = {}) => {
+    const entityId = payload.driverId;
+    if (!entityId) return;
+    const speedBefore = Math.max(0, Number(payload.speedBefore) || 0);
+    const deltaSpeed = Math.max(0, Number(payload.deltaSpeed) || 0);
+    const crashSeverity = Math.max(0, Number(payload.crashSeverity) || 0);
+    const forceBacked = payload.impactSource === "rapier-contact-force" && crashSeverity > 0;
+    if (forceBacked) {
+      if (speedBefore < VEHICLE_CRASH_FORCE_MIN_SPEED || crashSeverity < VEHICLE_CRASH_FORCE_MIN_SEVERITY) return;
+    } else if (speedBefore < VEHICLE_CRASH_MIN_SPEED || deltaSpeed < VEHICLE_CRASH_MIN_DELTA) {
+      return;
+    }
+    const current = pendingVehicleImpacts.get(entityId);
+    const score = forceBacked ? crashSeverity : deltaSpeed;
+    const currentScore = current ? (current.forceBacked ? current.crashSeverity : current.deltaSpeed) : -Infinity;
+    if (!current || score > currentScore) {
+      pendingVehicleImpacts.set(entityId, {
+        entityId,
+        vehicleId: payload.vehicleId ?? null,
+        speedBefore,
+        speedAfter: Math.max(0, Number(payload.speedAfter) || 0),
+        deltaSpeed,
+        forceBacked,
+        crashSeverity: forceBacked ? crashSeverity : Math.max(0, deltaSpeed * 1.1),
+        crashTier: payload.crashTier ?? null,
+        contactForceMagnitude: Number.isFinite(Number(payload.contactForceMagnitude)) ? Number(payload.contactForceMagnitude) : null,
+        maxContactForceMagnitude: Number.isFinite(Number(payload.maxContactForceMagnitude)) ? Number(payload.maxContactForceMagnitude) : null,
+        forceRatio: Number.isFinite(Number(payload.forceRatio)) ? Number(payload.forceRatio) : null,
+        contactSequence: Number.isFinite(Number(payload.contactSequence)) ? Number(payload.contactSequence) : null,
+        impactSource: payload.impactSource ?? "speed-fallback",
+      });
+    }
+  });
+
+  function processBuildingImpacts''', flags=re.S)
+          sub(p, r'  function processVehicleImpacts\(now\) \{.*?\n    pendingVehicleImpacts\.clear\(\);\n  \}', '''  function processVehicleImpacts(now) {
+    for (const impact of pendingVehicleImpacts.values()) {
+      const entity = entities.get(impact.entityId);
+      const vehicle = vehicles.stateFor(impact.vehicleId ?? undefined);
+      if (!entity?.alive || entity.bot || !vehicle || vehicle.driverId !== impact.entityId || ragdoll.isActive(impact.entityId)) continue;
+
+      const angle = Number(vehicle.angle) || 0;
+      const axes = basis(angle);
+      const direction = Number(vehicle.forwardSpeed) < -0.25 ? -1 : 1;
+      const severity = Math.max(0, Number(impact.crashSeverity) || impact.deltaSpeed);
+      const carryScale = 0.52 + clamp(severity / 30, 0, 0.28);
+      const carrySpeed = Math.min(55, impact.speedBefore * carryScale);
+      const upward = 0.9 + Math.min(4.2, severity * 0.18);
+
+      if (!vehicles.exit(impact.entityId, now, "crash-eject")) continue;
+      const transform = ctx.components.get(impact.entityId, "Transform");
+      if (!transform) continue;
+
+      const activated = ragdoll.activate(impact.entityId, {
+        reason: "vehicle-crash",
+        position: { x: transform.x, y: transform.y + 0.18, z: transform.z },
+        angle,
+        velocity: {
+          x: axes.forward.x * carrySpeed * direction,
+          y: upward,
+          z: axes.forward.z * carrySpeed * direction,
+        },
+      }, now);
+      if (!activated) continue;
+
+      stability.applyVelocityDeltaToLatest({
+        x: axes.forward.x * Math.min(5.0, severity * 0.22) * direction,
+        y: 1.0 + Math.min(4.0, severity * 0.19),
+        z: axes.forward.z * Math.min(5.0, severity * 0.22) * direction,
+      }, 16);
+      crashEjections += 1;
+      ctx.events.emit("ragdoll:vehicle-crash-eject", {
+        entityId: impact.entityId,
+        vehicleId: impact.vehicleId,
+        impactSource: impact.impactSource,
+        crashSeverity: severity,
+        crashTier: impact.crashTier,
+        contactForceMagnitude: impact.contactForceMagnitude,
+        maxContactForceMagnitude: impact.maxContactForceMagnitude,
+        forceRatio: impact.forceRatio,
+        contactSequence: impact.contactSequence,
+        speedBefore: impact.speedBefore,
+        speedAfter: impact.speedAfter,
+        deltaSpeed: impact.deltaSpeed,
+        x: transform.x,
+        y: transform.y,
+        z: transform.z,
+        now,
+      });
+    }
+    pendingVehicleImpacts.clear();
+  }''', flags=re.S)
+          sub(p, r'          vehicleCrashMinDelta: VEHICLE_CRASH_MIN_DELTA,', '''          vehicleCrashMinDelta: VEHICLE_CRASH_MIN_DELTA,
+          vehicleCrashForceMinSpeed: VEHICLE_CRASH_FORCE_MIN_SPEED,
+          vehicleCrashForceMinSeverity: VEHICLE_CRASH_FORCE_MIN_SEVERITY,''')
+
+          # 5. Immediate HP damage comes from the same force severity. Subsequent
+          # ragdoll body impacts still use the existing body-part damage model.
+          p = 'src/plugins/battle-royale-ragdoll-damage/server.js'
+          sub(p, r'version: "1\.1\.0"', 'version: "1.2.0"')
+          sub(p, r'function damageForSeverity\(severity\) \{(.*?)\n\}\n\nexport async function setup', r'''function damageForSeverity(severity) {\1
+}
+
+function vehicleCrashDamageForSeverity(severity) {
+  const s = Math.max(0, Number(severity) || 0);
+  const base = damageForSeverity(s);
+  if (base <= 0) return 0;
+  const scale = clamp(0.58 + s / 120, 0.60, 0.82);
+  return Math.min(80, Math.round(base * scale));
+}
+
+export async function setup''', flags=re.S)
+          sub(p, r'  let throttledHits = 0;\n', '''  let throttledHits = 0;
+  let vehicleCrashHits = 0;
+  let vehicleCrashDamage = 0;
+''')
+          sub(p, r'  ctx\.events\.on\("ragdoll:ended",', '''  ctx.events.on("ragdoll:vehicle-crash-eject", (payload = {}) => {
+    if (!payload.entityId || payload.impactSource !== "rapier-contact-force") return;
+    const severity = Math.max(0, Number(payload.crashSeverity) || 0);
+    const damage = vehicleCrashDamageForSeverity(severity);
+    if (damage <= 0) return;
+    const result = health.applyDamage(payload.entityId, damage, {
+      attackerId: null,
+      weaponId: "vehicle-crash-force",
+      now: Number(payload.now) || Date.now(),
+    });
+    if ((Number(result.applied) || 0) > 0) vehicleCrashHits += 1;
+    vehicleCrashDamage += Number(result.applied) || 0;
+  });
+
+  ctx.events.on("ragdoll:ended",''')
+          sub(p, r'    damageForSeverity,\n    estimate', '''    damageForSeverity,
+    vehicleCrashDamageForSeverity,
+    estimate''')
+          sub(p, r'        throttledHits,\n        intervalMs:', '''        throttledHits,
+        vehicleCrashHits,
+        vehicleCrashDamage,
+        intervalMs:''')
+
+          # 6. Crash audio uses the same severity field. Keep deltaSpeed fallback for
+          # older events and non-force implementations.
+          for p in ['client/plugins/battle-royale-vehicle-audio.js', 'public/client/plugins/battle-royale-vehicle-audio.js']:
+              sub(p, r'''  ctx\.events\.on\("game:event", \(packet\) => \{\n    if \(packet\.event !== "vehicle:impact"\) return;\n    const payload = packet\.payload \?\? \{\};\n    const delta = Math\.max\(0, Number\(payload\.deltaSpeed\) \|\| 0\);\n    if \(delta < 3\.2\) return;\n    void audio\.resume\(\);\n    audio\.playSpatialBuffer\(crashBuffer, payload, \{\n      radius: CRASH_RADIUS,\n      gain: clamp\(0\.28 \+ delta / 13, 0\.35, 1\.15\),\n      referenceDistance: 2\.5,\n      rolloffFactor: 0\.42,\n      airAbsorptionMinHz: 3900,\n      loop: false,\n    \}\);\n  \}\);''', '''  ctx.events.on("game:event", (packet) => {
+    if (packet.event !== "vehicle:impact") return;
+    const payload = packet.payload ?? {};
+    const forceSeverity = Math.max(0, Number(payload.crashSeverity) || 0);
+    const delta = Math.max(0, Number(payload.deltaSpeed) || 0);
+    const strength = payload.impactSource === "rapier-contact-force" && forceSeverity > 0
+      ? forceSeverity
+      : delta;
+    if (strength < 1.6) return;
+    void audio.resume();
+    audio.playSpatialBuffer(crashBuffer, payload, {
+      radius: CRASH_RADIUS * clamp(0.78 + strength / 45, 0.8, 1.35),
+      gain: clamp(0.24 + strength / 18, 0.3, 1.2),
+      referenceDistance: 2.5,
+      rolloffFactor: 0.42,
+      airAbsorptionMinHz: 3900,
+      loop: false,
+    });
+  });''')
+
+          # 7. Haptics prefer solver-derived severity instead of speedBefore, which
+          # previously made tiny high-speed scrapes feel like huge crashes.
+          p = 'public/client/plugins/gamepad-haptics.js'
+          sub(p, r'function impactStrength\(payload = \{\}\) \{.*?\n\}', '''function impactStrength(payload = {}) {
+  const forceSeverity = Number(payload.crashSeverity);
+  if (Number.isFinite(forceSeverity) && forceSeverity > 0) return forceSeverity;
+  return Math.max(
+    0,
+    Number(payload.deltaSpeed) || 0,
+    Number(payload.impactSpeed) || 0,
+    Number(payload.speedBefore) || 0,
+    Number(payload.speed) || 0,
+  );
+}''', flags=re.S)
+          sub(p, r'''    if \(packet\.event === "vehicle:impact" && payload\.driverId === self\) \{\n      const impact = impactStrength\(payload\);\n      const amount = clamp01\(\(impact - 2\.5\) / 14\);\n      if \(amount <= 0\) return;\n      rumble\(\{\n        duration: 90 \+ amount \* 210,\n        weak: 0\.32 \+ amount \* 0\.52,\n        strong: 0\.5 \+ amount \* 0\.5,\n      \}\);\n      return;\n    \}''', '''    if (packet.event === "vehicle:impact" && payload.driverId === self) {
+      const impact = impactStrength(payload);
+      const forceBacked = payload.impactSource === "rapier-contact-force";
+      const amount = forceBacked
+        ? clamp01((impact - 1.25) / 24)
+        : clamp01((impact - 2.5) / 14);
+      if (amount <= 0) return;
+      rumble({
+        duration: 75 + amount * 235,
+        weak: 0.24 + amount * 0.60,
+        strong: 0.38 + amount * 0.62,
+      });
+      return;
+    }''')
+
+          # Bump diagnostics revision so snapshots make the semantic change visible.
+          p = 'src/config/engine-diagnostics.js'
+          sub(p, r'revision: 5,', 'revision: 6,')
+          print('force-based crash integration transformed')
+          PY
+
+          node --check src/plugins/rapier-physics/server.js
+          node --check src/plugins/battle-royale-vehicle/server.js
+          node --check src/plugins/battle-royale-vehicle-fleet/server.js
+          node --check src/plugins/battle-royale-parkour-ragdoll/server.js
+          node --check src/plugins/battle-royale-ragdoll-damage/server.js
+          node --check client/plugins/battle-royale-vehicle-audio.js
+          node --check public/client/plugins/battle-royale-vehicle-audio.js
+          node --check public/client/plugins/gamepad-haptics.js
+          node --check src/config/engine-diagnostics.js
+          git diff --check
+      - name: Commit verified integration and remove installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Echo Front Engine Control'
+          git config user.email 'actions@users.noreply.github.com'
+          git add \
+            src/plugins/rapier-physics/server.js \
+            src/plugins/battle-royale-vehicle/server.js \
+            src/plugins/battle-royale-vehicle-fleet/server.js \
+            src/plugins/battle-royale-parkour-ragdoll/server.js \
+            src/plugins/battle-royale-ragdoll-damage/server.js \
+            client/plugins/battle-royale-vehicle-audio.js \
+            public/client/plugins/battle-royale-vehicle-audio.js \
+            public/client/plugins/gamepad-haptics.js \
+            src/config/engine-diagnostics.js
+          git rm -f .github/workflows/apply-force-based-vehicle-crashes.yml
+          git diff --cached --check
+          git commit -m 'Drive vehicle crash effects from Rapier force'
+          git push
