@@ -27,9 +27,15 @@ export function vehicleCrashMetrics(forceMagnitude, {
   // Rapier force is the primary signal. The speed terms are deliberately small:
   // they stabilize glancing contacts and solver spikes without taking severity
   // back to the old delta-speed-only model.
-  const forceSeverity = Math.max(0, forceRatio - 1.25) * 5.2;
-  const deltaBias = clamp((Number(deltaSpeed) || 0) * 0.18, 0, 3);
-  const speedBias = clamp(((Number(speedBefore) || 0) - 12) * 0.06, 0, 2);
+  // Calibrated from real Engine Control wall impacts on the 1800 kg off-road
+  // vehicle. Raw contact force grows much faster than perceived crash severity:
+  // roughly 319 kN at 10.8 km/h, 692 kN at 21.6, 1.30 MN at 39.6 and
+  // 2.16 MN at 64.8. A linear force-to-severity mapping therefore saturated
+  // almost every useful crash. Compress that range with a sub-linear power curve
+  // while keeping vehicle mass normalization so lighter/heavier cars remain fair.
+  const forceSeverity = 0.65 * Math.pow(Math.max(0, forceRatio - 8), 0.78);
+  const deltaBias = clamp((Number(deltaSpeed) || 0) * 0.12, 0, 2.5);
+  const speedBias = clamp(((Number(speedBefore) || 0) - 10) * 0.05, 0, 1.5);
   const severity = clamp(forceSeverity + deltaBias + speedBias, 0, 45);
   const tier = severity >= 28 ? "critical"
     : severity >= 16 ? "severe"
@@ -41,7 +47,7 @@ export function vehicleCrashMetrics(forceMagnitude, {
 
 export const manifest = {
   id: "battle-royale-vehicle",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["rapier-physics", "movement", "entities", "battle-royale", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
