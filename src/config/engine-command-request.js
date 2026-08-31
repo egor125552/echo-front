@@ -1,8 +1,8 @@
 const VEHICLE = "br-jeep-1";
-const TEST_NOW = 1788173100000;
+const TEST_NOW = 1788173400000;
 const CASES = Object.freeze([
-  { id: "force-crash-driver-11kph", name: "Crash Driver 11 kmh", speed: 3, offset: 0 },
-  { id: "force-crash-driver-22kph", name: "Crash Driver 22 kmh", speed: 6, offset: 1000 },
+  { id: "force-crash-driver-29kph", name: "Crash Driver 29 kmh", speed: 8, offset: 0 },
+  { id: "force-crash-driver-40kph", name: "Crash Driver 40 kmh", speed: 11, offset: 1000 },
 ]);
 
 function crashCase({ id, name, speed, offset }) {
@@ -42,9 +42,9 @@ function crashCase({ id, name, speed, offset }) {
 }
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 235,
+  id: 236,
   mode: "battle-royale",
-  room: "force-crash-low-speed-sweep-235",
+  room: "force-crash-mid-speed-sweep-236",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -55,5 +55,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "service.call", args: { service: "ragdoll-damage-model", method: "summary", arguments: [] } },
     ]
   },
-  requestedAt: "2026-08-31T13:40:00+03:00"
+  requestedAt: "2026-08-31T13:45:00+03:00"
 });
