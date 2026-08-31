@@ -1,11 +1,12 @@
 export const manifest = {
   id: "battle-royale-ragdoll-damage",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["health"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
 
 const RAGDOLL_DAMAGE_INTERVAL_MS = 420;
+const VEHICLE_CRASH_DAMAGE_INTERVAL_MS = 650;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -40,11 +41,13 @@ export async function setup(ctx) {
   const health = ctx.services.get("health");
   const latestImpact = new Map();
   const lastDamageAt = new Map();
+  const lastVehicleCrashAt = new Map();
   let adjustedHits = 0;
   let adjustedDamage = 0;
   let throttledHits = 0;
   let vehicleCrashHits = 0;
   let vehicleCrashDamage = 0;
+  let vehicleCrashThrottled = 0;
 
   ctx.events.on("ragdoll:impact", (impact = {}) => {
     if (!impact.entityId) return;
@@ -56,15 +59,22 @@ export async function setup(ctx) {
     });
   });
 
-  ctx.events.on("ragdoll:vehicle-crash-eject", (payload = {}) => {
+  ctx.events.on("vehicle:occupant-crash-trauma", (payload = {}) => {
     if (!payload.entityId || payload.impactSource !== "rapier-contact-force") return;
     const severity = Math.max(0, Number(payload.crashSeverity) || 0);
     const damage = vehicleCrashDamageForSeverity(severity);
     if (damage <= 0) return;
+    const now = Number(payload.now) || Date.now();
+    const previous = Number(lastVehicleCrashAt.get(payload.entityId)) || -Infinity;
+    if (now - previous < VEHICLE_CRASH_DAMAGE_INTERVAL_MS) {
+      vehicleCrashThrottled += 1;
+      return;
+    }
+    lastVehicleCrashAt.set(payload.entityId, now);
     const result = health.applyDamage(payload.entityId, damage, {
       attackerId: null,
       weaponId: "vehicle-crash-force",
-      now: Number(payload.now) || Date.now(),
+      now,
     });
     if ((Number(result.applied) || 0) > 0) vehicleCrashHits += 1;
     vehicleCrashDamage += Number(result.applied) || 0;
@@ -77,6 +87,7 @@ export async function setup(ctx) {
   ctx.events.on("entity:removed", ({ entityId }) => {
     latestImpact.delete(entityId);
     lastDamageAt.delete(entityId);
+    lastVehicleCrashAt.delete(entityId);
   });
 
   const originalApplyDamage = health.applyDamage.bind(health);
@@ -121,7 +132,9 @@ export async function setup(ctx) {
         throttledHits,
         vehicleCrashHits,
         vehicleCrashDamage,
+        vehicleCrashThrottled,
         intervalMs: RAGDOLL_DAMAGE_INTERVAL_MS,
+        vehicleCrashIntervalMs: VEHICLE_CRASH_DAMAGE_INTERVAL_MS,
         trackedImpacts: latestImpact.size,
       };
     },

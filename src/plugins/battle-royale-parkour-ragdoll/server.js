@@ -7,12 +7,14 @@ export const VEHICLE_CRASH_MIN_SPEED = 9.5;
 export const VEHICLE_CRASH_MIN_DELTA = 6.5;
 export const VEHICLE_CRASH_FORCE_MIN_SPEED = 5.0;
 export const VEHICLE_CRASH_FORCE_MIN_SEVERITY = 6.5;
+export const VEHICLE_CRASH_EJECT_MIN_SPEED = 8.0;
+export const VEHICLE_CRASH_EJECT_MIN_SEVERITY = 12.0;
 export const PARKOUR_FLIP_SPEED = 8.8;
 export const PARKOUR_TUCK_SPEED = 4.2;
 
 export const manifest = {
   id: "battle-royale-parkour-ragdoll",
-  version: "1.3.0",
+  version: "1.4.0",
   requires: [
     "match-api",
     "battle-royale",
@@ -182,6 +184,7 @@ export async function setup(ctx) {
   let buildingContacts = 0;
   let buildingBraces = 0;
   let buildingFalls = 0;
+  let crashTraumas = 0;
   let crashEjections = 0;
 
   function collectBodyHandles() {
@@ -425,10 +428,36 @@ export async function setup(ctx) {
       const vehicle = vehicles.stateFor(impact.vehicleId ?? undefined);
       if (!entity?.alive || entity.bot || !vehicle || vehicle.driverId !== impact.entityId || ragdoll.isActive(impact.entityId)) continue;
 
+      const severity = Math.max(0, Number(impact.crashSeverity) || impact.deltaSpeed);
+      crashTraumas += 1;
+      ctx.events.emit("vehicle:occupant-crash-trauma", {
+        entityId: impact.entityId,
+        vehicleId: impact.vehicleId,
+        impactSource: impact.impactSource,
+        crashSeverity: severity,
+        crashTier: impact.crashTier,
+        contactForceMagnitude: impact.contactForceMagnitude,
+        maxContactForceMagnitude: impact.maxContactForceMagnitude,
+        forceRatio: impact.forceRatio,
+        contactSequence: impact.contactSequence,
+        speedBefore: impact.speedBefore,
+        speedAfter: impact.speedAfter,
+        deltaSpeed: impact.deltaSpeed,
+        x: Number(vehicle.x) || 0,
+        y: Number(vehicle.y) || 0,
+        z: Number(vehicle.z) || 0,
+        now,
+      });
+
+      const shouldEject = impact.forceBacked
+        ? impact.speedBefore >= VEHICLE_CRASH_EJECT_MIN_SPEED
+          && severity >= VEHICLE_CRASH_EJECT_MIN_SEVERITY
+        : true;
+      if (!shouldEject) continue;
+
       const angle = Number(vehicle.angle) || 0;
       const axes = basis(angle);
       const direction = Number(vehicle.forwardSpeed) < -0.25 ? -1 : 1;
-      const severity = Math.max(0, Number(impact.crashSeverity) || impact.deltaSpeed);
       const carryScale = 0.52 + clamp(severity / 30, 0, 0.28);
       const carrySpeed = Math.min(55, impact.speedBefore * carryScale);
       const upward = 0.9 + Math.min(4.2, severity * 0.18);
@@ -501,6 +530,7 @@ export async function setup(ctx) {
         buildingContacts,
         buildingBraces,
         buildingFalls,
+        crashTraumas,
         crashEjections,
         thresholds: {
           buildingImpactMinSpeed: BUILDING_IMPACT_MIN_SPEED,
@@ -512,6 +542,8 @@ export async function setup(ctx) {
           vehicleCrashMinDelta: VEHICLE_CRASH_MIN_DELTA,
           vehicleCrashForceMinSpeed: VEHICLE_CRASH_FORCE_MIN_SPEED,
           vehicleCrashForceMinSeverity: VEHICLE_CRASH_FORCE_MIN_SEVERITY,
+          vehicleCrashEjectMinSpeed: VEHICLE_CRASH_EJECT_MIN_SPEED,
+          vehicleCrashEjectMinSeverity: VEHICLE_CRASH_EJECT_MIN_SEVERITY,
           parkourFlipSpeed: PARKOUR_FLIP_SPEED,
         },
       };
