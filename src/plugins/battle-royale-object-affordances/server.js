@@ -1,9 +1,10 @@
 export const manifest = {
   id: "battle-royale-object-affordances",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: [
     "battle-royale-building-factory",
     "battle-royale-vehicle-fleet",
+    "battle-royale-crate-physics",
     "rapier-physics",
     "map-test-arena",
     "movement",
@@ -48,8 +49,8 @@ function doorDistance(actor, door) {
 }
 
 function crateDistance(actor, crate) {
-  const hx = Math.max(0.82, Math.abs(finite(crate.hx, 0.9)));
-  const hz = Math.max(0.62, Math.abs(finite(crate.hz, 0.7)));
+  const hx = Math.max(0.72, Math.abs(finite(crate.hx, 0.72)));
+  const hz = Math.max(0.52, Math.abs(finite(crate.hz, 0.52)));
   const dx = distanceToInterval(finite(actor.x), finite(crate.x) - hx, finite(crate.x) + hx);
   const dz = distanceToInterval(finite(actor.z), finite(crate.z) - hz, finite(crate.z) + hz);
   return Math.hypot(dx, dz);
@@ -93,6 +94,7 @@ export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const map = ctx.services.get("map");
   const vehicles = ctx.services.get("vehicles");
+  const cratePhysics = ctx.services.get("crate-physics");
 
   const crateShells = new Map();
   const vehicleShells = new Map();
@@ -100,33 +102,17 @@ export async function setup(ctx) {
   const originalVehicleEnter = vehicles.enter.bind(vehicles);
   const originalVehicleInteract = vehicles.interact.bind(vehicles);
 
-  // Give loot a real, easy-to-discover body. A blind player can deliberately
-  // sweep a room and physically bump the crate instead of passing one small
-  // coordinate beside it.
+  // Crates now already have a full dynamic Rapier body. Reuse that collider
+  // instead of creating the old second static presence wall that would pin a
+  // movable crate in place.
+  cratePhysics.syncAll?.();
   for (const crate of map.crates ?? []) {
-    if (!crate?.id || crateShells.has(crate.id)) continue;
-    const collider = physics.createWall({
-      kind: "loot-crate-presence",
-      crateId: crate.id,
-      buildingId: crate.buildingId ?? null,
-      accessibleName: "ящик",
-      interactionHint: "Нажмите E, чтобы открыть",
-      material: "wood",
-      x: finite(crate.x),
-      y: finite(crate.y),
-      z: finite(crate.z),
-      hx: 0.9,
-      hz: 0.7,
-      height: 0.72,
-    });
-    crate.hx = Math.max(0.9, finite(crate.hx, 0.9));
-    crate.hz = Math.max(0.7, finite(crate.hz, 0.7));
-    crateShells.set(crate.id, collider);
+    if (!crate?.id) continue;
+    crate.hx = Math.max(0.72, finite(crate.hx, 0.72));
+    crate.hz = Math.max(0.52, finite(crate.hz, 0.52));
+    if (crate.collider) crateShells.set(crate.id, crate.collider);
   }
 
-  // Add a massless collision envelope around every vehicle. It changes neither
-  // mass nor suspension tuning; it only makes the pedestrian-facing body match
-  // the size a player expects from a jeep/supercar.
   for (const vehicle of vehicles.snapshot?.() ?? []) {
     const footprint = vehicleFootprint(vehicle);
     const collider = physics.addDynamicCuboidCollider(vehicle.id, {
@@ -152,6 +138,7 @@ export async function setup(ctx) {
   }
 
   map.interact = ({ entityId, x, y = 0, z, now = Date.now() }) => {
+    cratePhysics.syncAll?.();
     const actor = { x: finite(x), y: finite(y), z: finite(z) };
 
     const doorCandidate = (map.doors ?? [])
@@ -231,9 +218,6 @@ export async function setup(ctx) {
     const candidate = expandedVehicleCandidate(playerId, requestedVehicleId);
     if (!transform || !candidate) return false;
 
-    // The authoritative vehicle service still performs the actual entry. We
-    // only bridge its old center-distance check after the player's real pose
-    // has already passed the new body-envelope check.
     const original = { x: transform.x, y: transform.y, z: transform.z };
     transform.x = candidate.x;
     transform.y = candidate.y;
