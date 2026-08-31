@@ -1,0 +1,34 @@
+name: Vehicle Crash Model Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - src/plugins/battle-royale-vehicle/server.js
+      - scripts/check-vehicle-crash-model.mjs
+      - package.json
+      - .github/workflows/vehicle-crash-model-check.yml
+  pull_request:
+    paths:
+      - src/plugins/battle-royale-vehicle/server.js
+      - scripts/check-vehicle-crash-model.mjs
+      - package.json
+      - .github/workflows/vehicle-crash-model-check.yml
+
+permissions:
+  contents: read
+
+jobs:
+  calibration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check source syntax
+        run: |
+          node --check src/plugins/battle-royale-vehicle/server.js
+          node --check scripts/check-vehicle-crash-model.mjs
+      - name: Verify measured crash calibration
+        run: npm run check:vehicle-crashes
