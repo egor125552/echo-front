@@ -1,66 +1,34 @@
-const DROP_BODY = "rapier-diagnostics-drop-223";
-const commands = [
-  { command: "physics.stats", args: {} },
-  {
-    command: "physics.shape-cast-capsule",
-    args: {
-      origin: { x: 994, y: 0.79, z: 0 },
-      direction: { x: 1, y: 0, z: 0 },
-      maxDistance: 20,
-      worldOnly: true
-    }
-  },
-  {
-    command: "service.call",
-    args: {
-      service: "physics",
-      method: "createDynamicCuboid",
-      arguments: [
-        DROP_BODY,
-        {
-          x: 900,
-          y: 1.5,
-          z: 900,
-          hx: 0.5,
-          hy: 0.5,
-          hz: 0.5,
-          mass: 20,
-          friction: 0.7,
-          restitution: 0.02,
-          ccd: true,
-          metadata: {
-            kind: "diagnostic-drop",
-            accessibleName: "диагностическое тело",
-            contactForceThreshold: 100
-          }
-        }
-      ]
-    }
-  }
-];
-
-for (let i = 0; i < 16; i += 1) {
-  commands.push({
-    command: "service.call",
-    args: { service: "physics", method: "step", arguments: [1 / 30] }
-  });
-}
-
-commands.push(
-  {
-    command: "physics.contact-forces",
-    args: { limit: 8, bodyId: DROP_BODY, impactsOnly: true }
-  },
-  { command: "physics.stats", args: {} }
-);
-
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 223,
+  id: 224,
   mode: "battle-royale",
-  room: "rapier-diagnostics-223",
+  room: "force-crash-probe-224",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
-  args: { commands },
-  requestedAt: "2026-08-31T12:15:00+03:00"
+  args: {
+    commands: [
+      { command: "entity.list", args: { bot: false, alive: true, limit: 12 } },
+      { command: "service.methods", args: { service: "vehicles" } },
+      { command: "service.methods", args: { service: "ragdoll-damage-model" } },
+      {
+        command: "service.call",
+        args: {
+          service: "vehicles",
+          method: "crashMetricsForForce",
+          arguments: [30000, { totalMass: 1800, deltaSpeed: 2, speedBefore: 12 }]
+        }
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "vehicles",
+          method: "crashMetricsForForce",
+          arguments: [120000, { totalMass: 1800, deltaSpeed: 8, speedBefore: 25 }]
+        }
+      },
+      { command: "service.call", args: { service: "ragdoll-damage-model", method: "summary", arguments: [] } },
+      { command: "physics.stats", args: {} }
+    ]
+  },
+  requestedAt: "2026-08-31T12:46:00+03:00"
 });
