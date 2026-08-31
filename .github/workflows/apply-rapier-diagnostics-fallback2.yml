@@ -1,0 +1,233 @@
+name: Apply Rapier Diagnostics Fallback 2
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/apply-rapier-diagnostics-fallback2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply diagnostics refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/rapier-diagnostics-fallback.patch <<'PATCH'
+          --- a/src/plugins/rapier-physics/server.js
+          +++ b/src/plugins/rapier-physics/server.js
+          @@ -66,6 +66,15 @@
+             const recentContactForces = [];
+             let contactForceEventCount = 0;
+             let peakContactForceMagnitude = 0;
+          +  let lastStepWallMs = null;
+          +  let maxStepWallMs = 0;
+          +  const stepWallSamples = [];
+          +
+          +  function wallNow() {
+          +    return typeof performance !== "undefined" && typeof performance.now === "function"
+          +      ? performance.now()
+          +      : Date.now();
+          +  }
+           
+             function enableDynamicsGravity() {
+               world.gravity = { x: 0, y: -9.81, z: 0 };
+          @@ -82,8 +91,7 @@
+             }
+           
+             function captureProfilerTimings() {
+          -    if (!profilerAvailable) return null;
+          -    lastProfilerTimings = {
+          +    const builtIn = profilerAvailable ? {
+                 stepMs: safeTiming("timingStep"),
+                 broadPhaseMs: safeTiming("timingBroadPhase"),
+                 narrowPhaseMs: safeTiming("timingNarrowPhase"),
+          @@ -91,6 +99,23 @@
+                 solverMs: safeTiming("timingSolver"),
+                 ccdMs: safeTiming("timingCcd"),
+                 userChangesMs: safeTiming("timingUserChanges"),
+          +    } : null;
+          +    const builtInUseful = Boolean(
+          +      builtIn && Object.values(builtIn).some((value) => Number.isFinite(value) && value > 0),
+          +    );
+          +    const averageWallMs = stepWallSamples.length
+          +      ? stepWallSamples.reduce((sum, value) => sum + value, 0) / stepWallSamples.length
+          +      : null;
+          +    lastProfilerTimings = {
+          +      builtInAvailable: profilerAvailable,
+          +      builtInUseful,
+          +      builtIn,
+          +      wallClock: {
+          +        lastStepMs: lastStepWallMs,
+          +        averageStepMs: averageWallMs,
+          +        maxStepMs: maxStepWallMs,
+          +        sampleCount: stepWallSamples.length,
+          +      },
+               };
+               return lastProfilerTimings;
+             }
+          @@ -103,6 +128,39 @@
+               };
+             }
+           
+          +  function dynamicMassFor(info) {
+          +    const bodyId = info?.worldObject?.bodyId;
+          +    const body = bodyId ? dynamicBodies.get(bodyId)?.body : null;
+          +    if (!body) return null;
+          +    const mass = Number(body.mass?.());
+          +    return Number.isFinite(mass) && mass > 0 ? mass : null;
+          +  }
+          +
+          +  function classifyContactForce(record) {
+          +    const kind1 = record.collider1?.worldObject?.kind ?? null;
+          +    const kind2 = record.collider2?.worldObject?.kind ?? null;
+          +    const supportKinds = new Set(["ground", "building-floor", "building-stair"]);
+          +    const supportPair = supportKinds.has(kind1) || supportKinds.has(kind2);
+          +    const dynamicInfo = supportKinds.has(kind1) ? record.collider2 : record.collider1;
+          +    const mass = supportPair ? dynamicMassFor(dynamicInfo) : null;
+          +    const weight = mass ? mass * 9.81 : null;
+          +    const supportLoadRatio = weight ? record.totalForceMagnitude / weight : null;
+          +    const direction = record.maxForceDirection ?? {};
+          +    const mostlyVertical = Math.abs(Number(direction.y) || 0) >= 0.82;
+          +    const supportLike = Boolean(
+          +      supportPair
+          +      && Number.isFinite(supportLoadRatio)
+          +      && supportLoadRatio >= 0.45
+          +      && supportLoadRatio <= 1.65
+          +      && mostlyVertical
+          +    );
+          +    return {
+          +      kind: supportLike ? "support-load" : "impact",
+          +      supportLoadRatio: Number.isFinite(supportLoadRatio) ? supportLoadRatio : null,
+          +      dynamicBodyId: dynamicInfo?.worldObject?.bodyId ?? null,
+          +    };
+          +  }
+          +
+             function drainContactForceEvents() {
+               const stepEvents = [];
+               eventQueue.drainContactForceEvents((event) => {
+          @@ -125,6 +183,7 @@
+                     z: Number(maxDirection?.z) || 0,
+                   },
+                 };
+          +      record.classification = classifyContactForce(record);
+                 stepEvents.push(record);
+                 recentContactForces.push(record);
+                 if (recentContactForces.length > CONTACT_FORCE_HISTORY_LIMIT) recentContactForces.shift();
+          @@ -432,7 +491,12 @@
+               if (!dynamicBodies.size) return dynamicsSteps;
+               enableDynamicsGravity();
+               world.timestep = clamp(dt, MIN_TIMESTEP, MAX_TIMESTEP);
+          +    const wallStartedAt = wallNow();
+               world.step(eventQueue);
+          +    lastStepWallMs = Math.max(0, wallNow() - wallStartedAt);
+          +    maxStepWallMs = Math.max(maxStepWallMs, lastStepWallMs);
+          +    stepWallSamples.push(lastStepWallMs);
+          +    if (stepWallSamples.length > 120) stepWallSamples.shift();
+               drainContactForceEvents();
+               captureProfilerTimings();
+               dynamicsSteps += 1;
+          @@ -669,9 +733,26 @@
+               dynamicBodyState,
+               removeDynamicBody,
+               step,
+          -    contactForces(limit = 16) {
+          +    contactForces(limit = 16, options = {}) {
+                 const count = Math.max(0, Math.min(CONTACT_FORCE_HISTORY_LIMIT, Math.floor(Number(limit) || 16)));
+          -      return recentContactForces.slice(-count);
+          +      const impactsOnly = Boolean(options?.impactsOnly);
+          +      const bodyId = String(options?.bodyId ?? "").trim() || null;
+          +      const kind = String(options?.kind ?? "").trim() || null;
+          +      const selected = recentContactForces.filter((record) => {
+          +        if (impactsOnly && record.classification?.kind !== "impact") return false;
+          +        if (bodyId) {
+          +          const first = record.collider1?.worldObject?.bodyId;
+          +          const second = record.collider2?.worldObject?.bodyId;
+          +          if (first !== bodyId && second !== bodyId) return false;
+          +        }
+          +        if (kind) {
+          +          const first = record.collider1?.worldObject?.kind;
+          +          const second = record.collider2?.worldObject?.kind;
+          +          if (first !== kind && second !== kind) return false;
+          +        }
+          +        return true;
+          +      });
+          +      return selected.slice(-count);
+               },
+               profilerSnapshot() {
+                 return lastProfilerTimings ? { ...lastProfilerTimings } : null;
+          @@ -687,7 +768,7 @@
+                 profiler: {
+                   available: profilerAvailable,
+                   enabled: profilerAvailable && Boolean(world.profilerEnabled),
+          -        last: lastProfilerTimings ? { ...lastProfilerTimings } : null,
+          +        last: lastProfilerTimings ? structuredClone(lastProfilerTimings) : null,
+                 },
+                 contactForces: {
+                   threshold: CONTACT_FORCE_EVENT_THRESHOLD,
+          @@ -695,6 +776,9 @@
+                   lastStepCount: lastStepContactForces.length,
+                   peakTotalForceMagnitude: peakContactForceMagnitude,
+                   recent: recentContactForces.slice(-8),
+          +        recentImpacts: recentContactForces
+          +          .filter((record) => record.classification?.kind === "impact")
+          +          .slice(-8),
+                 },
+               };
+             },
+          --- a/src/server/engine-console.js
+          +++ b/src/server/engine-console.js
+          @@ -283,10 +283,14 @@
+               return host.services.get("physics").stats();
+             });
+           
+          -  register("physics.contact-forces", "Return recent real Rapier contact-force events.", async ({ limit = 16 } = {}) => {
+          +  register("physics.contact-forces", "Return recent real Rapier contact-force events, optionally filtered to impacts or one body/kind.", async ({ limit = 16, impactsOnly = false, bodyId = null, kind = null } = {}) => {
+               if (!host.services.has("physics")) throw new Error("physics service is unavailable");
+               const physics = host.services.get("physics");
+          -    return physics.contactForces?.(limit) ?? [];
+          +    return physics.contactForces?.(limit, {
+          +      impactsOnly: Boolean(impactsOnly),
+          +      bodyId,
+          +      kind,
+          +    }) ?? [];
+             });
+           
+             register("physics.shape-cast-capsule", "Sweep a player-sized or custom capsule through the real Rapier world.", async ({ origin, direction, maxDistance = 100, halfHeight = null, radius = null, excludeEntityId = null, worldOnly = false, targetDistance = 0 } = {}) => {
+          --- a/src/config/engine-diagnostics.js
+          +++ b/src/config/engine-diagnostics.js
+          @@ -1,6 +1,6 @@
+           export const ENGINE_DIAGNOSTICS_CONTROL = Object.freeze({
+             enabled: false,
+          -  revision: 4,
+          +  revision: 5,
+             maxEntities: 128,
+             maxTickSamples: 120,
+           });
+          PATCH
+          sed -i 's/^          //' /tmp/rapier-diagnostics-fallback.patch
+          git apply --check /tmp/rapier-diagnostics-fallback.patch
+          git apply /tmp/rapier-diagnostics-fallback.patch
+          node --check src/plugins/rapier-physics/server.js
+          node --check src/server/engine-console.js
+          node --check src/config/engine-diagnostics.js
+      - name: Commit refinement
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Echo Front Engine Control'
+          git config user.email 'actions@users.noreply.github.com'
+          git add src/plugins/rapier-physics/server.js src/server/engine-console.js src/config/engine-diagnostics.js
+          git rm .github/workflows/apply-rapier-diagnostics-fallback.yml .github/workflows/apply-rapier-diagnostics-fallback2.yml
+          git commit -m 'Refine Rapier diagnostics telemetry'
+          git push
