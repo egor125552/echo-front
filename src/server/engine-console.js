@@ -278,6 +278,34 @@ export function createEngineConsole(game) {
       : physics.raycast(from, vector, distance, excludeEntityId);
   });
 
+  register("physics.stats", "Return Rapier profiler timings and recent contact-force telemetry.", async () => {
+    if (!host.services.has("physics")) throw new Error("physics service is unavailable");
+    return host.services.get("physics").stats();
+  });
+
+  register("physics.contact-forces", "Return recent real Rapier contact-force events.", async ({ limit = 16 } = {}) => {
+    if (!host.services.has("physics")) throw new Error("physics service is unavailable");
+    const physics = host.services.get("physics");
+    return physics.contactForces?.(limit) ?? [];
+  });
+
+  register("physics.shape-cast-capsule", "Sweep a player-sized or custom capsule through the real Rapier world.", async ({ origin, direction, maxDistance = 100, halfHeight = null, radius = null, excludeEntityId = null, worldOnly = false, targetDistance = 0 } = {}) => {
+    if (!host.services.has("physics")) throw new Error("physics service is unavailable");
+    const physics = host.services.get("physics");
+    return physics.shapeCastCapsule(
+      requireObject(origin, "origin"),
+      requireObject(direction, "direction"),
+      Math.max(0.001, Number(maxDistance) || 100),
+      {
+        halfHeight: Number.isFinite(Number(halfHeight)) ? Number(halfHeight) : undefined,
+        radius: Number.isFinite(Number(radius)) ? Number(radius) : undefined,
+        excludeEntityId,
+        worldOnly: Boolean(worldOnly),
+        targetDistance: Math.max(0, Number(targetDistance) || 0),
+      },
+    );
+  });
+
   register("bot.inspect", "Inspect bot components, personality and current utility decision.", async ({ entityId }) => {
     const id = requireString(entityId, "entityId");
     const entity = entities()?.get?.(id);

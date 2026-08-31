@@ -15,6 +15,8 @@ const CHARACTER_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-s
 const DEFAULT_TIMESTEP = 1 / 60;
 const MIN_TIMESTEP = 1 / 120;
 const MAX_TIMESTEP = 1 / 30;
+const CONTACT_FORCE_EVENT_THRESHOLD = 500;
+const CONTACT_FORCE_HISTORY_LIMIT = 64;
 
 async function loadRapier() {
   if (typeof WebSocketPair !== "undefined") {
@@ -38,6 +40,13 @@ async function createRapierPhysics() {
   world.timestep = DEFAULT_TIMESTEP;
   if ("maxCcdSubsteps" in world) world.maxCcdSubsteps = 2;
 
+  let profilerAvailable = false;
+  try {
+    world.profilerEnabled = true;
+    profilerAvailable = Boolean(world.profilerEnabled);
+  } catch {}
+  const eventQueue = new RAPIER.EventQueue(true);
+
   const controller = world.createCharacterController(CHARACTER_CONTROLLER_OFFSET);
   controller.enableAutostep(0.24, 0.35, false);
   controller.enableSnapToGround(0.35);
@@ -52,9 +61,89 @@ async function createRapierPhysics() {
   let queryDirty = false;
   let dynamicsSteps = 0;
   let legacyQuerySteps = 0;
+  let lastProfilerTimings = null;
+  let lastStepContactForces = [];
+  const recentContactForces = [];
+  let contactForceEventCount = 0;
+  let peakContactForceMagnitude = 0;
 
   function enableDynamicsGravity() {
     world.gravity = { x: 0, y: -9.81, z: 0 };
+  }
+
+  function safeTiming(name) {
+    try {
+      const fn = world[name];
+      const value = typeof fn === "function" ? Number(fn.call(world)) : NaN;
+      return Number.isFinite(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function captureProfilerTimings() {
+    if (!profilerAvailable) return null;
+    lastProfilerTimings = {
+      stepMs: safeTiming("timingStep"),
+      broadPhaseMs: safeTiming("timingBroadPhase"),
+      narrowPhaseMs: safeTiming("timingNarrowPhase"),
+      collisionDetectionMs: safeTiming("timingCollisionDetection"),
+      solverMs: safeTiming("timingSolver"),
+      ccdMs: safeTiming("timingCcd"),
+      userChangesMs: safeTiming("timingUserChanges"),
+    };
+    return lastProfilerTimings;
+  }
+
+  function colliderInfo(handle) {
+    return {
+      handle,
+      entityId: colliderToEntity.get(handle) ?? null,
+      worldObject: colliderMetadata.get(handle) ?? null,
+    };
+  }
+
+  function drainContactForceEvents() {
+    const stepEvents = [];
+    eventQueue.drainContactForceEvents((event) => {
+      const totalForce = event.totalForce();
+      const maxDirection = event.maxForceDirection();
+      const record = {
+        at: Date.now(),
+        collider1: colliderInfo(event.collider1()),
+        collider2: colliderInfo(event.collider2()),
+        totalForceMagnitude: Number(event.totalForceMagnitude()) || 0,
+        maxForceMagnitude: Number(event.maxForceMagnitude()) || 0,
+        totalForce: {
+          x: Number(totalForce?.x) || 0,
+          y: Number(totalForce?.y) || 0,
+          z: Number(totalForce?.z) || 0,
+        },
+        maxForceDirection: {
+          x: Number(maxDirection?.x) || 0,
+          y: Number(maxDirection?.y) || 0,
+          z: Number(maxDirection?.z) || 0,
+        },
+      };
+      stepEvents.push(record);
+      recentContactForces.push(record);
+      if (recentContactForces.length > CONTACT_FORCE_HISTORY_LIMIT) recentContactForces.shift();
+      contactForceEventCount += 1;
+      peakContactForceMagnitude = Math.max(peakContactForceMagnitude, record.totalForceMagnitude);
+    });
+    lastStepContactForces = stepEvents;
+    return stepEvents;
+  }
+
+  function enableContactForceDiagnostics(collider, threshold = CONTACT_FORCE_EVENT_THRESHOLD) {
+    if (!collider) return collider;
+    try {
+      collider.setActiveEvents(
+        (Number(collider.activeEvents?.()) || 0) | RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS,
+      );
+      collider.setContactForceEventThreshold(Math.max(0, Number(threshold) || 0));
+    } catch {}
+    return collider;
   }
 
   function flushQueries() {
@@ -256,6 +345,7 @@ async function createRapierPhysics() {
         .setRestitution(clamp(restitution, 0, 1)),
       body,
     );
+    enableContactForceDiagnostics(collider, metadata.contactForceThreshold);
     rememberCollider(collider, {
       kind: metadata.kind ?? "dynamic-body",
       bodyId,
@@ -293,6 +383,7 @@ async function createRapierPhysics() {
         .setSensor(Boolean(sensor)),
       entry.body,
     );
+    if (!sensor) enableContactForceDiagnostics(collider, metadata.contactForceThreshold);
     rememberCollider(collider, {
       kind: metadata.kind ?? "dynamic-body-part",
       bodyId,
@@ -341,7 +432,9 @@ async function createRapierPhysics() {
     if (!dynamicBodies.size) return dynamicsSteps;
     enableDynamicsGravity();
     world.timestep = clamp(dt, MIN_TIMESTEP, MAX_TIMESTEP);
-    world.step();
+    world.step(eventQueue);
+    drainContactForceEvents();
+    captureProfilerTimings();
     dynamicsSteps += 1;
     return dynamicsSteps;
   }
@@ -486,6 +579,50 @@ async function createRapierPhysics() {
     return describeRayHit(hit);
   }
 
+  function shapeCastCapsule(origin, direction, maxDistance, options = {}) {
+    const length = Math.hypot(direction.x, direction.y ?? 0, direction.z);
+    if (!(length > 0.000001) || !(Number(maxDistance) > 0)) return null;
+    const halfHeight = Math.max(0.01, Number(options.halfHeight) || CHARACTER_HALF_HEIGHT);
+    const radius = Math.max(0.01, Number(options.radius) || CHARACTER_RADIUS);
+    const targetDistance = Math.max(0, Number(options.targetDistance) || 0);
+    const shape = new RAPIER.Capsule(halfHeight, radius);
+    const velocity = {
+      x: direction.x / length,
+      y: (direction.y ?? 0) / length,
+      z: direction.z / length,
+    };
+    const exclude = characters.get(options.excludeEntityId)?.collider;
+    const hit = world.castShape(
+      { x: origin.x, y: origin.y ?? CHARACTER_BASE_OFFSET, z: origin.z },
+      { x: 0, y: 0, z: 0, w: 1 },
+      velocity,
+      shape,
+      targetDistance,
+      Number(maxDistance),
+      Boolean(options.stopAtPenetration ?? true),
+      options.worldOnly ? RAPIER.QueryFilterFlags.EXCLUDE_DYNAMIC : undefined,
+      undefined,
+      exclude,
+      undefined,
+      options.worldOnly
+        ? collider => !colliderToEntity.has(collider.handle)
+        : undefined,
+    );
+    if (!hit) return null;
+    const toi = Number(hit.time_of_impact ?? hit.timeOfImpact ?? hit.toi) || 0;
+    return {
+      distance: toi,
+      entityId: colliderToEntity.get(hit.collider.handle) ?? null,
+      colliderHandle: hit.collider.handle,
+      worldObject: colliderMetadata.get(hit.collider.handle) ?? null,
+      witness1: hit.witness1 ? { x: hit.witness1.x, y: hit.witness1.y, z: hit.witness1.z } : null,
+      witness2: hit.witness2 ? { x: hit.witness2.x, y: hit.witness2.y, z: hit.witness2.z } : null,
+      normal1: hit.normal1 ? { x: hit.normal1.x, y: hit.normal1.y, z: hit.normal1.z } : null,
+      normal2: hit.normal2 ? { x: hit.normal2.x, y: hit.normal2.y, z: hit.normal2.z } : null,
+      shape: { type: "capsule", halfHeight, radius },
+    };
+  }
+
   function lineOfSight(from, to, excludeEntityId = null, targetEntityId = null) {
     const dx = to.x - from.x;
     const dy = (to.y ?? 0) - (from.y ?? 0);
@@ -521,6 +658,7 @@ async function createRapierPhysics() {
     raycast,
     raycastWorld,
     raycastSupportWorld,
+    shapeCastCapsule,
     lineOfSight,
     syncQueries,
     beginBatch,
@@ -531,6 +669,13 @@ async function createRapierPhysics() {
     dynamicBodyState,
     removeDynamicBody,
     step,
+    contactForces(limit = 16) {
+      const count = Math.max(0, Math.min(CONTACT_FORCE_HISTORY_LIMIT, Math.floor(Number(limit) || 16)));
+      return recentContactForces.slice(-count);
+    },
+    profilerSnapshot() {
+      return lastProfilerTimings ? { ...lastProfilerTimings } : null;
+    },
     stats() {
       return {
         version: manifest.version,
@@ -539,6 +684,18 @@ async function createRapierPhysics() {
         dynamicsSteps,
         legacyQuerySteps,
         sharedWorld: true,
+        profiler: {
+          available: profilerAvailable,
+          enabled: profilerAvailable && Boolean(world.profilerEnabled),
+          last: lastProfilerTimings ? { ...lastProfilerTimings } : null,
+        },
+        contactForces: {
+          threshold: CONTACT_FORCE_EVENT_THRESHOLD,
+          totalEvents: contactForceEventCount,
+          lastStepCount: lastStepContactForces.length,
+          peakTotalForceMagnitude: peakContactForceMagnitude,
+          recent: recentContactForces.slice(-8),
+        },
       };
     },
   };
