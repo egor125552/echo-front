@@ -12,6 +12,10 @@
 // - walls: additional wall segments with x/z/hx/hz/y/height/material
 // - crates: id, floorId, x, z, yOffset, loot
 // - navigation: optional overrides for regions/transitions/targetPosition
+//
+// Layout convention: a building's main entrance should face the natural approach
+// from the centre of the map whenever practical. This keeps navigation intuitive
+// without injecting artificial front-approach waypoints into the route planner.
 
 export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
   {
@@ -163,14 +167,14 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         height: 2.9,
         surface: "wood",
         acoustics: { zone: "two-storey-upper", reverbMix: 0.48 },
-        // The stair now runs straight inward from the front (east) door.
-        // The opening is deliberately broad so a player can enter the house,
-        // keep walking straight, and naturally climb instead of hunting for it.
+        // The whole house is rotated 180 degrees compared with the old layout.
+        // Enter from the west-facing front door and keep walking straight east:
+        // the staircase is directly ahead instead of being around a corner.
         slabs: [
-          { x: -4.5, z: 0, width: 9.0, depth: 14.0 },
-          { x: 8.0, z: 0, width: 2.0, depth: 14.0 },
-          { x: 3.5, z: -4.6, width: 7.0, depth: 4.8 },
-          { x: 3.5, z: 4.6, width: 7.0, depth: 4.8 },
+          { x: 4.5, z: 0, width: 9.0, depth: 14.0 },
+          { x: -8.0, z: 0, width: 2.0, depth: 14.0 },
+          { x: -3.5, z: 4.6, width: 7.0, depth: 4.8 },
+          { x: -3.5, z: -4.6, width: 7.0, depth: 4.8 },
         ],
       },
     ],
@@ -179,7 +183,7 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         id: "two-storey-front-door",
         name: "Входная дверь двухэтажного дома",
         floorId: "ground",
-        side: "east",
+        side: "west",
         offset: 0,
         width: 3.6,
         material: "wood",
@@ -191,21 +195,21 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         name: "лестница на второй этаж",
         fromFloorId: "ground",
         toFloorId: "upper",
-        x: 3.5,
+        x: -3.5,
         z: 0,
         run: 6.0,
         width: 3.2,
-        risesToward: "west",
+        risesToward: "east",
         material: "wood",
         acoustics: { zone: "two-storey-stairs", reverbMix: 0.4 },
       },
     ],
     crates: [
-      { id: "two-storey-ground-armor", floorId: "ground", x: -5.5, z: -4.5, loot: "armor" },
-      { id: "two-storey-ground-rifle", floorId: "ground", x: -5.5, z: 4.5, loot: "rifle" },
-      { id: "two-storey-upper-rifle-a", floorId: "upper", x: -5.5, z: -4.5, loot: "rifle" },
-      { id: "two-storey-upper-armor", floorId: "upper", x: -5.5, z: 4.5, loot: "armor" },
-      { id: "two-storey-upper-rifle-b", floorId: "upper", x: 0.5, z: 4.7, loot: "rifle" },
+      { id: "two-storey-ground-armor", floorId: "ground", x: 5.5, z: 4.5, loot: "armor" },
+      { id: "two-storey-ground-rifle", floorId: "ground", x: 5.5, z: -4.5, loot: "rifle" },
+      { id: "two-storey-upper-rifle-a", floorId: "upper", x: 5.5, z: 4.5, loot: "rifle" },
+      { id: "two-storey-upper-armor", floorId: "upper", x: 5.5, z: -4.5, loot: "armor" },
+      { id: "two-storey-upper-rifle-b", floorId: "upper", x: -0.5, z: -4.7, loot: "rifle" },
     ],
   },
 ]);
