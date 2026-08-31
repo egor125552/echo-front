@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "check:vehicle-crashes": "node scripts/check-vehicle-crash-model.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d": "0.19.3",
