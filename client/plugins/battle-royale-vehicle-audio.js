@@ -195,12 +195,16 @@ export async function setup(ctx) {
   ctx.events.on("game:event", (packet) => {
     if (packet.event !== "vehicle:impact") return;
     const payload = packet.payload ?? {};
+    const forceSeverity = Math.max(0, Number(payload.crashSeverity) || 0);
     const delta = Math.max(0, Number(payload.deltaSpeed) || 0);
-    if (delta < 3.2) return;
+    const strength = payload.impactSource === "rapier-contact-force" && forceSeverity > 0
+      ? forceSeverity
+      : delta;
+    if (strength < 1.6) return;
     void audio.resume();
     audio.playSpatialBuffer(crashBuffer, payload, {
-      radius: CRASH_RADIUS,
-      gain: clamp(0.28 + delta / 13, 0.35, 1.15),
+      radius: CRASH_RADIUS * clamp(0.78 + strength / 45, 0.8, 1.35),
+      gain: clamp(0.24 + strength / 18, 0.3, 1.2),
       referenceDistance: 2.5,
       rolloffFactor: 0.42,
       airAbsorptionMinHz: 3900,

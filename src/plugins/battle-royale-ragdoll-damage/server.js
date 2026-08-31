@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-ragdoll-damage",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["health"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -26,6 +26,16 @@ function damageForSeverity(severity) {
   return 100;
 }
 
+function vehicleCrashDamageForSeverity(severity) {
+  const s = Math.max(0, Number(severity) || 0);
+  const base = damageForSeverity(s);
+  if (base <= 0) return 0;
+  // The initial cabin trauma is only part of the injury. The actual ragdoll may
+  // still add body-part damage on subsequent contacts with the world.
+  const scale = clamp(0.58 + s / 120, 0.60, 0.82);
+  return Math.min(80, Math.round(base * scale));
+}
+
 export async function setup(ctx) {
   const health = ctx.services.get("health");
   const latestImpact = new Map();
@@ -33,6 +43,8 @@ export async function setup(ctx) {
   let adjustedHits = 0;
   let adjustedDamage = 0;
   let throttledHits = 0;
+  let vehicleCrashHits = 0;
+  let vehicleCrashDamage = 0;
 
   ctx.events.on("ragdoll:impact", (impact = {}) => {
     if (!impact.entityId) return;
@@ -42,6 +54,20 @@ export async function setup(ctx) {
       part: impact.part ?? null,
       now: Number(impact.now) || Date.now(),
     });
+  });
+
+  ctx.events.on("ragdoll:vehicle-crash-eject", (payload = {}) => {
+    if (!payload.entityId || payload.impactSource !== "rapier-contact-force") return;
+    const severity = Math.max(0, Number(payload.crashSeverity) || 0);
+    const damage = vehicleCrashDamageForSeverity(severity);
+    if (damage <= 0) return;
+    const result = health.applyDamage(payload.entityId, damage, {
+      attackerId: null,
+      weaponId: "vehicle-crash-force",
+      now: Number(payload.now) || Date.now(),
+    });
+    if ((Number(result.applied) || 0) > 0) vehicleCrashHits += 1;
+    vehicleCrashDamage += Number(result.applied) || 0;
   });
 
   ctx.events.on("ragdoll:ended", ({ entityId }) => {
@@ -79,6 +105,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("ragdoll-damage-model", {
     damageForSeverity,
+    vehicleCrashDamageForSeverity,
     estimate(impact = {}) {
       return {
         severity: Number(impact.severity) || 0,
@@ -92,6 +119,8 @@ export async function setup(ctx) {
         adjustedHits,
         adjustedDamage,
         throttledHits,
+        vehicleCrashHits,
+        vehicleCrashDamage,
         intervalMs: RAGDOLL_DAMAGE_INTERVAL_MS,
         trackedImpacts: latestImpact.size,
       };

@@ -75,7 +75,7 @@ export const FLEET_LAYOUT = Object.freeze([
 
 export const manifest = {
   id: "battle-royale-vehicle-fleet",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: [
     "battle-royale-vehicle", "battle-royale-world-expansion",
     "rapier-physics", "movement", "entities", "map-test-arena",
@@ -610,37 +610,73 @@ export async function setup(ctx) {
     }
   }
 
-  function finishExtraSubstep(entry, now) {
+  function finishExtraSubstep(entry) {
     const speed = speedMetersPerSecond(entry);
     const delta = Math.max(0, entry.previousSpeed - speed);
+    entry.tickPeakDelta = Math.max(Number(entry.tickPeakDelta) || 0, delta);
     entry.peakImpactDelta = Math.max(entry.peakImpactDelta * 0.985, delta);
-    if (delta >= 5.5 && entry.previousSpeed >= 7) {
-      const body = bodyState(entry);
-      ctx.events.emit("vehicle:impact", {
-        vehicleId: entry.id,
-        vehicleKind: entry.tuning.kind,
-        driverId: entry.driverId,
-        deltaSpeed: delta,
-        speedBefore: entry.previousSpeed,
-        speedAfter: speed,
-        x: body?.x ?? 0,
-        y: body?.y ?? 0,
-        z: body?.z ?? 0,
-        now,
-      });
-    }
     entry.previousSpeed = speed;
     entry.physicsFrames += 1;
+  }
+
+  function emitExtraCrash(entry, speedBefore, speedAfter, contactCursor, now) {
+    if (!entry.driverId) return;
+    const delta = Math.max(0, Number(entry.tickPeakDelta) || 0, speedBefore - speedAfter);
+    const forceImpact = (physics.contactForces?.(256, {
+      bodyId: entry.id,
+      impactsOnly: true,
+    }) ?? [])
+      .filter((record) => (Number(record.sequence) || 0) > contactCursor)
+      .sort((a, b) => (Number(b.totalForceMagnitude) || 0) - (Number(a.totalForceMagnitude) || 0))[0] ?? null;
+    const totalMass = entry.tuning.chassis.mass + entry.tuning.chassis.ballastMass;
+    const metrics = forceImpact
+      ? vehicles.crashMetricsForForce?.(forceImpact.totalForceMagnitude, {
+        totalMass,
+        deltaSpeed: delta,
+        speedBefore,
+      })
+      : null;
+    const forceBacked = Boolean(speedBefore >= 2.5 && metrics && metrics.severity >= 1.25);
+    const speedFallback = Boolean(!forceImpact && delta >= 5.5 && speedBefore >= 7);
+    if (!forceBacked && !speedFallback) return;
+
+    const body = bodyState(entry);
+    const fallbackSeverity = clamp(delta * 1.1, 0, 45);
+    ctx.events.emit("vehicle:impact", {
+      vehicleId: entry.id,
+      vehicleKind: entry.tuning.kind,
+      driverId: entry.driverId,
+      impactSource: forceBacked ? "rapier-contact-force" : "speed-fallback",
+      crashSeverity: forceBacked ? metrics.severity : fallbackSeverity,
+      crashTier: forceBacked ? metrics.tier : (fallbackSeverity >= 16 ? "severe" : fallbackSeverity >= 8 ? "moderate" : "light"),
+      contactForceMagnitude: forceBacked ? metrics.force : null,
+      maxContactForceMagnitude: forceBacked ? (Number(forceImpact.maxForceMagnitude) || 0) : null,
+      forceRatio: forceBacked ? metrics.forceRatio : null,
+      contactSequence: forceBacked ? forceImpact.sequence : null,
+      contactDirection: forceBacked ? forceImpact.maxForceDirection ?? null : null,
+      deltaSpeed: delta,
+      speedBefore,
+      speedAfter,
+      x: body?.x ?? 0,
+      y: body?.y ?? 0,
+      z: body?.z ?? 0,
+      now,
+    });
   }
 
   function tickPhysics(dt, now = Date.now()) {
     const safeDt = clamp(dt, 0, 0.1);
     if (!(safeDt > 0)) return;
-    for (const entry of extras.values()) updateExtraNitro(entry, safeDt, now);
+    const contactCursor = Number(physics.contactForceCursor?.()) || 0;
+    const speedBeforeTick = new Map();
+    for (const entry of extras.values()) {
+      updateExtraNitro(entry, safeDt, now);
+      speedBeforeTick.set(entry.id, entry.previousSpeed);
+      entry.tickPeakDelta = 0;
+    }
 
-    // The original jeep owns the shared physics stepping loop. Wrap each one of
-    // those real Rapier substeps so every additional vehicle controller computes
-    // wheel forces before the world advances. The world itself still steps once.
+    // The primary jeep still owns the shared Rapier step. Additional vehicle
+    // controllers inject wheel forces into that exact same step.
     const originalPhysicsStep = physics.step;
     physics.step = (subDt = PHYSICS_STEP) => {
       for (const entry of extras.values()) {
@@ -653,7 +689,7 @@ export async function setup(ctx) {
         );
       }
       const result = originalPhysicsStep(subDt);
-      for (const entry of extras.values()) finishExtraSubstep(entry, now);
+      for (const entry of extras.values()) finishExtraSubstep(entry);
       return result;
     };
     try {
@@ -662,7 +698,16 @@ export async function setup(ctx) {
       physics.step = originalPhysicsStep;
     }
 
-    for (const entry of extras.values()) syncExtraDriver(entry);
+    for (const entry of extras.values()) {
+      emitExtraCrash(
+        entry,
+        Math.max(0, Number(speedBeforeTick.get(entry.id)) || 0),
+        speedMetersPerSecond(entry),
+        contactCursor,
+        now,
+      );
+      syncExtraDriver(entry);
+    }
   }
 
   function driverId(vehicleId = primaryId) {

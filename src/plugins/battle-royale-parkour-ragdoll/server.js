@@ -5,12 +5,14 @@ export const AIRBORNE_BUILDING_MIN_HEAD_ON = 0.5;
 export const AIRBORNE_BUILDING_DROP_SPEED = 4.4;
 export const VEHICLE_CRASH_MIN_SPEED = 9.5;
 export const VEHICLE_CRASH_MIN_DELTA = 6.5;
+export const VEHICLE_CRASH_FORCE_MIN_SPEED = 5.0;
+export const VEHICLE_CRASH_FORCE_MIN_SEVERITY = 6.5;
 export const PARKOUR_FLIP_SPEED = 8.8;
 export const PARKOUR_TUCK_SPEED = 4.2;
 
 export const manifest = {
   id: "battle-royale-parkour-ragdoll",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "match-api",
     "battle-royale",
@@ -344,15 +346,32 @@ export async function setup(ctx) {
     if (!entityId) return;
     const speedBefore = Math.max(0, Number(payload.speedBefore) || 0);
     const deltaSpeed = Math.max(0, Number(payload.deltaSpeed) || 0);
-    if (speedBefore < VEHICLE_CRASH_MIN_SPEED || deltaSpeed < VEHICLE_CRASH_MIN_DELTA) return;
+    const crashSeverity = Math.max(0, Number(payload.crashSeverity) || 0);
+    const forceBacked = payload.impactSource === "rapier-contact-force" && crashSeverity > 0;
+    if (forceBacked) {
+      if (speedBefore < VEHICLE_CRASH_FORCE_MIN_SPEED || crashSeverity < VEHICLE_CRASH_FORCE_MIN_SEVERITY) return;
+    } else if (speedBefore < VEHICLE_CRASH_MIN_SPEED || deltaSpeed < VEHICLE_CRASH_MIN_DELTA) {
+      return;
+    }
+
     const current = pendingVehicleImpacts.get(entityId);
-    if (!current || deltaSpeed > current.deltaSpeed) {
+    const score = forceBacked ? crashSeverity : deltaSpeed;
+    const currentScore = current ? (current.forceBacked ? current.crashSeverity : current.deltaSpeed) : -Infinity;
+    if (!current || score > currentScore) {
       pendingVehicleImpacts.set(entityId, {
         entityId,
         vehicleId: payload.vehicleId ?? null,
         speedBefore,
         speedAfter: Math.max(0, Number(payload.speedAfter) || 0),
         deltaSpeed,
+        forceBacked,
+        crashSeverity: forceBacked ? crashSeverity : Math.max(0, deltaSpeed * 1.1),
+        crashTier: payload.crashTier ?? null,
+        contactForceMagnitude: Number.isFinite(Number(payload.contactForceMagnitude)) ? Number(payload.contactForceMagnitude) : null,
+        maxContactForceMagnitude: Number.isFinite(Number(payload.maxContactForceMagnitude)) ? Number(payload.maxContactForceMagnitude) : null,
+        forceRatio: Number.isFinite(Number(payload.forceRatio)) ? Number(payload.forceRatio) : null,
+        contactSequence: Number.isFinite(Number(payload.contactSequence)) ? Number(payload.contactSequence) : null,
+        impactSource: payload.impactSource ?? "speed-fallback",
       });
     }
   });
@@ -409,8 +428,10 @@ export async function setup(ctx) {
       const angle = Number(vehicle.angle) || 0;
       const axes = basis(angle);
       const direction = Number(vehicle.forwardSpeed) < -0.25 ? -1 : 1;
-      const carrySpeed = Math.min(55, impact.speedBefore * 0.62);
-      const upward = 1.2 + Math.min(3.8, impact.deltaSpeed * 0.24);
+      const severity = Math.max(0, Number(impact.crashSeverity) || impact.deltaSpeed);
+      const carryScale = 0.52 + clamp(severity / 30, 0, 0.28);
+      const carrySpeed = Math.min(55, impact.speedBefore * carryScale);
+      const upward = 0.9 + Math.min(4.2, severity * 0.18);
 
       if (!vehicles.exit(impact.entityId, now, "crash-eject")) continue;
       const transform = ctx.components.get(impact.entityId, "Transform");
@@ -429,14 +450,21 @@ export async function setup(ctx) {
       if (!activated) continue;
 
       stability.applyVelocityDeltaToLatest({
-        x: axes.forward.x * Math.min(4.5, impact.deltaSpeed * 0.24) * direction,
-        y: 1.2 + Math.min(3.5, impact.deltaSpeed * 0.22),
-        z: axes.forward.z * Math.min(4.5, impact.deltaSpeed * 0.24) * direction,
+        x: axes.forward.x * Math.min(5.0, severity * 0.22) * direction,
+        y: 1.0 + Math.min(4.0, severity * 0.19),
+        z: axes.forward.z * Math.min(5.0, severity * 0.22) * direction,
       }, 16);
       crashEjections += 1;
       ctx.events.emit("ragdoll:vehicle-crash-eject", {
         entityId: impact.entityId,
         vehicleId: impact.vehicleId,
+        impactSource: impact.impactSource,
+        crashSeverity: severity,
+        crashTier: impact.crashTier,
+        contactForceMagnitude: impact.contactForceMagnitude,
+        maxContactForceMagnitude: impact.maxContactForceMagnitude,
+        forceRatio: impact.forceRatio,
+        contactSequence: impact.contactSequence,
         speedBefore: impact.speedBefore,
         speedAfter: impact.speedAfter,
         deltaSpeed: impact.deltaSpeed,
@@ -482,6 +510,8 @@ export async function setup(ctx) {
           airborneBuildingDropSpeed: AIRBORNE_BUILDING_DROP_SPEED,
           vehicleCrashMinSpeed: VEHICLE_CRASH_MIN_SPEED,
           vehicleCrashMinDelta: VEHICLE_CRASH_MIN_DELTA,
+          vehicleCrashForceMinSpeed: VEHICLE_CRASH_FORCE_MIN_SPEED,
+          vehicleCrashForceMinSeverity: VEHICLE_CRASH_FORCE_MIN_SEVERITY,
           parkourFlipSpeed: PARKOUR_FLIP_SPEED,
         },
       };

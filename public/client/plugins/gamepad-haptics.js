@@ -46,6 +46,8 @@ async function playRumble({ duration = 80, weak = 0.2, strong = 0.5 } = {}) {
 }
 
 function impactStrength(payload = {}) {
+  const forceSeverity = Number(payload.crashSeverity);
+  if (Number.isFinite(forceSeverity) && forceSeverity > 0) return forceSeverity;
   return Math.max(
     0,
     Number(payload.deltaSpeed) || 0,
@@ -95,12 +97,15 @@ export async function setup(ctx) {
 
     if (packet.event === "vehicle:impact" && payload.driverId === self) {
       const impact = impactStrength(payload);
-      const amount = clamp01((impact - 2.5) / 14);
+      const forceBacked = payload.impactSource === "rapier-contact-force";
+      const amount = forceBacked
+        ? clamp01((impact - 1.25) / 24)
+        : clamp01((impact - 2.5) / 14);
       if (amount <= 0) return;
       rumble({
-        duration: 90 + amount * 210,
-        weak: 0.32 + amount * 0.52,
-        strong: 0.5 + amount * 0.5,
+        duration: 75 + amount * 235,
+        weak: 0.24 + amount * 0.60,
+        strong: 0.38 + amount * 0.62,
       });
       return;
     }

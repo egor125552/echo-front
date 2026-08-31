@@ -1,6 +1,6 @@
 export const manifest = {
   id: "rapier-physics",
-  version: "3.1.0",
+  version: "3.2.0",
   requires: [],
   capabilities: ["services.provide"],
 };
@@ -16,7 +16,7 @@ const DEFAULT_TIMESTEP = 1 / 60;
 const MIN_TIMESTEP = 1 / 120;
 const MAX_TIMESTEP = 1 / 30;
 const CONTACT_FORCE_EVENT_THRESHOLD = 500;
-const CONTACT_FORCE_HISTORY_LIMIT = 64;
+const CONTACT_FORCE_HISTORY_LIMIT = 256;
 
 async function loadRapier() {
   if (typeof WebSocketPair !== "undefined") {
@@ -167,6 +167,7 @@ async function createRapierPhysics() {
       const totalForce = event.totalForce();
       const maxDirection = event.maxForceDirection();
       const record = {
+        sequence: contactForceEventCount + 1,
         at: Date.now(),
         collider1: colliderInfo(event.collider1()),
         collider2: colliderInfo(event.collider2()),
@@ -733,6 +734,9 @@ async function createRapierPhysics() {
     dynamicBodyState,
     removeDynamicBody,
     step,
+    contactForceCursor() {
+      return contactForceEventCount;
+    },
     contactForces(limit = 16, options = {}) {
       const count = Math.max(0, Math.min(CONTACT_FORCE_HISTORY_LIMIT, Math.floor(Number(limit) || 16)));
       const impactsOnly = Boolean(options?.impactsOnly);

@@ -13,10 +13,35 @@ export const VEHICLE_SERVICE_BRAKE = 18;
 export const VEHICLE_HAND_BRAKE = 55;
 export const VEHICLE_PARK_BRAKE = 10;
 export const VEHICLE_PHYSICS_STEP = 1 / 60;
+export const VEHICLE_TOTAL_MASS = VEHICLE_CHASSIS_MASS + 420;
+export const VEHICLE_FORCE_EVENT_MIN_SPEED = 2.5;
+
+export function vehicleCrashMetrics(forceMagnitude, {
+  totalMass = VEHICLE_TOTAL_MASS,
+  deltaSpeed = 0,
+  speedBefore = 0,
+} = {}) {
+  const mass = Math.max(1, Number(totalMass) || VEHICLE_TOTAL_MASS);
+  const force = Math.max(0, Number(forceMagnitude) || 0);
+  const forceRatio = force / (mass * 9.81);
+  // Rapier force is the primary signal. The speed terms are deliberately small:
+  // they stabilize glancing contacts and solver spikes without taking severity
+  // back to the old delta-speed-only model.
+  const forceSeverity = Math.max(0, forceRatio - 1.25) * 5.2;
+  const deltaBias = clamp((Number(deltaSpeed) || 0) * 0.18, 0, 3);
+  const speedBias = clamp(((Number(speedBefore) || 0) - 12) * 0.06, 0, 2);
+  const severity = clamp(forceSeverity + deltaBias + speedBias, 0, 45);
+  const tier = severity >= 28 ? "critical"
+    : severity >= 16 ? "severe"
+      : severity >= 8 ? "moderate"
+        : severity >= 4 ? "light"
+          : "bump";
+  return { force, forceRatio, severity, tier };
+}
 
 export const manifest = {
   id: "battle-royale-vehicle",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["rapier-physics", "movement", "entities", "battle-royale", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -450,6 +475,8 @@ export async function setup(ctx) {
   function tickPhysics(dt, now = Date.now()) {
     const safeDt = clamp(dt, 0, 0.1);
     if (!(safeDt > 0)) return;
+    const contactCursor = Number(physics.contactForceCursor?.()) || 0;
+    const speedBeforeTick = previousSpeed;
     updateNitroState(safeDt, now);
     const substeps = Math.max(1, Math.min(6, Math.ceil(safeDt / VEHICLE_PHYSICS_STEP)));
     const subDt = safeDt / substeps;
@@ -466,15 +493,52 @@ export async function setup(ctx) {
     }
 
     const speed = speedMetersPerSecond();
-    const delta = Math.max(0, previousSpeed - speed);
+    const delta = Math.max(0, speedBeforeTick - speed);
     peakImpactDelta = Math.max(peakImpactDelta * 0.985, delta);
-    if (delta >= 5.5 && previousSpeed >= 7) {
+
+    const forceImpact = (physics.contactForces?.(256, {
+      bodyId: VEHICLE_ID,
+      impactsOnly: true,
+    }) ?? [])
+      .filter((record) => (Number(record.sequence) || 0) > contactCursor)
+      .sort((a, b) => (Number(b.totalForceMagnitude) || 0) - (Number(a.totalForceMagnitude) || 0))[0] ?? null;
+
+    const metrics = forceImpact
+      ? vehicleCrashMetrics(forceImpact.totalForceMagnitude, {
+        totalMass: VEHICLE_TOTAL_MASS,
+        deltaSpeed: delta,
+        speedBefore: speedBeforeTick,
+      })
+      : null;
+    const forceBacked = Boolean(
+      driverId
+      && speedBeforeTick >= VEHICLE_FORCE_EVENT_MIN_SPEED
+      && metrics
+      && metrics.severity >= 1.25
+    );
+    const speedFallback = Boolean(
+      driverId
+      && !forceImpact
+      && delta >= 5.5
+      && speedBeforeTick >= 7
+    );
+
+    if (forceBacked || speedFallback) {
       const body = bodyState();
+      const fallbackSeverity = clamp(delta * 1.1, 0, 45);
       ctx.events.emit("vehicle:impact", {
         vehicleId: VEHICLE_ID,
         driverId,
+        impactSource: forceBacked ? "rapier-contact-force" : "speed-fallback",
+        crashSeverity: forceBacked ? metrics.severity : fallbackSeverity,
+        crashTier: forceBacked ? metrics.tier : (fallbackSeverity >= 16 ? "severe" : fallbackSeverity >= 8 ? "moderate" : "light"),
+        contactForceMagnitude: forceBacked ? metrics.force : null,
+        maxContactForceMagnitude: forceBacked ? (Number(forceImpact.maxForceMagnitude) || 0) : null,
+        forceRatio: forceBacked ? metrics.forceRatio : null,
+        contactSequence: forceBacked ? forceImpact.sequence : null,
+        contactDirection: forceBacked ? forceImpact.maxForceDirection ?? null : null,
         deltaSpeed: delta,
-        speedBefore: previousSpeed,
+        speedBefore: speedBeforeTick,
         speedAfter: speed,
         x: body?.x ?? 0,
         y: body?.y ?? 0,
@@ -512,6 +576,9 @@ export async function setup(ctx) {
     exit,
     setInput,
     tickPhysics,
+    crashMetricsForForce(forceMagnitude, options = {}) {
+      return vehicleCrashMetrics(forceMagnitude, options);
+    },
     isDriving(playerId) { return driverId === playerId; },
     driverId() { return driverId; },
     stateFor(vehicleId = VEHICLE_ID) { return vehicleId === VEHICLE_ID ? state() : null; },
