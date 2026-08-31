@@ -1,10 +1,8 @@
 const VEHICLE = "br-jeep-1";
-const TEST_NOW = 1788172800000;
+const TEST_NOW = 1788173100000;
 const CASES = Object.freeze([
   { id: "force-crash-driver-11kph", name: "Crash Driver 11 kmh", speed: 3, offset: 0 },
   { id: "force-crash-driver-22kph", name: "Crash Driver 22 kmh", speed: 6, offset: 1000 },
-  { id: "force-crash-driver-40kph", name: "Crash Driver 40 kmh", speed: 11, offset: 2000 },
-  { id: "force-crash-driver-65kph", name: "Crash Driver 65 kmh", speed: 18, offset: 3000 },
 ]);
 
 function crashCase({ id, name, speed, offset }) {
@@ -44,9 +42,9 @@ function crashCase({ id, name, speed, offset }) {
 }
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 234,
+  id: 235,
   mode: "battle-royale",
-  room: "force-crash-speed-sweep-234",
+  room: "force-crash-low-speed-sweep-235",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -54,10 +52,8 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
     commands: [
       { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [TEST_NOW] } },
       ...CASES.flatMap(crashCase),
-      { command: "service.call", args: { service: "parkour-ragdoll", method: "summary", arguments: [] } },
       { command: "service.call", args: { service: "ragdoll-damage-model", method: "summary", arguments: [] } },
-      { command: "physics.stats", args: {} }
     ]
   },
-  requestedAt: "2026-08-31T13:35:00+03:00"
+  requestedAt: "2026-08-31T13:40:00+03:00"
 });
