@@ -56,6 +56,7 @@ import * as socialIntegration from "../plugins/social-match-integration/server.j
 import * as networkTuning from "../plugins/network-tuning/server.js";
 import * as acousticProfile from "../plugins/battle-royale-acoustic-profile/server.js";
 import * as vehicleIntegration from "../plugins/battle-royale-vehicle-integration/server.js";
+import * as crateIntegration from "../plugins/battle-royale-crate-integration/server.js";
 import * as parachuteIntegration from "../plugins/battle-royale-parachute-integration/server.js";
 import * as parachuteCanopy from "../plugins/battle-royale-parachute-canopy/server.js";
 import * as parachuteDynamics from "../plugins/battle-royale-parachute-dynamics/server.js";
@@ -133,6 +134,7 @@ export const battleRoyalePreset = [
   networkTuning,
   acousticProfile,
   vehicleIntegration,
+  crateIntegration,
   parachuteIntegration,
   parachuteCanopy,
   parachuteDynamics,
