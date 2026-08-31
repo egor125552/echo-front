@@ -43,7 +43,9 @@ const FORWARDED_EVENTS = new Set([
 
 function shouldForwardEvent(eventName) {
   const name = String(eventName ?? "");
-  return FORWARDED_EVENTS.has(name) || name.startsWith("navigation:");
+  return FORWARDED_EVENTS.has(name)
+    || name.startsWith("navigation:")
+    || name.startsWith("crate:");
 }
 
 export function normalizeGameMode(value) {
