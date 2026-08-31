@@ -66,6 +66,15 @@ async function createRapierPhysics() {
   const recentContactForces = [];
   let contactForceEventCount = 0;
   let peakContactForceMagnitude = 0;
+  let lastStepWallMs = null;
+  let maxStepWallMs = 0;
+  const stepWallSamples = [];
+
+  function wallNow() {
+    return typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  }
 
   function enableDynamicsGravity() {
     world.gravity = { x: 0, y: -9.81, z: 0 };
@@ -82,8 +91,7 @@ async function createRapierPhysics() {
   }
 
   function captureProfilerTimings() {
-    if (!profilerAvailable) return null;
-    lastProfilerTimings = {
+    const builtIn = profilerAvailable ? {
       stepMs: safeTiming("timingStep"),
       broadPhaseMs: safeTiming("timingBroadPhase"),
       narrowPhaseMs: safeTiming("timingNarrowPhase"),
@@ -91,6 +99,23 @@ async function createRapierPhysics() {
       solverMs: safeTiming("timingSolver"),
       ccdMs: safeTiming("timingCcd"),
       userChangesMs: safeTiming("timingUserChanges"),
+    } : null;
+    const builtInUseful = Boolean(
+      builtIn && Object.values(builtIn).some((value) => Number.isFinite(value) && value > 0),
+    );
+    const averageWallMs = stepWallSamples.length
+      ? stepWallSamples.reduce((sum, value) => sum + value, 0) / stepWallSamples.length
+      : null;
+    lastProfilerTimings = {
+      builtInAvailable: profilerAvailable,
+      builtInUseful,
+      builtIn,
+      wallClock: {
+        lastStepMs: lastStepWallMs,
+        averageStepMs: averageWallMs,
+        maxStepMs: maxStepWallMs,
+        sampleCount: stepWallSamples.length,
+      },
     };
     return lastProfilerTimings;
   }
@@ -100,6 +125,39 @@ async function createRapierPhysics() {
       handle,
       entityId: colliderToEntity.get(handle) ?? null,
       worldObject: colliderMetadata.get(handle) ?? null,
+    };
+  }
+
+  function dynamicMassFor(info) {
+    const bodyId = info?.worldObject?.bodyId;
+    const body = bodyId ? dynamicBodies.get(bodyId)?.body : null;
+    if (!body) return null;
+    const mass = Number(body.mass?.());
+    return Number.isFinite(mass) && mass > 0 ? mass : null;
+  }
+
+  function classifyContactForce(record) {
+    const kind1 = record.collider1?.worldObject?.kind ?? null;
+    const kind2 = record.collider2?.worldObject?.kind ?? null;
+    const supportKinds = new Set(["ground", "building-floor", "building-stair"]);
+    const supportPair = supportKinds.has(kind1) || supportKinds.has(kind2);
+    const dynamicInfo = supportKinds.has(kind1) ? record.collider2 : record.collider1;
+    const mass = supportPair ? dynamicMassFor(dynamicInfo) : null;
+    const weight = mass ? mass * 9.81 : null;
+    const supportLoadRatio = weight ? record.totalForceMagnitude / weight : null;
+    const direction = record.maxForceDirection ?? {};
+    const mostlyVertical = Math.abs(Number(direction.y) || 0) >= 0.82;
+    const supportLike = Boolean(
+      supportPair
+      && Number.isFinite(supportLoadRatio)
+      && supportLoadRatio >= 0.45
+      && supportLoadRatio <= 1.65
+      && mostlyVertical
+    );
+    return {
+      kind: supportLike ? "support-load" : "impact",
+      supportLoadRatio: Number.isFinite(supportLoadRatio) ? supportLoadRatio : null,
+      dynamicBodyId: dynamicInfo?.worldObject?.bodyId ?? null,
     };
   }
 
@@ -125,6 +183,7 @@ async function createRapierPhysics() {
           z: Number(maxDirection?.z) || 0,
         },
       };
+      record.classification = classifyContactForce(record);
       stepEvents.push(record);
       recentContactForces.push(record);
       if (recentContactForces.length > CONTACT_FORCE_HISTORY_LIMIT) recentContactForces.shift();
@@ -432,7 +491,12 @@ async function createRapierPhysics() {
     if (!dynamicBodies.size) return dynamicsSteps;
     enableDynamicsGravity();
     world.timestep = clamp(dt, MIN_TIMESTEP, MAX_TIMESTEP);
+    const wallStartedAt = wallNow();
     world.step(eventQueue);
+    lastStepWallMs = Math.max(0, wallNow() - wallStartedAt);
+    maxStepWallMs = Math.max(maxStepWallMs, lastStepWallMs);
+    stepWallSamples.push(lastStepWallMs);
+    if (stepWallSamples.length > 120) stepWallSamples.shift();
     drainContactForceEvents();
     captureProfilerTimings();
     dynamicsSteps += 1;
@@ -669,9 +733,26 @@ async function createRapierPhysics() {
     dynamicBodyState,
     removeDynamicBody,
     step,
-    contactForces(limit = 16) {
+    contactForces(limit = 16, options = {}) {
       const count = Math.max(0, Math.min(CONTACT_FORCE_HISTORY_LIMIT, Math.floor(Number(limit) || 16)));
-      return recentContactForces.slice(-count);
+      const impactsOnly = Boolean(options?.impactsOnly);
+      const bodyId = String(options?.bodyId ?? "").trim() || null;
+      const kind = String(options?.kind ?? "").trim() || null;
+      const selected = recentContactForces.filter((record) => {
+        if (impactsOnly && record.classification?.kind !== "impact") return false;
+        if (bodyId) {
+          const first = record.collider1?.worldObject?.bodyId;
+          const second = record.collider2?.worldObject?.bodyId;
+          if (first !== bodyId && second !== bodyId) return false;
+        }
+        if (kind) {
+          const first = record.collider1?.worldObject?.kind;
+          const second = record.collider2?.worldObject?.kind;
+          if (first !== kind && second !== kind) return false;
+        }
+        return true;
+      });
+      return selected.slice(-count);
     },
     profilerSnapshot() {
       return lastProfilerTimings ? { ...lastProfilerTimings } : null;
@@ -687,7 +768,7 @@ async function createRapierPhysics() {
         profiler: {
           available: profilerAvailable,
           enabled: profilerAvailable && Boolean(world.profilerEnabled),
-          last: lastProfilerTimings ? { ...lastProfilerTimings } : null,
+          last: lastProfilerTimings ? structuredClone(lastProfilerTimings) : null,
         },
         contactForces: {
           threshold: CONTACT_FORCE_EVENT_THRESHOLD,
@@ -695,6 +776,9 @@ async function createRapierPhysics() {
           lastStepCount: lastStepContactForces.length,
           peakTotalForceMagnitude: peakContactForceMagnitude,
           recent: recentContactForces.slice(-8),
+          recentImpacts: recentContactForces
+            .filter((record) => record.classification?.kind === "impact")
+            .slice(-8),
         },
       };
     },

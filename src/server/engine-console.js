@@ -283,10 +283,14 @@ export function createEngineConsole(game) {
     return host.services.get("physics").stats();
   });
 
-  register("physics.contact-forces", "Return recent real Rapier contact-force events.", async ({ limit = 16 } = {}) => {
+  register("physics.contact-forces", "Return recent real Rapier contact-force events, optionally filtered to impacts or one body/kind.", async ({ limit = 16, impactsOnly = false, bodyId = null, kind = null } = {}) => {
     if (!host.services.has("physics")) throw new Error("physics service is unavailable");
     const physics = host.services.get("physics");
-    return physics.contactForces?.(limit) ?? [];
+    return physics.contactForces?.(limit, {
+      impactsOnly: Boolean(impactsOnly),
+      bodyId,
+      kind,
+    }) ?? [];
   });
 
   register("physics.shape-cast-capsule", "Sweep a player-sized or custom capsule through the real Rapier world.", async ({ origin, direction, maxDistance = 100, halfHeight = null, radius = null, excludeEntityId = null, worldOnly = false, targetDistance = 0 } = {}) => {
