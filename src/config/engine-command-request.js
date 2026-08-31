@@ -1,11 +1,11 @@
-const TEST_HUMAN = "force-crash-29kph-post-fix";
+const TEST_HUMAN = "force-crash-40kph-post-fix";
 const VEHICLE = "br-jeep-1";
-const TEST_NOW = 1788174000000;
+const TEST_NOW = 1788174300000;
 
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 238,
+  id: 239,
   mode: "battle-royale",
-  room: "force-crash-29kph-post-fix-238",
+  room: "force-crash-40kph-post-fix-239",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -20,7 +20,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
           arguments: [{
             id: TEST_HUMAN,
             kind: "diagnostic-human",
-            name: "Post Fix Crash Driver 29 kmh",
+            name: "Post Fix Crash Driver 40 kmh",
             bot: false,
             alive: true,
             health: 100,
@@ -30,19 +30,20 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       { command: "service.call", args: { service: "vehicles", method: "enter", arguments: [TEST_HUMAN, TEST_NOW] } },
       { command: "service.call", args: { service: "physics", method: "setDynamicBodyTranslation", arguments: [VEHICLE, { x: 900, y: 1.25, z: 900 }, true] } },
-      { command: "service.call", args: { service: "physics", method: "setDynamicBodyLinearVelocity", arguments: [VEHICLE, { x: 8, y: 0, z: 0 }, true] } },
+      { command: "service.call", args: { service: "physics", method: "setDynamicBodyLinearVelocity", arguments: [VEHICLE, { x: 11, y: 0, z: 0 }, true] } },
       { command: "game.step", args: { dt: 0.03, steps: 1, now: TEST_NOW } },
       { command: "service.call", args: { service: "physics", method: "setDynamicBodyTranslation", arguments: [VEHICLE, { x: 998.0, y: 1.25, z: 900 }, true] } },
-      { command: "service.call", args: { service: "physics", method: "setDynamicBodyLinearVelocity", arguments: [VEHICLE, { x: 8, y: 0, z: 0 }, true] } },
+      { command: "service.call", args: { service: "physics", method: "setDynamicBodyLinearVelocity", arguments: [VEHICLE, { x: 11, y: 0, z: 0 }, true] } },
       { command: "game.step", args: { dt: 0.1, steps: 1 } },
       { command: "physics.contact-forces", args: { limit: 32, bodyId: VEHICLE, impactsOnly: true } },
       { command: "service.call", args: { service: "vehicles", method: "stateFor", arguments: [VEHICLE] } },
       { command: "service.call", args: { service: "ragdoll", method: "isActive", arguments: [TEST_HUMAN] } },
+      { command: "service.call", args: { service: "ragdoll", method: "stateFor", arguments: [TEST_HUMAN] } },
       { command: "entity.inspect", args: { entityId: TEST_HUMAN } },
       { command: "service.call", args: { service: "parkour-ragdoll", method: "summary", arguments: [] } },
       { command: "service.call", args: { service: "ragdoll-damage-model", method: "summary", arguments: [] } },
       { command: "physics.stats", args: {} }
     ]
   },
-  requestedAt: "2026-08-31T13:55:00+03:00"
+  requestedAt: "2026-08-31T14:00:00+03:00"
 });
