@@ -6,7 +6,17 @@ on:
     branches:
       - main
     paths:
+      - src/**
+      - client/**
+      - public/client/**
+      - package.json
+      - package-lock.json
+      - wrangler.toml
       - .github/workflows/ai-source-snapshot.yml
+
+concurrency:
+  group: ai-source-snapshot-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
