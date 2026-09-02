@@ -1,6 +1,6 @@
 export const manifest = {
   id: "keyboard-camera-turn",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["keyboard-input"],
 };
 
@@ -14,6 +14,19 @@ function appleKeyboardPlatform() {
   return /mac|iphone|ipad|ipod/.test(platform);
 }
 
+function ensureAccessibleHelp(applePlatform) {
+  if (document.getElementById("keyboard-camera-controls-help")) return;
+  const headings = [...document.querySelectorAll("#game-panel h3")];
+  const heading = headings.find((node) => node.textContent?.trim() === "Управление") ?? headings[0];
+  if (!heading) return;
+  const help = document.createElement("p");
+  help.id = "keyboard-camera-controls-help";
+  help.textContent = applePlatform
+    ? "Поворот взгляда с клавиатуры: удерживайте Command и стрелку влево или вправо. Без Command эти стрелки по-прежнему двигают персонажа вбок."
+    : "Поворот взгляда с клавиатуры: удерживайте Alt и стрелку влево или вправо. Без Alt эти стрелки по-прежнему двигают персонажа вбок.";
+  heading.insertAdjacentElement("afterend", help);
+}
+
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const originalSample = input.sample.bind(input);
@@ -24,6 +37,8 @@ export async function setup(ctx) {
       : ["AltLeft", "AltRight"],
   );
   const pressedModifiers = new Set();
+
+  ensureAccessibleHelp(applePlatform);
 
   function modifierDown() {
     return pressedModifiers.size > 0;
