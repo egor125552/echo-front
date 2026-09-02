@@ -1,4 +1,5 @@
 import * as input from "../plugins/input.js";
+import * as keyboardCameraTurn from "../plugins/keyboard-camera-turn.js";
 import * as network from "../plugins/network.js";
 import * as parachuteInput from "../plugins/parachute-input.js";
 import * as parkourInput from "../plugins/parkour-input.js";
@@ -39,6 +40,7 @@ import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js
 
 export const echoFrontClientPreset = [
   input,
+  keyboardCameraTurn,
   network,
   parachuteInput,
   parkourInput,
