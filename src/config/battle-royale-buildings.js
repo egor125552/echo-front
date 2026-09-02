@@ -167,9 +167,9 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         height: 2.9,
         surface: "wood",
         acoustics: { zone: "two-storey-upper", reverbMix: 0.48 },
-        // The whole house is rotated 180 degrees compared with the old layout.
-        // Enter from the west-facing front door and keep walking straight east:
-        // the staircase is directly ahead instead of being around a corner.
+        // Enter from the west-facing front door and keep walking straight east.
+        // The stair opening is deliberately wider than the ramp so a blind
+        // player can stay on it without needing pixel-perfect steering.
         slabs: [
           { x: 4.5, z: 0, width: 9.0, depth: 14.0 },
           { x: -8.0, z: 0, width: 2.0, depth: 14.0 },
@@ -197,10 +197,13 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         toFloorId: "upper",
         x: -3.5,
         z: 0,
+        // Match the proven warehouse ramp: 6 m run, 4 m usable width,
+        // metal surface. The previous 3.2 m ramp let the player step off it
+        // around the middle and fall back to the ground floor.
         run: 6.0,
-        width: 3.2,
+        width: 4.0,
         risesToward: "east",
-        material: "wood",
+        material: "metal",
         acoustics: { zone: "two-storey-stairs", reverbMix: 0.4 },
       },
     ],
