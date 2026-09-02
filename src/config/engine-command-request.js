@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 2026090202,
+  id: 2026090203,
   mode: "battle-royale",
-  room: "building-navigation-arrival",
+  room: "keyboard-camera-turn",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -9,42 +9,14 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
     commands: [
       {
         command: "service.call",
-        args: {
-          service: "match-api",
-          method: "connectHuman",
-          arguments: ["navigation-test-player"],
-        },
+        args: { service: "match-api", method: "connectHuman", arguments: ["camera-turn-test-player"] },
       },
       {
         command: "service.call",
         args: {
           service: "movement",
           method: "teleport",
-          arguments: ["navigation-test-player", { x: 110, y: 0, z: 20, angle: 0 }],
-        },
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "navigation",
-          method: "selectTarget",
-          arguments: ["navigation-test-player", "warehouse"],
-        },
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "navigation",
-          method: "toggle",
-          arguments: ["navigation-test-player"],
-        },
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "navigation-face",
-          method: "enableGuidance",
-          arguments: ["navigation-test-player"],
+          arguments: ["camera-turn-test-player", { x: 0, y: 0, z: 0, angle: 0 }],
         },
       },
       {
@@ -52,70 +24,30 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["navigation-test-player", { forward: 1, strafe: 0, turn: 0, sprint: false, fireHeld: false }],
+          arguments: ["camera-turn-test-player", { forward: 0, strafe: 0, turn: 1, sprint: false, fireHeld: false }],
         },
       },
-      { command: "game.step", args: { dt: 0.05, steps: 235 } },
+      { command: "game.step", args: { dt: 0.05, steps: 10 } },
       {
         command: "service.call",
-        args: { service: "match-api", method: "handleInput", arguments: ["navigation-test-player", {}] },
+        args: { service: "match-api", method: "handleInput", arguments: ["camera-turn-test-player", {}] },
       },
-      {
-        command: "service.call",
-        args: { service: "navigation", method: "stateFor", arguments: ["navigation-test-player"] },
-      },
-      { command: "component.get", args: { entityId: "navigation-test-player", component: "Transform" } },
-      {
-        command: "service.call",
-        args: { service: "navigation", method: "availableTargets", arguments: ["navigation-test-player"] },
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "movement",
-          method: "teleport",
-          arguments: ["navigation-test-player", { x: -70, y: 0, z: -45, angle: 2.4 }],
-        },
-      },
-      {
-        command: "service.call",
-        args: {
-          service: "navigation",
-          method: "selectTarget",
-          arguments: ["navigation-test-player", "forest-hut"],
-        },
-      },
-      {
-        command: "service.call",
-        args: { service: "navigation", method: "toggle", arguments: ["navigation-test-player"] },
-      },
-      {
-        command: "service.call",
-        args: { service: "navigation-face", method: "enableGuidance", arguments: ["navigation-test-player"] },
-      },
+      { command: "component.get", args: { entityId: "camera-turn-test-player", component: "Transform" } },
       {
         command: "service.call",
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["navigation-test-player", { forward: 1, strafe: 0, turn: 0, sprint: false, fireHeld: false }],
+          arguments: ["camera-turn-test-player", { forward: 0, strafe: 0, turn: -1, sprint: false, fireHeld: false }],
         },
       },
-      { command: "game.step", args: { dt: 0.05, steps: 267 } },
+      { command: "game.step", args: { dt: 0.05, steps: 20 } },
       {
         command: "service.call",
-        args: { service: "match-api", method: "handleInput", arguments: ["navigation-test-player", {}] },
+        args: { service: "match-api", method: "handleInput", arguments: ["camera-turn-test-player", {}] },
       },
-      {
-        command: "service.call",
-        args: { service: "navigation", method: "stateFor", arguments: ["navigation-test-player"] },
-      },
-      { command: "component.get", args: { entityId: "navigation-test-player", component: "Transform" } },
-      {
-        command: "service.call",
-        args: { service: "navigation", method: "availableTargets", arguments: ["navigation-test-player"] },
-      }
+      { command: "component.get", args: { entityId: "camera-turn-test-player", component: "Transform" } }
     ],
   },
-  requestedAt: "2026-09-02T17:20:00Z",
+  requestedAt: "2026-09-02T17:22:00Z",
 });
