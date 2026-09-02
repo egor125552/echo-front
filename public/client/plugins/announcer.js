@@ -32,6 +32,7 @@ export async function setup(ctx) {
   let team = 0;
   let lastArmorPlates = null;
   let lastArmorReserve = null;
+  let lastArmorReserveCapacity = null;
   let mode = "tdm";
   let lastLocation = null;
   let lastSpectatorTargetId = null;
@@ -61,6 +62,7 @@ export async function setup(ctx) {
     mode = joinedMode === "battle-royale" ? "battle-royale" : "tdm";
     lastArmorPlates = null;
     lastArmorReserve = null;
+    lastArmorReserveCapacity = null;
     lastLocation = null;
     lastSelf = null;
     lastZone = null;
@@ -76,7 +78,7 @@ export async function setup(ctx) {
     }
     announce(
       `Вы в команде ${team}. Первый раунд учебный. ` +
-      "Стрелка вверх — вперёд, вниз — назад, влево — движение влево, вправо — движение вправо. Стрелки можно удерживать и сочетать. Поворот камеры не нужен. " +
+      "Стрелка вверх — вперёд, вниз — назад, влево — движение влево, вправо — движение вправо. Стрелки можно удерживать и сочетать. " +
       "X — огонь, X можно удерживать. R — перезарядка. B — поставить одну бронепластину. Shift — бег. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы сменить оружие. " +
       "На сенсорном экране доступны отдельные кнопки движения, стопа, огня, бега, перезарядки, бронепластины и смены оружия.",
       { interrupt: true },
@@ -91,6 +93,9 @@ export async function setup(ctx) {
     mode = snapshot.mode === "battle-royale" ? "battle-royale" : mode;
     if (self.armorPlates != null && lastArmorPlates == null) lastArmorPlates = Number(self.armorPlates);
     if (self.armorReserve != null && lastArmorReserve == null) lastArmorReserve = Number(self.armorReserve);
+    if (self.armorReserveMax != null && lastArmorReserveCapacity == null) {
+      lastArmorReserveCapacity = Number(self.armorReserveMax);
+    }
     const spectator = snapshot?.spectator;
     const observedId = spectator?.active ? spectator.targetId : network.playerId;
     const observed = snapshot?.entities?.find((entity) => entity.id === observedId) ?? self;
@@ -105,8 +110,18 @@ export async function setup(ctx) {
       else if (observed.location !== lastLocation) {
         const previous = lastLocation;
         lastLocation = observed.location;
-        const important = observed.location.startsWith("Склад") || previous.startsWith("Склад");
-        if (important) announce(observed.location, { interrupt: false, repeat: true });
+        const currentLower = String(observed.location).toLowerCase();
+        const previousLower = String(previous).toLowerCase();
+        const stairTransition = currentLower.includes("лестниц") || previousLower.includes("лестниц");
+        const important = stairTransition
+          || observed.location.startsWith("Склад")
+          || previous.startsWith("Склад");
+        if (important) {
+          announce(observed.location, {
+            interrupt: stairTransition,
+            repeat: true,
+          });
+        }
       }
     }
   });
@@ -130,17 +145,8 @@ export async function setup(ctx) {
       const next = Number(payload.platesRemaining);
       const reserve = Number(payload.reservePlates);
       const capacity = Number(payload.reserveCapacity);
-      if (Number.isFinite(reserve)) {
-        if (lastArmorReserve != null && reserve > lastArmorReserve) {
-          announce(
-            Number.isFinite(capacity)
-              ? `Бронепластина подобрана. В запасе ${reserve} из ${capacity}`
-              : `Бронепластина подобрана. В запасе ${reserve}`,
-            { interrupt: false, repeat: true },
-          );
-        }
-        lastArmorReserve = reserve;
-      }
+      if (Number.isFinite(reserve)) lastArmorReserve = reserve;
+      if (Number.isFinite(capacity)) lastArmorReserveCapacity = capacity;
       if (Number.isFinite(next)) {
         if (lastArmorPlates != null && next < lastArmorPlates) {
           announce(`Осталось ${next} ${next === 1 ? "пластина" : next >= 2 && next <= 4 ? "пластины" : "пластин"}`, {
@@ -173,6 +179,7 @@ export async function setup(ctx) {
     if (packet.event === "entity:respawned" && payload.entityId === network.playerId && mode !== "battle-royale") {
       lastArmorPlates = null;
       lastArmorReserve = null;
+      lastArmorReserveCapacity = null;
       announce("Вы снова в бою", { interrupt: true });
     }
 
@@ -215,7 +222,24 @@ export async function setup(ctx) {
           if (payload.restocked) announce(`Патроны к автомату: ${Math.max(0, Number(payload.quantity) || 0)}`, { interrupt: false });
           else announce(payload.applied ? "Автомат подобран" : "Боезапас автомата полон", { interrupt: false });
         }
-        if (payload.loot === "armor" && !payload.applied) announce("Запас бронепластин полон", { interrupt: false });
+        if (payload.loot === "armor") {
+          if (!payload.applied) {
+            announce("Запас бронепластин полон", { interrupt: false, repeat: true });
+          } else {
+            const quantity = Math.max(0, Number(payload.quantity) || 0);
+            const reserve = Number(lastArmorReserve);
+            const capacity = Number(lastArmorReserveCapacity);
+            let message = `Бронепластины: плюс ${quantity}`;
+            if (Number.isFinite(reserve)) {
+              message += Number.isFinite(capacity)
+                ? `. В запасе ${reserve} из ${capacity}`
+                : `. В запасе ${reserve}`;
+            }
+            // Pickup is a direct user action. Non-interrupting speech is dropped
+            // whenever another phrase is playing, which made these counts vanish.
+            announce(message, { interrupt: true, repeat: true });
+          }
+        }
       }
       if (packet.event === "battle-royale:ended") {
         announce(payload.winnerId === network.playerId ? "Победа. Вы последний выживший" : "Королевская битва завершена", { interrupt: true });
