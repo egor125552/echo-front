@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 2026090204,
+  id: 2026090205,
   mode: "battle-royale",
-  room: "two-storey-stair-regression",
+  room: "two-storey-stair-traversal",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -12,22 +12,41 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "match-api",
           method: "connectHuman",
-          arguments: ["stair-regression-player"],
+          arguments: ["stair-traversal-player"],
         },
       },
       {
         command: "component.patch",
         args: {
-          entityId: "stair-regression-player",
-          component: "Transform",
+          entityId: "stair-traversal-player",
+          component: "Parachute",
           patch: {
-            x: 127.8,
-            y: 0,
-            z: 121.75,
-            angle: 1.5707963267948966,
-            verticalVelocity: 0,
-            grounded: true,
+            phase: "landed",
+            airborne: false,
+            deployed: false,
+            simulatedVerticalVelocity: 0,
+            savedControl: null,
+            beforeMovementX: null,
+            beforeMovementY: null,
+            beforeMovementZ: null,
+            groundDistance: 0,
+            landingApproach: false,
+            turnRate: 0,
+            glideSpeed: 0,
+            brake: 0,
+            airSpeed: 0
           },
+        },
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "movement",
+          method: "teleport",
+          arguments: [
+            "stair-traversal-player",
+            { "x": 127.8, "y": 0, "z": 121.75, "angle": 1.5707963267948966 }
+          ],
         },
       },
       {
@@ -35,7 +54,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "map",
           method: "surfaceAt",
-          arguments: [{ x: 131.5, y: 1.6, z: 121.75 }],
+          arguments: [{ "x": 131.5, "y": 1.6, "z": 121.75 }],
         },
       },
       {
@@ -43,7 +62,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "map",
           method: "locationAt",
-          arguments: [{ x: 131.5, y: 1.6, z: 121.75 }],
+          arguments: [{ "x": 131.5, "y": 1.6, "z": 121.75 }],
         },
       },
       {
@@ -51,7 +70,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["stair-regression-player", { "forward": 1 }],
+          arguments: ["stair-traversal-player", { "forward": 1 }],
         },
       },
       {
@@ -63,13 +82,13 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "match-api",
           method: "handleInput",
-          arguments: ["stair-regression-player", {}],
+          arguments: ["stair-traversal-player", {}],
         },
       },
       {
         command: "component.get",
         args: {
-          entityId: "stair-regression-player",
+          entityId: "stair-traversal-player",
           component: "Transform"
         },
       },
@@ -78,10 +97,10 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "match-api",
           method: "snapshotFor",
-          arguments: ["stair-regression-player"]
+          arguments: ["stair-traversal-player"]
         },
       }
     ]
   },
-  requestedAt: "2026-09-02T17:30:00Z",
+  requestedAt: "2026-09-02T17:34:00Z",
 });
