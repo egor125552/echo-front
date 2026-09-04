@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-crate-integration",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: [
     "match-api",
     "battle-royale-crate-physics",
@@ -17,6 +17,9 @@ export const manifest = {
 const PUSH_FORWARD_THRESHOLD = 0.12;
 const PUSH_AUDIO_UPDATE_MS = 90;
 const PUSH_AUDIO_RADIUS = 46;
+const PUSH_AUDIO_STALL_SPEED = 0.055;
+const PUSH_AUDIO_RESUME_SPEED = 0.13;
+const PUSH_AUDIO_STALL_MS = 280;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -49,6 +52,8 @@ export async function setup(ctx) {
         pushed: false,
         startedCrateId: null,
         lastAudioUpdateAt: 0,
+        lowMotionSince: null,
+        audioSuppressed: false,
       };
       states.set(playerId, state);
     }
@@ -69,12 +74,9 @@ export async function setup(ctx) {
     };
   }
 
-  function stopPush(playerId, now = Date.now(), reason = "released") {
+  function stopPushAudio(playerId, now = Date.now(), reason = "released") {
     const state = states.get(playerId);
-    if (!state) return false;
-    state.requested = false;
-    state.forward = 0;
-    if (!state.startedCrateId) return false;
+    if (!state?.startedCrateId) return false;
     const crateId = state.startedCrateId;
     const crate = cratePhysics.crate(crateId);
     cratePhysics.syncAll?.();
@@ -89,7 +91,18 @@ export async function setup(ctx) {
       now,
     }));
     state.startedCrateId = null;
+    state.lastAudioUpdateAt = 0;
     return true;
+  }
+
+  function stopPush(playerId, now = Date.now(), reason = "released") {
+    const state = states.get(playerId);
+    if (!state) return false;
+    state.requested = false;
+    state.forward = 0;
+    state.lowMotionSince = null;
+    state.audioSuppressed = false;
+    return stopPushAudio(playerId, now, reason);
   }
 
   function clearState(playerId, now = Date.now(), reason = "cleared") {
@@ -115,8 +128,8 @@ export async function setup(ctx) {
     const pressed = Boolean(input.interactPressed);
     const state = stateFor(playerId);
 
-    // A momentary touch/virtual interaction has no held state, so preserve the
-    // old immediate E-like behavior for touch controls, doors, loot and cars.
+    // Touch and virtual interaction remains momentary. Keyboard hold adds the
+    // continuous crate-push gesture without changing ordinary doors or loot.
     if (pressed && !keyboardHeld) {
       clearState(playerId, now, "tap");
       originalHandleInput(playerId, input, now);
@@ -134,10 +147,9 @@ export async function setup(ctx) {
       state.pushed = false;
       state.forward = Math.max(0, finite(input.forward));
       state.requested = state.forward >= PUSH_FORWARD_THRESHOLD;
+      state.lowMotionSince = null;
+      state.audioSuppressed = false;
 
-      // Suppress the normal press while a nearby crate is armed. If the player
-      // simply taps and releases E, we replay the normal interaction on release.
-      // If they walk forward while holding E, it becomes a physical push instead.
       originalHandleInput(playerId, { ...input, interactPressed: false }, now);
       return;
     }
@@ -207,15 +219,32 @@ export async function setup(ctx) {
         }
 
         state.pushed = true;
+        const speed = Math.max(0, finite(pushed.speed));
+        if (speed <= PUSH_AUDIO_STALL_SPEED) {
+          if (state.lowMotionSince == null) state.lowMotionSince = now;
+          if (!state.audioSuppressed && now - state.lowMotionSince >= PUSH_AUDIO_STALL_MS) {
+            stopPushAudio(playerId, now, "stalled");
+            state.audioSuppressed = true;
+          }
+        } else {
+          state.lowMotionSince = null;
+          if (state.audioSuppressed && speed >= PUSH_AUDIO_RESUME_SPEED) {
+            state.audioSuppressed = false;
+            state.startedCrateId = null;
+          }
+        }
+
+        if (state.audioSuppressed) continue;
+
         if (state.startedCrateId !== pushed.crateId) {
-          if (state.startedCrateId) stopPush(playerId, now, "switched-crate");
+          if (state.startedCrateId) stopPushAudio(playerId, now, "switched-crate");
           state.startedCrateId = pushed.crateId;
           state.lastAudioUpdateAt = now;
           ctx.events.emit("crate:push-start", spatialPayload({
             entityId: playerId,
             crateId: pushed.crateId,
             material: "metal",
-            speed: pushed.speed,
+            speed,
             force: pushed.force,
             x: pushed.x,
             y: pushed.y,
@@ -228,7 +257,7 @@ export async function setup(ctx) {
             entityId: playerId,
             crateId: pushed.crateId,
             material: "metal",
-            speed: pushed.speed,
+            speed,
             force: pushed.force,
             x: pushed.x,
             y: pushed.y,
@@ -241,9 +270,6 @@ export async function setup(ctx) {
       for (const playerId of states.keys()) stopPush(playerId, now, "match-inactive");
     }
 
-    // Forces must be queued before the vehicle integration advances the shared
-    // Rapier world. Capture velocity immediately before that physics step so
-    // wall impacts can be classified from real contact force + speed loss.
     cratePhysics.capturePreStep?.();
     const result = originalStep(dt, now);
     cratePhysics.afterPhysics?.(now);
