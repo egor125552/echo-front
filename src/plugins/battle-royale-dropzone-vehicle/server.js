@@ -3,7 +3,7 @@ export const DROPZONE_VEHICLE_OFFSET = 12;
 
 export const manifest = {
   id: "battle-royale-dropzone-vehicle",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: [
     "battle-royale-parachute",
     "battle-royale-vehicle-fleet",
@@ -32,12 +32,15 @@ export async function setup(ctx) {
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
   const assignedByPlayer = new Map();
   const assignedVehicles = new Map();
+  let placements = 0;
+  let repositions = 0;
+  let parkingFallbacks = 0;
 
   function groundCandidate(x, z, originY) {
     const hit = physics.raycastSupportWorld(
       { x, y: originY, z },
       { x: 0, y: -1, z: 0 },
-      100,
+      140,
     );
     if (!hit || hit.worldObject?.kind !== "ground") return null;
     return {
@@ -50,21 +53,34 @@ export async function setup(ctx) {
   function chooseParkingPoint(position, angle = 0) {
     const x = finite(position?.x);
     const z = finite(position?.z);
-    const y = Math.max(20, finite(position?.y) + 20);
-    const right = { x: Math.cos(angle), z: Math.sin(angle) };
-    const forward = { x: Math.sin(angle), z: -Math.cos(angle) };
-    const candidates = [
-      { x: x + right.x * DROPZONE_VEHICLE_OFFSET, z: z + right.z * DROPZONE_VEHICLE_OFFSET },
-      { x: x - right.x * DROPZONE_VEHICLE_OFFSET, z: z - right.z * DROPZONE_VEHICLE_OFFSET },
-      { x: x - forward.x * (DROPZONE_VEHICLE_OFFSET + 3), z: z - forward.z * (DROPZONE_VEHICLE_OFFSET + 3) },
-      { x: x + forward.x * (DROPZONE_VEHICLE_OFFSET + 3), z: z + forward.z * (DROPZONE_VEHICLE_OFFSET + 3) },
-    ];
-    for (const candidate of candidates) {
-      const grounded = groundCandidate(candidate.x, candidate.z, y);
-      if (grounded) return grounded;
+    const y = Math.max(28, finite(position?.y) + 28);
+    const heading = Number(angle) || 0;
+    const radii = [DROPZONE_VEHICLE_OFFSET, 16, 22, 28];
+    const offsets = [0, Math.PI, Math.PI / 2, -Math.PI / 2, Math.PI / 4, -Math.PI / 4, 3 * Math.PI / 4, -3 * Math.PI / 4];
+
+    for (const radius of radii) {
+      for (const offset of offsets) {
+        const theta = heading + offset;
+        const candidate = {
+          x: x + Math.cos(theta) * radius,
+          z: z + Math.sin(theta) * radius,
+        };
+        const grounded = groundCandidate(candidate.x, candidate.z, y);
+        if (grounded) return grounded;
+      }
     }
-    return groundCandidate(x + DROPZONE_VEHICLE_OFFSET, z, y)
-      ?? { x: x + DROPZONE_VEHICLE_OFFSET, y: 0, z };
+
+    const nearLanding = groundCandidate(x, z, y);
+    if (nearLanding) return nearLanding;
+    parkingFallbacks += 1;
+    return { x: x + DROPZONE_VEHICLE_OFFSET, y: 0, z };
+  }
+
+  function releaseAssignment(entityId) {
+    const vehicleId = assignedByPlayer.get(entityId);
+    if (vehicleId) assignedVehicles.delete(vehicleId);
+    assignedByPlayer.delete(entityId);
+    return vehicleId ?? null;
   }
 
   function candidateVehicle(entityId) {
@@ -72,6 +88,7 @@ export async function setup(ctx) {
     if (assigned) {
       const state = vehicles.stateFor(assigned);
       if (state && (!state.occupied || state.driverId === entityId)) return state;
+      releaseAssignment(entityId);
     }
 
     const candidates = (vehicles.snapshot?.() ?? [])
@@ -97,15 +114,20 @@ export async function setup(ctx) {
     const entity = entities.get(entityId);
     if (!entity || entity.bot || entity.kind !== "human") return null;
 
-    const existingVehicleId = assignedByPlayer.get(entityId);
-    if (existingVehicleId) return vehicles.stateFor(existingVehicleId);
-
-    const vehicle = candidateVehicle(entityId);
-    const body = vehicle ? physics.dynamicBody(vehicle.id) : null;
     const transform = ctx.components.get(entityId, "Transform");
-    if (!vehicle || !body || !transform) return null;
-
+    if (!transform) return null;
     const landing = landingPosition ?? transform;
+
+    const previousVehicleId = assignedByPlayer.get(entityId) ?? null;
+    let vehicle = previousVehicleId ? vehicles.stateFor(previousVehicleId) : null;
+    if (vehicle?.occupied && vehicle.driverId !== entityId) {
+      releaseAssignment(entityId);
+      vehicle = null;
+    }
+    if (!vehicle) vehicle = candidateVehicle(entityId);
+    const body = vehicle ? physics.dynamicBody(vehicle.id) : null;
+    if (!vehicle || !body) return null;
+
     const parking = chooseParkingPoint(landing, finite(transform.angle));
     const bodyHeight = vehicle.kind === "supercar" ? 1.05 : 1.25;
     body.setTranslation({
@@ -118,6 +140,8 @@ export async function setup(ctx) {
     body.wakeUp?.();
     physics.syncQueries?.();
     assignVehicle(entityId, vehicle.id);
+    placements += 1;
+    if (previousVehicleId === vehicle.id) repositions += 1;
 
     const state = vehicles.stateFor(vehicle.id);
     const distance = state ? distance2(landing, state) : distance2(landing, parking);
@@ -130,6 +154,7 @@ export async function setup(ctx) {
       y: state?.y ?? parking.y + bodyHeight,
       z: state?.z ?? parking.z,
       distance,
+      repositioned: previousVehicleId === vehicle.id,
       now,
     });
     return state;
@@ -140,7 +165,7 @@ export async function setup(ctx) {
     return vehicleId ? vehicles.stateFor(vehicleId) : null;
   }
 
-  function assertNear(position, maximumDistance = 18, entityId = null) {
+  function assertNear(position, maximumDistance = 30, entityId = null) {
     const states = entityId && assignedByPlayer.has(entityId)
       ? [assignedFor(entityId)].filter(Boolean)
       : (vehicles.snapshot?.() ?? []).filter((vehicle) => vehicle.kind === "supercar");
@@ -154,14 +179,21 @@ export async function setup(ctx) {
     return nearest;
   }
 
+  ctx.events.on("parachute:launched", ({ entityId }) => {
+    releaseAssignment(entityId);
+  });
+
   ctx.events.on("parachute:landed", ({ entityId, x, y, z, now }) => {
     placeNear(entityId, { x, y, z }, Number(now) || Date.now());
   });
 
+  ctx.events.on("battle-royale:started", () => {
+    assignedByPlayer.clear();
+    assignedVehicles.clear();
+  });
+
   ctx.events.on("entity:removed", ({ entityId }) => {
-    const vehicleId = assignedByPlayer.get(entityId);
-    if (vehicleId) assignedVehicles.delete(vehicleId);
-    assignedByPlayer.delete(entityId);
+    releaseAssignment(entityId);
   });
 
   matchApi.eventsForPlayer = (playerId, packets = []) => {
@@ -183,5 +215,15 @@ export async function setup(ctx) {
     placeNear,
     assignedFor,
     assertNear,
+    releaseAssignment,
+    summary() {
+      return {
+        assignedPlayers: assignedByPlayer.size,
+        assignedVehicles: assignedVehicles.size,
+        placements,
+        repositions,
+        parkingFallbacks,
+      };
+    },
   });
 }
