@@ -20,8 +20,6 @@ function withArchitecturalOcclusion(options = {}) {
   return {
     ...options,
     gain: gain * architecturalGainFactor(occlusion),
-    // Keep the low-pass stage at full physical strength while the gain stage
-    // supplies the missing sense of a wall or closed door between spaces.
     occlusion: Math.min(1, occlusion * 1.08),
   };
 }
@@ -37,8 +35,4 @@ export async function setup(ctx) {
   audio.playSpatialBuffer = (buffer, position, options = {}) => (
     originalPlaySpatialBuffer(buffer, position, withArchitecturalOcclusion(options))
   );
-
-  ctx.services.provide?.("architectural-occlusion", {
-    gainFactor: architecturalGainFactor,
-  });
 }
