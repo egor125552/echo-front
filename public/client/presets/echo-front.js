@@ -13,6 +13,7 @@ import * as socialProfile from "../plugins/social-profile.js";
 import * as accessibleMenus from "../plugins/accessible-menus.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
+import * as architecturalOcclusion from "../plugins/architectural-occlusion.js";
 import * as crateInteraction from "../plugins/battle-royale-crate-interaction.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
@@ -35,6 +36,7 @@ import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js"
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
+import * as lootAnnouncer from "../plugins/battle-royale-loot-announcer.js";
 import * as parachuteAnnouncer from "../plugins/parachute-announcer.js";
 import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js";
 
@@ -54,6 +56,7 @@ export const echoFrontClientPreset = [
   accessibleMenus,
   speechDiagnostics,
   spatialAudio,
+  architecturalOcclusion,
   crateInteraction,
   audioResilience,
   navigation,
@@ -76,6 +79,7 @@ export const echoFrontClientPreset = [
   lowHealthAudio,
   hud,
   announcer,
+  lootAnnouncer,
   parachuteAnnouncer,
   vehicleAnnouncer,
 ];
