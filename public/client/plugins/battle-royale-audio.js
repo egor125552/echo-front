@@ -11,8 +11,8 @@ const LOOT_PICKUP_URL = warzoneSound("Call of Duty： Warzone ｜ Legendary Loot
 const CIRCLE_CLOSING_URL = warzoneSound("Call of Duty： Warzone ｜ Circle Closing Now! [Sound Effect].mp3");
 const VICTORY_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Victory! [Sound Effect].mp3");
 const DEFEAT_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Defeat [Sound Effect].mp3");
-const CRATE_AUDIO_RADIUS = 10;
-const CRATE_START_RADIUS = 9.5;
+const CRATE_AUDIO_RADIUS = 20;
+const CRATE_START_RADIUS = 18.5;
 const CRATE_FLOOR_TOLERANCE = 1.75;
 const CRATE_OCCLUSION_RESTART_DELTA = 0.08;
 const CRATE_AMBIENT_GAIN = 0.48;
@@ -97,8 +97,8 @@ export async function setup(ctx) {
       const handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
         radius: CRATE_AUDIO_RADIUS,
         gain: crateAmbientGain(occlusion),
-        referenceDistance: 1.1,
-        rolloffFactor: 4.5,
+        referenceDistance: 1.4,
+        rolloffFactor: 2.2,
         occlusion: audibleOcclusion,
         loop: true,
         channel: crateChannel(crate.id),
@@ -109,8 +109,6 @@ export async function setup(ctx) {
         return;
       }
       if (handle) {
-        // Keep the raw physical value here so reopening a door reliably crosses
-        // the restart threshold even though playback uses the perceptual curve.
         handle.crateOcclusion = occlusion;
         crateLoops.set(crate.id, handle);
       }
