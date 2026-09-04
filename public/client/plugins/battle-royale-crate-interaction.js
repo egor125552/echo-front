@@ -8,7 +8,9 @@ const START_RATTLE_URL = "/audio/gdc2026/MACHMech_Mechanism Counting Machine Int
 const LIGHT_IMPACT_URL = "/audio/gdc2026/METLImpt_Metal Old File Impact Tap Against Tire Iron Metallic Hit 01_ESM_HDGM.mp3";
 const HARD_IMPACT_URL = "/audio/gdc2026/METLImpt_METAL SWING HIT Weapon Swing To Metallic Body Impact And Resonant Tail 01_DDUMAIS_MWP2.mp3";
 const BODY_IMPACT_URL = "/audio/environment/metal-hit.mp3";
-const LOOP_STALE_MS = 520;
+const LOOP_STALE_MS = 340;
+const LOW_SPEED_STOP_MS = 220;
+const MIN_DRAG_SPEED = 0.055;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -30,10 +32,6 @@ export async function setup(ctx) {
   const dragLoops = new Map();
   const dragGeneration = new Map();
 
-  // The existing input layer intentionally exposes E as a one-shot interaction.
-  // Decorate its sampler rather than replacing it: keyboard E gains held/release
-  // semantics needed by crate pushing, while touch and virtual interactions stay
-  // momentary and keep their old behavior.
   const originalSample = input.sample.bind(input);
   input.sample = () => {
     const sampled = originalSample();
@@ -60,6 +58,7 @@ export async function setup(ctx) {
   ctx.events.on("input:reset", () => {
     if (interactHeld) interactReleased = true;
     interactHeld = false;
+    stopAllDrags();
   });
 
   function nextGeneration(crateId) {
@@ -69,6 +68,7 @@ export async function setup(ctx) {
   }
 
   function stopDrag(crateId) {
+    if (!crateId) return;
     nextGeneration(crateId);
     const current = dragLoops.get(crateId);
     dragLoops.delete(crateId);
@@ -83,9 +83,10 @@ export async function setup(ctx) {
   async function startDrag(payload) {
     const crateId = String(payload.crateId ?? "");
     if (!crateId) return;
+    const speed = clamp(payload.speed, 0, 2.5);
+    if (speed < MIN_DRAG_SPEED) return;
     stopDrag(crateId);
     const generation = nextGeneration(crateId);
-    const speed = clamp(payload.speed, 0, 2.5);
     const gain = 0.46 + speed * 0.13;
     const position = positionOf(payload);
 
@@ -109,6 +110,7 @@ export async function setup(ctx) {
         dragLoops.set(crateId, {
           handle,
           lastUpdateAt: performance.now(),
+          lowSpeedSince: null,
         });
       }
     } catch (error) {
@@ -118,12 +120,20 @@ export async function setup(ctx) {
 
   function updateDrag(payload) {
     const crateId = String(payload.crateId ?? "");
+    const speed = clamp(payload.speed, 0, 2.5);
     const current = dragLoops.get(crateId);
     if (!current) {
-      void startDrag(payload);
+      if (speed >= MIN_DRAG_SPEED) void startDrag(payload);
       return;
     }
-    current.lastUpdateAt = performance.now();
+    const now = performance.now();
+    current.lastUpdateAt = now;
+    if (speed < MIN_DRAG_SPEED) {
+      if (current.lowSpeedSince == null) current.lowSpeedSince = now;
+      if (now - current.lowSpeedSince >= LOW_SPEED_STOP_MS) stopDrag(crateId);
+      return;
+    }
+    current.lowSpeedSince = null;
     current.handle?.update?.(positionOf(payload));
   }
 
@@ -156,8 +166,6 @@ export async function setup(ctx) {
 
     try {
       if (tier === "hard") {
-        // Two layers: a heavy body thump supplies mass, then the GDC resonant
-        // metallic tail keeps the collision from sounding like a tiny one-shot.
         const body = audio.playSpatial(BODY_IMPACT_URL, position, {
           ...common,
           gain: 0.34 + intensity * 0.28,
@@ -198,7 +206,7 @@ export async function setup(ctx) {
     const payload = packet?.payload ?? {};
     if (packet.event === "crate:push-start") {
       void playStartRattle(payload);
-      void startDrag(payload);
+      if (Number(payload.speed) >= MIN_DRAG_SPEED) void startDrag(payload);
       return;
     }
     if (packet.event === "crate:push-update") {
@@ -219,7 +227,7 @@ export async function setup(ctx) {
     for (const [crateId, current] of dragLoops) {
       if (now - current.lastUpdateAt > LOOP_STALE_MS) stopDrag(crateId);
     }
-  }, 180);
+  }, 140);
 
   ctx.services.provide?.("crate-interaction-audio", {
     dragUrl: DRAG_URL,

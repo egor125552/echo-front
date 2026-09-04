@@ -1,6 +1,6 @@
 export const manifest = {
   id: "battle-royale-parachute-dynamics",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["entities", "battle-royale-parachute", "rapier-physics"],
   capabilities: ["services.consume", "components.read", "components.write", "events.emit"],
 };
@@ -9,6 +9,11 @@ const MAX_DT = 0.1;
 const MAX_WIND_SPEED = 3.2;
 const FREEFALL_WIND_AUTHORITY = 0.34;
 const CANOPY_WIND_AUTHORITY = 1.0;
+const FREEFALL_BASE_FORWARD_SPEED = 3.4;
+const FREEFALL_FORWARD_BOOST = 5.2;
+const FREEFALL_BACKWARD_BRAKE = 2.6;
+const FREEFALL_STRAFE_SPEED = 4.6;
+const FREEFALL_SPRINT_BOOST = 1.1;
 const FULL_BRAKE_THRESHOLD = 0.86;
 const STALL_DELAY_SECONDS = 1.65;
 const STALL_BUILD_SECONDS = 1.15;
@@ -56,6 +61,28 @@ function windAt(transform, now) {
   };
 }
 
+function freefallVelocity(transform, input = {}) {
+  const forwardInput = clamp(input.forward, -1, 1);
+  const strafeInput = clamp(input.strafe, -1, 1);
+  let forwardSpeed = FREEFALL_BASE_FORWARD_SPEED;
+  if (forwardInput >= 0) forwardSpeed += forwardInput * FREEFALL_FORWARD_BOOST;
+  else forwardSpeed += forwardInput * FREEFALL_BACKWARD_BRAKE;
+  if (input.sprint && forwardInput > 0.05) forwardSpeed += FREEFALL_SPRINT_BOOST;
+  forwardSpeed = Math.max(0.65, forwardSpeed);
+
+  const strafeSpeed = strafeInput * FREEFALL_STRAFE_SPEED;
+  const angle = Number(transform?.angle) || 0;
+  const forwardX = Math.sin(angle);
+  const forwardZ = -Math.cos(angle);
+  const rightX = Math.cos(angle);
+  const rightZ = Math.sin(angle);
+  return {
+    x: forwardX * forwardSpeed + rightX * strafeSpeed,
+    z: forwardZ * forwardSpeed + rightZ * strafeSpeed,
+    speed: Math.hypot(forwardSpeed, strafeSpeed),
+  };
+}
+
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const parachute = ctx.services.get("parachute");
@@ -73,6 +100,7 @@ export async function setup(ctx) {
       if (!entity.alive || entity.bot || entity.kind !== "human") continue;
       const state = ctx.components.get(entity.id, "Parachute");
       const transform = ctx.components.get(entity.id, "Transform");
+      const input = ctx.components.get(entity.id, "Input");
       if (!state?.airborne || !transform) continue;
 
       const wind = windAt(transform, now);
@@ -86,8 +114,34 @@ export async function setup(ctx) {
         state.stall = approach(Number(state.stall) || 0, 0, safeDt / STALL_RECOVERY_SECONDS);
         state.turnTransient = approach(Number(state.turnTransient) || 0, 0, safeDt * TURN_TRANSIENT_DECAY);
         state.previousTurnRate = 0;
+
+        if (input) {
+          state.freefallSavedControl = {
+            forward: input.forward,
+            strafe: input.strafe,
+            sprint: input.sprint,
+          };
+          const velocity = freefallVelocity(transform, input);
+          state.freefallVelocityX = velocity.x;
+          state.freefallVelocityZ = velocity.z;
+          state.glideSpeed = velocity.speed;
+          input.forward = 0;
+          input.strafe = 0;
+          input.sprint = false;
+        } else {
+          const velocity = freefallVelocity(transform, {});
+          state.freefallVelocityX = velocity.x;
+          state.freefallVelocityZ = velocity.z;
+          state.glideSpeed = velocity.speed;
+        }
+        const down = Math.max(0, -(Number(state.simulatedVerticalVelocity) || 0));
+        state.airSpeed = Math.hypot(down, Number(state.glideSpeed) || 0, wind.speed);
         continue;
       }
+
+      state.freefallSavedControl = null;
+      state.freefallVelocityX = 0;
+      state.freefallVelocityZ = 0;
 
       const inflation = clamp(state.inflation);
       const brake = clamp(state.brake);
@@ -168,24 +222,39 @@ export async function setup(ctx) {
       if (!entity.alive || entity.bot || entity.kind !== "human") continue;
       const state = ctx.components.get(entity.id, "Parachute");
       const transform = ctx.components.get(entity.id, "Transform");
+      const input = ctx.components.get(entity.id, "Input");
       if (!state?.airborne || !transform || safeDt <= 0) continue;
 
-      const authority = state.phase === "deployed"
+      const deployed = state.phase === "deployed";
+      const authority = deployed
         ? CANOPY_WIND_AUTHORITY * (0.25 + 0.75 * clamp(state.inflation))
         : FREEFALL_WIND_AUTHORITY;
-      const stallAuthority = state.phase === "deployed" ? 1 - clamp(state.stall) * 0.18 : 1;
-      const dx = (Number(state.windX) || 0) * authority * stallAuthority * safeDt;
-      const dz = (Number(state.windZ) || 0) * authority * stallAuthority * safeDt;
+      const stallAuthority = deployed ? 1 - clamp(state.stall) * 0.18 : 1;
+      let dx = (Number(state.windX) || 0) * authority * stallAuthority * safeDt;
+      let dz = (Number(state.windZ) || 0) * authority * stallAuthority * safeDt;
 
-      if (Math.abs(dx) < 0.0001 && Math.abs(dz) < 0.0001) continue;
-      const moved = physics.move(entity.id, dx, dz, 0);
-      const position = physics.position(entity.id);
-      if (position) {
-        transform.x = position.x;
-        transform.y = Math.abs(position.y) < 0.0001 ? 0 : position.y;
-        transform.z = position.z;
+      if (!deployed) {
+        dx += (Number(state.freefallVelocityX) || 0) * safeDt;
+        dz += (Number(state.freefallVelocityZ) || 0) * safeDt;
       }
-      if (moved?.grounded) transform.grounded = true;
+
+      if (Math.abs(dx) >= 0.0001 || Math.abs(dz) >= 0.0001) {
+        const moved = physics.move(entity.id, dx, dz, 0);
+        const position = physics.position(entity.id);
+        if (position) {
+          transform.x = position.x;
+          transform.y = Math.abs(position.y) < 0.0001 ? 0 : position.y;
+          transform.z = position.z;
+        }
+        if (moved?.grounded) transform.grounded = true;
+      }
+
+      if (!deployed && input && state.freefallSavedControl) {
+        input.forward = state.freefallSavedControl.forward;
+        input.strafe = state.freefallSavedControl.strafe;
+        input.sprint = state.freefallSavedControl.sprint;
+        state.freefallSavedControl = null;
+      }
     }
 
     return result;
@@ -204,6 +273,7 @@ export async function setup(ctx) {
       stall: clamp(state?.stall),
       brakeHoldSeconds: Math.max(0, Number(state?.brakeHoldSeconds) || 0),
       turnTransient: clamp(state?.turnTransient),
+      freefallForwardSpeed: state?.phase === "freefall" ? Math.max(0, Number(state?.glideSpeed) || 0) : 0,
     };
   };
 }
