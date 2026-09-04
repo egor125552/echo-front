@@ -12,6 +12,7 @@ const CRASH_RADIUS = 120;
 const CABIN_TRUCK_CUTOFF_HZ = 3600;
 const CABIN_SPORT_CUTOFF_HZ = 4600;
 const CABIN_OPEN_CUTOFF_HZ = 18000;
+const OCCLUSION_RESTART_DELTA = 0.08;
 const TRUCK_ENGINE_URL = "/audio/vehicles/ts3/ts3_truck_engine.mp3";
 const SPORT_ENGINE_URL = "/audio/vehicles/ts3/engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
@@ -52,6 +53,7 @@ export async function setup(ctx) {
   let engine = null;
   let currentVehicleId = null;
   let currentProfile = null;
+  let currentOcclusion = 0;
   let brakingActive = false;
 
   function profileFor(vehicle) {
@@ -71,6 +73,7 @@ export async function setup(ctx) {
     engine = null;
     currentVehicleId = null;
     currentProfile = null;
+    currentOcclusion = 0;
     brakingActive = false;
   }
 
@@ -134,6 +137,7 @@ export async function setup(ctx) {
       referenceDistance: 2.5,
       rolloffFactor: 0.36,
       airAbsorptionMinHz: 4300,
+      occlusion: clamp(vehicle?.occlusion, 0, 1),
       loop: false,
       channel: BRAKE_CHANNEL,
       replace: true,
@@ -155,7 +159,9 @@ export async function setup(ctx) {
     }
 
     const profile = profileFor(vehicle);
-    if (!engine || currentVehicleId !== vehicle.id || currentProfile !== profile) {
+    const occlusion = clamp(vehicle?.occlusion, 0, 1);
+    const acousticsChanged = Math.abs(currentOcclusion - occlusion) >= OCCLUSION_RESTART_DELTA;
+    if (!engine || currentVehicleId !== vehicle.id || currentProfile !== profile || acousticsChanged) {
       stopEngine();
       void audio.resume();
       engine = audio.playSpatialBuffer(bufferFor(vehicle), vehicle, {
@@ -164,6 +170,7 @@ export async function setup(ctx) {
         referenceDistance: profile === "sport" ? 3.2 : 2.8,
         rolloffFactor: profile === "sport" ? 0.25 : 0.28,
         airAbsorptionMinHz: profile === "sport" ? 5200 : 4300,
+        occlusion,
         loop: true,
         channel: ENGINE_CHANNEL,
         replace: true,
@@ -179,6 +186,7 @@ export async function setup(ctx) {
       }
       currentVehicleId = vehicle.id;
       currentProfile = profile;
+      currentOcclusion = occlusion;
     }
     if (!engine) return;
 
@@ -215,6 +223,7 @@ export async function setup(ctx) {
       referenceDistance: 2.5,
       rolloffFactor: 0.42,
       airAbsorptionMinHz: 3900,
+      occlusion: clamp(payload?.occlusion, 0, 1),
       loop: false,
     });
   });
