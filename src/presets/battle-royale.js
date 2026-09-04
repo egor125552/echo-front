@@ -38,7 +38,9 @@ import * as botStateMachine from "../plugins/battle-royale-bot-state-machine/ser
 import * as botBrain from "../plugins/battle-royale-bot-brain/server.js";
 import * as botAwareness from "../plugins/battle-royale-bot-awareness/server.js";
 import * as botCoverFire from "../plugins/battle-royale-bot-cover-fire/server.js";
+import * as buildingAiPortability from "../plugins/battle-royale-building-ai-portability/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
+import * as botBuildingStairs from "../plugins/battle-royale-bot-building-stairs/server.js";
 import * as warehouseTraffic from "../plugins/battle-royale-bot-warehouse-traffic/server.js";
 import * as warehouseCombatFlow from "../plugins/battle-royale-bot-warehouse-combat-flow/server.js";
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
@@ -116,7 +118,9 @@ export const battleRoyalePreset = [
   botBrain,
   botAwareness,
   botCoverFire,
+  buildingAiPortability,
   botCombat,
+  botBuildingStairs,
   warehouseTraffic,
   warehouseCombatFlow,
   botObserver,

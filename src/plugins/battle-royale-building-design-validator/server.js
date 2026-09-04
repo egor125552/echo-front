@@ -2,7 +2,7 @@ import { BATTLE_ROYALE_BUILDINGS } from "../../config/battle-royale-buildings.js
 
 export const manifest = {
   id: "battle-royale-building-design-validator",
-  version: "1.0.0",
+  version: "1.0.1",
   requires: ["battle-royale-building-factory"],
   capabilities: ["services.consume", "services.provide"],
 };
@@ -103,6 +103,15 @@ function wallRect(wall) {
   };
 }
 
+function naturalApproachSide(spec) {
+  const towardCenterX = -finite(spec?.x);
+  const towardCenterZ = -finite(spec?.z);
+  if (Math.abs(towardCenterX) >= Math.abs(towardCenterZ)) {
+    return towardCenterX >= 0 ? "east" : "west";
+  }
+  return towardCenterZ >= 0 ? "south" : "north";
+}
+
 function validateBuilding(spec) {
   const errors = [];
   const warnings = [];
@@ -140,10 +149,11 @@ function validateBuilding(spec) {
   const primaryDoor = spec?.doors?.[0] ?? null;
   if (primaryDoor) {
     const primarySide = String(primaryDoor.side ?? "east");
+    const expectedSide = naturalApproachSide(spec);
     const primaryOffset = Math.abs(finite(primaryDoor.offset));
     const primaryWidth = Math.max(0.8, Math.abs(finite(primaryDoor.width, 2.2)));
-    if (primarySide !== "east") {
-      warnings.push(`primary door ${primaryDoor.id ?? "unnamed"} does not face east like the warehouse front entrance`);
+    if (primarySide !== expectedSide) {
+      warnings.push(`primary door ${primaryDoor.id ?? "unnamed"} does not face the natural approach from the map centre (${expectedSide})`);
     }
     if (primaryOffset > 0.35) {
       warnings.push(`primary door ${primaryDoor.id ?? "unnamed"} is not centered on the front wall`);
