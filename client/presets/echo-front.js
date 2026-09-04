@@ -7,6 +7,7 @@ import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
+import * as architecturalOcclusion from "../plugins/architectural-occlusion.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
 import * as navigationStatus from "../plugins/battle-royale-navigation-status.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face.js";
@@ -26,6 +27,7 @@ import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js"
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
+import * as lootAnnouncer from "../plugins/battle-royale-loot-announcer.js";
 import * as parachuteAnnouncer from "../plugins/parachute-announcer.js";
 import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js";
 
@@ -39,6 +41,7 @@ export const echoFrontClientPreset = [
   speechSettings,
   speechDiagnostics,
   spatialAudio,
+  architecturalOcclusion,
   navigation,
   navigationStatus,
   navigationFace,
@@ -58,6 +61,7 @@ export const echoFrontClientPreset = [
   lowHealthAudio,
   hud,
   announcer,
+  lootAnnouncer,
   parachuteAnnouncer,
   vehicleAnnouncer,
 ];
