@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 9051403,
+  id: 9051404,
   mode: "battle-royale",
-  room: "stair-forgiving-collision",
+  room: "stair-forgiving-collision-no-steering",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -147,5 +147,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "entity.remove", args: { entityId: "stair-warehouse-parallel-outside" } }
     ],
   },
-  requestedAt: "2026-09-05T14:18:00Z",
+  requestedAt: "2026-09-05T14:28:00Z",
 });
