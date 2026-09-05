@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - src/**
+      - public/index.html
       - public/client/bootstrap.js
       - public/client/plugins/network.js
       - scripts/check-play-websocket.mjs
@@ -11,6 +12,7 @@ on:
   pull_request:
     paths:
       - src/**
+      - public/index.html
       - public/client/bootstrap.js
       - public/client/plugins/network.js
       - scripts/check-play-websocket.mjs
@@ -35,6 +37,13 @@ jobs:
           node --check src/server/match-room.js
           node --check scripts/check-play-websocket.mjs
 
+      - name: Check emergency error dialog markup
+        run: |
+          grep -q 'id="runtime-error-dialog"' public/index.html
+          grep -q 'id="runtime-error-copy"' public/index.html
+          grep -q 'id="runtime-error-ok"' public/index.html
+          grep -q 'bootstrap.src = "/client/bootstrap.js"' public/index.html
+
       - name: Start local Worker
         run: |
           timeout 90s npx wrangler dev --port 8787 > /tmp/echo-front-play-websocket.log 2>&1 &
@@ -49,6 +58,13 @@ jobs:
           cat /tmp/echo-front-play-websocket.log || true
           echo "Local Worker did not become healthy"
           exit 1
+
+      - name: Check served emergency error dialog
+        run: |
+          curl --max-time 10 --silent --show-error --fail http://127.0.0.1:8787/ > /tmp/index.html
+          grep -q 'id="runtime-error-dialog"' /tmp/index.html
+          grep -q 'Скопировать текст ошибки' /tmp/index.html
+          grep -q 'bootstrap.src = "/client/bootstrap.js"' /tmp/index.html
 
       - name: Probe full Battle Royale player startup
         run: |
