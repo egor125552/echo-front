@@ -22,6 +22,7 @@ import * as social from "../plugins/social/server.js";
 import * as sharedHumanSpawn from "../plugins/battle-royale-shared-human-spawn/server.js";
 import * as targetAssist from "../plugins/target-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
+import * as projectiles from "../plugins/rapier-projectiles/server.js";
 import * as healthRegeneration from "../plugins/health-regeneration/server.js";
 import * as weapons from "../plugins/weapons/server.js";
 import * as botController from "../plugins/bot-controller/server.js";
@@ -76,6 +77,7 @@ import * as navigationFace from "../plugins/battle-royale-navigation-face/server
 import * as navigationStability from "../plugins/battle-royale-navigation-stability/server.js";
 import * as navigationLifecycle from "../plugins/battle-royale-navigation-lifecycle/server.js";
 import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/server.js";
+import * as projectileLifecycle from "../plugins/rapier-projectile-lifecycle/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -102,6 +104,7 @@ export const battleRoyalePreset = [
   sharedHumanSpawn,
   targetAssist,
   combat,
+  projectiles,
   healthRegeneration,
   weapons,
   botController,
@@ -156,4 +159,5 @@ export const battleRoyalePreset = [
   navigationStability,
   navigationLifecycle,
   dropzoneVehicle,
+  projectileLifecycle,
 ];
