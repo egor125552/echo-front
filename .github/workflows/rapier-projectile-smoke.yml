@@ -10,6 +10,7 @@ on:
       - src/plugins/rapier-physics/**
       - src/presets/**
       - scripts/check-rapier-projectiles.mjs
+      - scripts/check-battle-royale-projectiles.mjs
       - .github/workflows/rapier-projectile-smoke.yml
   pull_request:
     paths:
@@ -20,6 +21,7 @@ on:
       - src/plugins/rapier-physics/**
       - src/presets/**
       - scripts/check-rapier-projectiles.mjs
+      - scripts/check-battle-royale-projectiles.mjs
       - .github/workflows/rapier-projectile-smoke.yml
   workflow_dispatch:
 
@@ -40,5 +42,8 @@ jobs:
           node --check src/presets/echo-front.js
           node --check src/presets/battle-royale.js
           node --check scripts/check-rapier-projectiles.mjs
+          node --check scripts/check-battle-royale-projectiles.mjs
       - name: Verify physical projectile behavior
         run: node scripts/check-rapier-projectiles.mjs
+      - name: Verify Battle Royale shared Rapier world
+        run: node scripts/check-battle-royale-projectiles.mjs
