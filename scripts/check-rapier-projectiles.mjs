@@ -27,6 +27,15 @@ async function main() {
     game.api.connectHuman(SHOOTER_ID);
     game.api.connectHuman(TARGET_ID);
 
+    // Let TDM finish its own match-start/respawn sequence first. Otherwise the
+    // first simulation tick legitimately reapplies spawn protection and masks an
+    // otherwise-correct physical projectile hit.
+    let now = Date.now() + 3000;
+    for (let frame = 0; frame < 4; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+    }
+
     for (const entity of [...entities.all()]) {
       if (entity.bot) entities.remove(entity.id);
     }
@@ -53,7 +62,6 @@ async function main() {
       "Every firearm must keep its own projectile velocity",
     );
 
-    let now = Date.now() + 3000;
     const healthBefore = entitySnapshot(game, TARGET_ID)?.health;
     assert(Number.isFinite(healthBefore), "Target health is unavailable");
     assert(weapons.fire(SHOOTER_ID, now), "Pistol did not spawn a projectile");
@@ -86,8 +94,11 @@ async function main() {
     );
     assert(projectiles.stats().hitTotal >= 1, "Rapier contact was not recorded as a projectile hit");
 
+    // The target is moved after the trigger pull but before Rapier advances. A
+    // hitscan weapon would have already damaged it; a real projectile can miss.
     movement.teleport(SHOOTER_ID, { x: 0, y: 0, z: 0, angle: 0 });
     movement.teleport(TARGET_ID, { x: 0, y: 0, z: -20, angle: Math.PI });
+    spawnProtection.clear(TARGET_ID);
     now += 500;
     const dodgeHealthBefore = entitySnapshot(game, TARGET_ID)?.health;
     assert(weapons.fire(SHOOTER_ID, now), "Second pistol projectile did not spawn");
@@ -104,6 +115,8 @@ async function main() {
       `Dodged physical projectile still damaged target (${dodgeHealthBefore} -> ${dodgeHealthAfter})`,
     );
 
+    // Saturation is bounded: oldest active projectiles are recycled instead of
+    // allocating an unbounded number of Rapier rigid bodies in a Worker.
     for (let index = 0; index < MAX_PROJECTILE_POOL + 17; index += 1) {
       projectiles.spawn({
         shooterId: SHOOTER_ID,
@@ -134,6 +147,7 @@ async function main() {
       poolSize: stats.poolSize,
       poolCapacity: stats.poolCapacity,
       recycledAtCapacity: stats.recycledAtCapacity,
+      collisionEventsTotal: stats.collisionEventsTotal,
       physicsStepCount: stats.physicsStepCount,
     }));
   } finally {
