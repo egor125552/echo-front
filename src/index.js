@@ -11,6 +11,21 @@ function errorText(error) {
   return message.slice(0, 500);
 }
 
+function assertProbeSnapshot(snapshot, mode, playerId, label) {
+  if (!snapshot || typeof snapshot !== "object") {
+    throw new Error(`Runtime probe received invalid ${label} snapshot for ${mode}`);
+  }
+  if (!Array.isArray(snapshot.entities)) {
+    throw new Error(`Runtime probe ${label} snapshot has no entity list for ${mode}`);
+  }
+  if (!snapshot.entities.some((entity) => entity?.id === playerId)) {
+    throw new Error(`Runtime probe ${label} snapshot does not contain the connected player for ${mode}`);
+  }
+  if (mode === "battle-royale" && snapshot.mode !== "battle-royale") {
+    throw new Error(`Runtime probe ${label} snapshot has wrong Battle Royale mode`);
+  }
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -45,9 +60,7 @@ export default {
         const initialSnapshot = typeof game.api.snapshotFor === "function"
           ? game.api.snapshotFor(probePlayerId)
           : game.api.snapshot();
-        if (!initialSnapshot || initialSnapshot.mode !== mode) {
-          throw new Error(`Runtime probe received invalid initial snapshot for ${mode}`);
-        }
+        assertProbeSnapshot(initialSnapshot, mode, probePlayerId, "initial");
 
         phase = "first-input";
         game.api.handleInput(probePlayerId, {
@@ -65,9 +78,7 @@ export default {
         const nextSnapshot = typeof game.api.snapshotFor === "function"
           ? game.api.snapshotFor(probePlayerId)
           : game.api.snapshot();
-        if (!nextSnapshot || nextSnapshot.mode !== mode) {
-          throw new Error(`Runtime probe received invalid post-input snapshot for ${mode}`);
-        }
+        assertProbeSnapshot(nextSnapshot, mode, probePlayerId, "post-input");
 
         phase = "complete";
         return Response.json({ ok: true, mode, phase }, { headers });
