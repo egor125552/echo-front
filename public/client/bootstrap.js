@@ -200,32 +200,62 @@ const connection = document.querySelector("#connection-status");
 const modeValue = document.querySelector("#mode-value");
 const startButtons = [playButton, battleRoyaleButton].filter(Boolean);
 
-let probePromise = null;
+let diagnosisPromise = null;
 let lastNetworkFailure = null;
 
 function setButtonsDisabled(value) {
   for (const button of startButtons) button.disabled = Boolean(value);
 }
 
-async function probeServerRuntime(mode, networkDetails = {}) {
-  if (probePromise) return probePromise;
+function reportServerError(info = {}, extra = {}) {
+  reportError("Ошибка сервера", info.message ?? "Unknown server runtime error", {
+    serverName: info.name ?? null,
+    serverPhase: info.phase ?? null,
+    serverMode: info.mode ?? null,
+    serverPlayerId: info.playerId ?? null,
+    serverTime: info.at ?? null,
+    serverStack: info.stack ?? null,
+    ...extra,
+  });
+}
 
-  probePromise = (async () => {
+async function diagnoseServerFailure(mode, room, networkDetails = {}) {
+  if (diagnosisPromise) return diagnosisPromise;
+  const wantedMode = mode || "tdm";
+  const wantedRoom = room || "public";
+
+  diagnosisPromise = (async () => {
     try {
-      const response = await fetch(`/api/runtime-probe?mode=${encodeURIComponent(mode || "tdm")}`, {
+      const exactResponse = await fetch(
+        `/api/play-error?room=${encodeURIComponent(wantedRoom)}&mode=${encodeURIComponent(wantedMode)}`,
+        { cache: "no-store", headers: { Accept: "application/json" } },
+      );
+      let exact = null;
+      try { exact = await exactResponse.json(); } catch {}
+      if (exact?.error) {
+        reportServerError(exact.error, {
+          diagnosticSource: "current-room",
+          networkPhase: networkDetails.phase ?? null,
+          socketState: networkDetails.readyState ?? null,
+          closeCode: networkDetails.code ?? null,
+        });
+        return exact;
+      }
+
+      const response = await fetch(`/api/runtime-probe?mode=${encodeURIComponent(wantedMode)}`, {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
       let data = null;
       try { data = await response.json(); } catch {}
-
       if (data?.ok) return data;
 
-      const serverError = data?.error ?? `Runtime probe HTTP ${response.status || "error"}`;
-      reportError("Ошибка серверного runtime", serverError, {
-        mode: data?.mode ?? mode,
+      reportError("Ошибка серверного runtime", data?.error ?? `Runtime probe HTTP ${response.status || "error"}`, {
+        mode: data?.mode ?? wantedMode,
         probePhase: data?.phase ?? null,
         errorName: data?.errorName ?? null,
+        serverStack: data?.errorStack ?? null,
+        diagnosticSource: "deep-probe",
         networkPhase: networkDetails.phase ?? null,
         socketState: networkDetails.readyState ?? null,
         closeCode: networkDetails.code ?? null,
@@ -234,14 +264,15 @@ async function probeServerRuntime(mode, networkDetails = {}) {
     } catch (error) {
       reportError("Ошибка подключения и диагностики", error, {
         ...networkDetails,
-        runtimeProbe: "request failed",
+        room: wantedRoom,
+        mode: wantedMode,
       });
       return null;
     } finally {
-      probePromise = null;
+      diagnosisPromise = null;
     }
   })();
-  return probePromise;
+  return diagnosisPromise;
 }
 
 async function start(mode) {
@@ -268,11 +299,24 @@ async function start(mode) {
 playButton?.addEventListener("click", () => start("tdm"));
 battleRoyaleButton?.addEventListener("click", () => start("battle-royale"));
 
+host.events.on("network:server-error", ({ error, room, mode, endpoint } = {}) => {
+  reportServerError(error ?? {}, {
+    diagnosticSource: "live-websocket",
+    room,
+    mode,
+    endpoint,
+  });
+});
+
 host.events.on("network:error", (details = {}) => {
   lastNetworkFailure = { ...details };
   if (connection) connection.textContent = "Соединение прервано. Переподключение";
   reportError("Ошибка подключения", details.message ?? "WebSocket connection failed", details);
-  probeServerRuntime(details.mode ?? host.services.get("network").mode, details);
+  diagnoseServerFailure(
+    details.mode ?? host.services.get("network").mode,
+    details.room ?? host.services.get("network").room,
+    details,
+  );
 });
 
 host.events.on("network:disconnected", (details = {}) => {
@@ -284,16 +328,18 @@ host.events.on("network:disconnected", (details = {}) => {
       ...details,
       phase: "close",
     });
-    probeServerRuntime(details.mode ?? host.services.get("network").mode, lastNetworkFailure);
+    diagnoseServerFailure(
+      details.mode ?? host.services.get("network").mode,
+      details.room ?? host.services.get("network").room,
+      lastNetworkFailure,
+    );
   }
 });
 
 host.events.on("network:reconnecting", ({ attempt, delay } = {}) => {
   setButtonsDisabled(true);
   if (connection) connection.textContent = `Повторное подключение, попытка ${attempt ?? "?"}`;
-  if (lastNetworkFailure) {
-    lastNetworkFailure = { ...lastNetworkFailure, attempt, nextDelayMs: delay };
-  }
+  if (lastNetworkFailure) lastNetworkFailure = { ...lastNetworkFailure, attempt, nextDelayMs: delay };
 });
 
 host.events.on("network:reconnected", ({ resumed } = {}) => {
