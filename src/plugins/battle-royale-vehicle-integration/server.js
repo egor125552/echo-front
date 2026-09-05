@@ -1,8 +1,8 @@
 export const manifest = {
   id: "battle-royale-vehicle-integration",
-  version: "1.2.0",
+  version: "1.2.1",
   requires: ["match-api", "battle-royale-vehicle", "movement", "battle-royale", "map-test-arena"],
-  capabilities: ["services.consume"],
+  capabilities: ["services.consume", "components.read"],
 };
 
 function clamp01(value) {
