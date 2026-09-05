@@ -106,6 +106,84 @@
       <p>Командный бой сохраняет прежний формат на четыре слота. Королевская битва запускается отдельно и заполняется до 96 участников ботами. Оба режима используют одну модульную систему движения, оружия, брони и пространственного звука.</p>
     </details>
   </main>
-  <script type="module" src="/client/bootstrap.js"></script>
+
+  <dialog id="runtime-error-dialog" aria-labelledby="runtime-error-title" aria-describedby="runtime-error-summary">
+    <section>
+      <h2 id="runtime-error-title" tabindex="-1">Ошибка</h2>
+      <p id="runtime-error-summary" role="alert" aria-live="assertive" aria-atomic="true"></p>
+      <label for="runtime-error-text">Текст ошибки</label>
+      <textarea id="runtime-error-text" rows="10" readonly spellcheck="false"></textarea>
+      <p id="runtime-error-copy-status" role="status" aria-live="polite"></p>
+      <details>
+        <summary>История ошибок</summary>
+        <ol id="runtime-error-history"></ol>
+      </details>
+      <div>
+        <button id="runtime-error-copy" type="button">Скопировать текст ошибки</button>
+        <button id="runtime-error-ok" type="button">ОК</button>
+      </div>
+    </section>
+  </dialog>
+
+  <script>
+    (() => {
+      const dialog = document.querySelector("#runtime-error-dialog");
+      const heading = document.querySelector("#runtime-error-title");
+      const summary = document.querySelector("#runtime-error-summary");
+      const text = document.querySelector("#runtime-error-text");
+      const copyStatus = document.querySelector("#runtime-error-copy-status");
+      const copyButton = document.querySelector("#runtime-error-copy");
+      const okButton = document.querySelector("#runtime-error-ok");
+      let emergencyText = "";
+      let previousFocus = null;
+
+      function showBootstrapError(message) {
+        emergencyText = [
+          `Время: ${new Date().toISOString()}`,
+          "Ошибка: Не удалось загрузить игровой клиент",
+          `Сообщение: ${message || "Главный модуль клиента не загрузился"}`,
+          "Подробности:",
+          "phase: bootstrap-module-load",
+          "resource: /client/bootstrap.js",
+        ].join("\n");
+        if (summary) summary.textContent = `Не удалось загрузить игровой клиент. ${message || "Главный модуль клиента не загрузился"}`;
+        if (text) text.value = emergencyText;
+        previousFocus = document.activeElement;
+        try { dialog?.showModal(); } catch { dialog?.setAttribute("open", ""); }
+        requestAnimationFrame(() => heading?.focus());
+      }
+
+      copyButton?.addEventListener("click", async () => {
+        if (!emergencyText) return;
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(emergencyText);
+          copied = true;
+        } catch {
+          try {
+            text?.focus();
+            text?.select();
+            copied = document.execCommand("copy");
+          } catch {}
+        }
+        if (copyStatus) copyStatus.textContent = copied
+          ? "Текст ошибки скопирован"
+          : "Не удалось скопировать автоматически. Текст ошибки доступен в поле выше.";
+      });
+
+      okButton?.addEventListener("click", () => {
+        try { dialog?.close(); } catch { dialog?.removeAttribute("open"); }
+        try { previousFocus?.focus(); } catch {}
+      });
+
+      const bootstrap = document.createElement("script");
+      bootstrap.type = "module";
+      bootstrap.src = "/client/bootstrap.js";
+      bootstrap.addEventListener("error", () => {
+        showBootstrapError("Главный модуль клиента или один из его импортов не загрузился");
+      });
+      document.body.append(bootstrap);
+    })();
+  </script>
 </body>
 </html>

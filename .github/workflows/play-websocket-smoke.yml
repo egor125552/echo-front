@@ -4,12 +4,16 @@ on:
   push:
     paths:
       - src/**
+      - public/index.html
+      - public/client/bootstrap.js
       - public/client/plugins/network.js
       - scripts/check-play-websocket.mjs
       - .github/workflows/play-websocket-smoke.yml
   pull_request:
     paths:
       - src/**
+      - public/index.html
+      - public/client/bootstrap.js
       - public/client/plugins/network.js
       - scripts/check-play-websocket.mjs
       - .github/workflows/play-websocket-smoke.yml
@@ -24,6 +28,21 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+
+      - name: Check diagnostic JavaScript syntax
+        run: |
+          node --check public/client/bootstrap.js
+          node --check public/client/plugins/network.js
+          node --check src/index.js
+          node --check src/server/match-room.js
+          node --check scripts/check-play-websocket.mjs
+
+      - name: Check emergency error dialog markup
+        run: |
+          grep -q 'id="runtime-error-dialog"' public/index.html
+          grep -q 'id="runtime-error-copy"' public/index.html
+          grep -q 'id="runtime-error-ok"' public/index.html
+          grep -q 'bootstrap.src = "/client/bootstrap.js"' public/index.html
 
       - name: Start local Worker
         run: |
@@ -40,8 +59,36 @@ jobs:
           echo "Local Worker did not become healthy"
           exit 1
 
+      - name: Check served emergency error dialog
+        run: |
+          curl --max-time 10 --silent --show-error --fail http://127.0.0.1:8787/ > /tmp/index.html
+          grep -q 'id="runtime-error-dialog"' /tmp/index.html
+          grep -q 'Скопировать текст ошибки' /tmp/index.html
+          grep -q 'bootstrap.src = "/client/bootstrap.js"' /tmp/index.html
+
+      - name: Probe full Battle Royale player startup
+        run: |
+          BODY=$(curl --max-time 30 --silent --show-error --fail \
+            'http://127.0.0.1:8787/api/runtime-probe?mode=battle-royale')
+          echo "$BODY"
+          printf '%s' "$BODY" | jq -e '.ok == true and .mode == "battle-royale" and .phase == "complete"' > /dev/null
+
+      - name: Probe full TDM player startup
+        run: |
+          BODY=$(curl --max-time 30 --silent --show-error --fail \
+            'http://127.0.0.1:8787/api/runtime-probe?mode=tdm')
+          echo "$BODY"
+          printf '%s' "$BODY" | jq -e '.ok == true and .mode == "tdm" and .phase == "complete"' > /dev/null
+
       - name: Connect through real play WebSocket
         run: node scripts/check-play-websocket.mjs ws://127.0.0.1:8787
+
+      - name: Check healthy room error endpoint
+        run: |
+          BODY=$(curl --max-time 10 --silent --show-error --fail \
+            'http://127.0.0.1:8787/api/play-error?room=websocket-smoke&mode=battle-royale')
+          echo "$BODY"
+          printf '%s' "$BODY" | jq -e '.ok == true and .error == null' > /dev/null
 
       - name: Show Worker log on failure
         if: failure()

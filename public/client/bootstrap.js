@@ -1,9 +1,7 @@
 import { ClientPluginHost } from "./core/plugin-host.js";
 import { echoFrontClientPreset } from "./presets/echo-front.js";
 
-const ERROR_HISTORY_LIMIT = 8;
-const PROBE_COOLDOWN_MS = 2500;
-const NETWORK_ERROR_ATTEMPT_THRESHOLD = 3;
+const ERROR_HISTORY_LIMIT = 20;
 
 function errorMessage(error) {
   if (error instanceof Error) return error.message || error.name;
@@ -11,74 +9,180 @@ function errorMessage(error) {
   try { return JSON.stringify(error); } catch { return String(error ?? "Неизвестная ошибка"); }
 }
 
-function installErrorUi() {
-  let panel = document.querySelector("#runtime-error-panel");
-  if (panel) return panel;
-
-  panel = document.createElement("section");
-  panel.id = "runtime-error-panel";
-  panel.hidden = true;
-  panel.setAttribute("aria-labelledby", "runtime-error-title");
-  panel.innerHTML = `
-    <h2 id="runtime-error-title">Ошибка игры</h2>
-    <p id="runtime-error-live" role="alert" aria-live="assertive" aria-atomic="true"></p>
-    <details open>
-      <summary>Технические подробности</summary>
-      <ol id="runtime-error-history"></ol>
-    </details>
-    <button id="runtime-error-clear" type="button">Скрыть ошибки</button>
-  `;
-
-  const main = document.querySelector("main") ?? document.body;
-  const gamePanel = document.querySelector("#game-panel");
-  if (gamePanel?.parentNode === main) main.insertBefore(panel, gamePanel);
-  else main.append(panel);
-
-  panel.querySelector("#runtime-error-clear")?.addEventListener("click", () => {
-    panel.hidden = true;
-    const history = panel.querySelector("#runtime-error-history");
-    if (history) history.replaceChildren();
-    const live = panel.querySelector("#runtime-error-live");
-    if (live) live.textContent = "";
-  });
-  return panel;
+function detailText(value) {
+  if (value === undefined || value === null || value === "") return null;
+  if (typeof value === "string") return value;
+  try { return JSON.stringify(value); } catch { return String(value); }
 }
 
-const errorPanel = installErrorUi();
+function installErrorDialog() {
+  let dialog = document.querySelector("#runtime-error-dialog");
+  if (dialog) return dialog;
+
+  dialog = document.createElement("dialog");
+  dialog.id = "runtime-error-dialog";
+  dialog.setAttribute("aria-labelledby", "runtime-error-title");
+  dialog.setAttribute("aria-describedby", "runtime-error-summary");
+  dialog.innerHTML = `
+    <section>
+      <h2 id="runtime-error-title" tabindex="-1">Ошибка</h2>
+      <p id="runtime-error-summary" role="alert" aria-live="assertive" aria-atomic="true"></p>
+      <label for="runtime-error-text">Текст ошибки</label>
+      <textarea id="runtime-error-text" rows="10" readonly spellcheck="false"></textarea>
+      <p id="runtime-error-copy-status" role="status" aria-live="polite"></p>
+      <details>
+        <summary>История ошибок</summary>
+        <ol id="runtime-error-history"></ol>
+      </details>
+      <div>
+        <button id="runtime-error-copy" type="button">Скопировать текст ошибки</button>
+        <button id="runtime-error-ok" type="button">ОК</button>
+      </div>
+    </section>
+  `;
+  document.body.append(dialog);
+  return dialog;
+}
+
+const errorDialog = installErrorDialog();
+const errorHeading = errorDialog.querySelector("#runtime-error-title");
+const errorSummary = errorDialog.querySelector("#runtime-error-summary");
+const errorTextArea = errorDialog.querySelector("#runtime-error-text");
+const errorCopyStatus = errorDialog.querySelector("#runtime-error-copy-status");
+const errorHistory = errorDialog.querySelector("#runtime-error-history");
+const errorCopyButton = errorDialog.querySelector("#runtime-error-copy");
+const errorOkButton = errorDialog.querySelector("#runtime-error-ok");
+
+let lastErrorReport = "";
+let focusBeforeError = null;
+
+function closeErrorDialog() {
+  if (typeof errorDialog.close === "function" && errorDialog.open) errorDialog.close();
+  else errorDialog.removeAttribute("open");
+  const previous = focusBeforeError;
+  focusBeforeError = null;
+  if (previous && typeof previous.focus === "function" && previous.isConnected) {
+    try { previous.focus({ preventScroll: true }); } catch { previous.focus(); }
+  }
+}
+
+async function copyCurrentError() {
+  if (!lastErrorReport) return;
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(lastErrorReport);
+    copied = true;
+  } catch {
+    const helper = document.createElement("textarea");
+    helper.value = lastErrorReport;
+    helper.setAttribute("readonly", "");
+    helper.style.position = "fixed";
+    helper.style.left = "-9999px";
+    document.body.append(helper);
+    helper.select();
+    try { copied = document.execCommand("copy"); } catch {}
+    helper.remove();
+  }
+  if (errorCopyStatus) {
+    errorCopyStatus.textContent = copied
+      ? "Текст ошибки скопирован"
+      : "Не удалось скопировать автоматически. Текст ошибки доступен в поле выше.";
+  }
+}
+
+errorCopyButton?.addEventListener("click", copyCurrentError);
+errorOkButton?.addEventListener("click", closeErrorDialog);
+errorDialog.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeErrorDialog();
+});
+
+function buildErrorReport(title, error, details = {}) {
+  const message = errorMessage(error);
+  const detailEntries = Object.entries(details)
+    .map(([key, value]) => [key, detailText(value)])
+    .filter(([, value]) => value !== null);
+  const lines = [
+    `Время: ${new Date().toISOString()}`,
+    `Ошибка: ${title}`,
+    `Сообщение: ${message}`,
+  ];
+  if (detailEntries.length) {
+    lines.push("Подробности:");
+    for (const [key, value] of detailEntries) lines.push(`${key}: ${value}`);
+  }
+  if (error instanceof Error && error.stack) lines.push("Стек:", error.stack);
+  return { message, text: lines.join("\n") };
+}
 
 function reportError(title, error, details = {}) {
-  const message = errorMessage(error);
-  const live = errorPanel.querySelector("#runtime-error-live");
-  const history = errorPanel.querySelector("#runtime-error-history");
-  errorPanel.hidden = false;
-  if (live) live.textContent = `${title}. ${message}`;
+  const report = buildErrorReport(title, error, details);
+  lastErrorReport = report.text;
 
-  if (history) {
+  if (errorSummary) errorSummary.textContent = `${title}. ${report.message}`;
+  if (errorTextArea) errorTextArea.value = report.text;
+  if (errorCopyStatus) errorCopyStatus.textContent = "";
+
+  if (errorHistory) {
     const item = document.createElement("li");
-    const time = new Date().toLocaleTimeString("ru-RU");
-    const detailEntries = Object.entries(details)
-      .filter(([, value]) => value !== undefined && value !== null && value !== "")
-      .map(([key, value]) => `${key}=${typeof value === "object" ? JSON.stringify(value) : value}`);
-    item.textContent = `${time} — ${title}: ${message}${detailEntries.length ? `; ${detailEntries.join("; ")}` : ""}`;
-    history.prepend(item);
-    while (history.children.length > ERROR_HISTORY_LIMIT) history.lastElementChild?.remove();
+    item.textContent = `${new Date().toLocaleTimeString("ru-RU")} — ${title}: ${report.message}`;
+    errorHistory.prepend(item);
+    while (errorHistory.children.length > ERROR_HISTORY_LIMIT) errorHistory.lastElementChild?.remove();
   }
 
   const connection = document.querySelector("#connection-status");
-  if (connection) connection.textContent = `Ошибка: ${message}`;
+  if (connection) connection.textContent = `Ошибка: ${report.message}`;
+
+  const wasOpen = Boolean(errorDialog.open || errorDialog.hasAttribute("open"));
+  if (!wasOpen) {
+    focusBeforeError = document.activeElement;
+    if (typeof errorDialog.showModal === "function") {
+      try { errorDialog.showModal(); } catch { errorDialog.setAttribute("open", ""); }
+    } else {
+      errorDialog.setAttribute("open", "");
+      errorDialog.setAttribute("aria-modal", "true");
+    }
+    requestAnimationFrame(() => {
+      try { errorHeading?.focus({ preventScroll: true }); } catch { errorHeading?.focus(); }
+    });
+  }
+
   console.error(`[Echo Front] ${title}`, error, details);
 }
 
 window.addEventListener("error", (event) => {
-  reportError("Ошибка клиента", event.error ?? event.message ?? "JavaScript error", {
-    file: event.filename ? event.filename.split("/").at(-1) : null,
-    line: event.lineno || null,
-    column: event.colno || null,
+  if (event instanceof ErrorEvent) {
+    reportError("Ошибка клиента", event.error ?? event.message ?? "JavaScript error", {
+      file: event.filename ? event.filename.split("/").at(-1) : null,
+      line: event.lineno || null,
+      column: event.colno || null,
+    });
+    return;
+  }
+
+  const target = event.target;
+  const resource = target?.currentSrc || target?.src || target?.href || null;
+  reportError("Ошибка загрузки ресурса", resource ? `Не удалось загрузить ${resource}` : "Resource load failed", {
+    tag: target?.tagName ?? null,
+    resource,
   });
-});
+}, true);
 
 window.addEventListener("unhandledrejection", (event) => {
   reportError("Необработанная ошибка клиента", event.reason ?? "Promise rejection");
+});
+
+window.addEventListener("securitypolicyviolation", (event) => {
+  reportError("Ошибка политики безопасности", event.violatedDirective || "Security policy violation", {
+    blockedURI: event.blockedURI || null,
+    sourceFile: event.sourceFile || null,
+    line: event.lineNumber || null,
+    column: event.columnNumber || null,
+  });
+});
+
+window.addEventListener("offline", () => {
+  reportError("Нет подключения к сети", "Браузер перешёл в автономный режим", { phase: "browser-offline" });
 });
 
 let host;
@@ -96,66 +200,79 @@ const connection = document.querySelector("#connection-status");
 const modeValue = document.querySelector("#mode-value");
 const startButtons = [playButton, battleRoyaleButton].filter(Boolean);
 
-let lastProbeAt = 0;
-let probePromise = null;
+let diagnosisPromise = null;
 let lastNetworkFailure = null;
 
 function setButtonsDisabled(value) {
   for (const button of startButtons) button.disabled = Boolean(value);
 }
 
-async function probeServerRuntime(mode, networkDetails = {}, { reportTransportFailure = false } = {}) {
-  const now = Date.now();
-  if (probePromise) return probePromise;
-  if (now - lastProbeAt < PROBE_COOLDOWN_MS) return null;
-  lastProbeAt = now;
+function reportServerError(info = {}, extra = {}) {
+  reportError("Ошибка сервера", info.message ?? "Unknown server runtime error", {
+    serverName: info.name ?? null,
+    serverPhase: info.phase ?? null,
+    serverMode: info.mode ?? null,
+    serverPlayerId: info.playerId ?? null,
+    serverTime: info.at ?? null,
+    serverStack: info.stack ?? null,
+    ...extra,
+  });
+}
 
-  probePromise = (async () => {
+async function diagnoseServerFailure(mode, room, networkDetails = {}) {
+  if (diagnosisPromise) return diagnosisPromise;
+  const wantedMode = mode || "tdm";
+  const wantedRoom = room || "public";
+
+  diagnosisPromise = (async () => {
     try {
-      const response = await fetch(`/api/runtime-probe?mode=${encodeURIComponent(mode || "tdm")}`, {
+      const exactResponse = await fetch(
+        `/api/play-error?room=${encodeURIComponent(wantedRoom)}&mode=${encodeURIComponent(wantedMode)}`,
+        { cache: "no-store", headers: { Accept: "application/json" } },
+      );
+      let exact = null;
+      try { exact = await exactResponse.json(); } catch {}
+      if (exact?.error) {
+        reportServerError(exact.error, {
+          diagnosticSource: "current-room",
+          networkPhase: networkDetails.phase ?? null,
+          socketState: networkDetails.readyState ?? null,
+          closeCode: networkDetails.code ?? null,
+        });
+        return exact;
+      }
+
+      const response = await fetch(`/api/runtime-probe?mode=${encodeURIComponent(wantedMode)}`, {
         cache: "no-store",
         headers: { Accept: "application/json" },
       });
       let data = null;
       try { data = await response.json(); } catch {}
+      if (data?.ok) return data;
 
-      // A healthy runtime means the game server can start. A short WebSocket
-      // transport interruption is recoverable and must not become a red
-      // "Ошибка игры" on its own.
-      if (data?.ok) {
-        if (reportTransportFailure) {
-          reportError("Соединение нестабильно", networkDetails.message ?? "WebSocket connection failed", {
-            ...networkDetails,
-            runtimeProbe: "server runtime starts successfully",
-            httpStatus: response.status,
-          });
-        }
-        return data;
-      }
-
-      const serverError = data?.error
-        ?? `Runtime probe HTTP ${response.status || "error"}`;
-      reportError("Ошибка серверного runtime", serverError, {
-        mode: data?.mode ?? mode,
+      reportError("Ошибка серверного runtime", data?.error ?? `Runtime probe HTTP ${response.status || "error"}`, {
+        mode: data?.mode ?? wantedMode,
+        probePhase: data?.phase ?? null,
         errorName: data?.errorName ?? null,
+        serverStack: data?.errorStack ?? null,
+        diagnosticSource: "deep-probe",
         networkPhase: networkDetails.phase ?? null,
         socketState: networkDetails.readyState ?? null,
         closeCode: networkDetails.code ?? null,
       });
       return data;
     } catch (error) {
-      if (reportTransportFailure) {
-        reportError("Ошибка подключения и диагностики", error, {
-          ...networkDetails,
-          runtimeProbe: "request failed",
-        });
-      }
+      reportError("Ошибка подключения и диагностики", error, {
+        ...networkDetails,
+        room: wantedRoom,
+        mode: wantedMode,
+      });
       return null;
     } finally {
-      probePromise = null;
+      diagnosisPromise = null;
     }
   })();
-  return probePromise;
+  return diagnosisPromise;
 }
 
 async function start(mode) {
@@ -167,8 +284,6 @@ async function start(mode) {
   gamePanel.hidden = false;
 
   try {
-    // Prime browser speech while this call still belongs to the user's tap/click.
-    // This is especially important for iPhone/WebKit and VoiceOver activation.
     host.services.get("speech")?.prime?.("game-start");
     await host.services.get("audio").resume();
     host.services.get("network").connect("public", { mode });
@@ -184,33 +299,47 @@ async function start(mode) {
 playButton?.addEventListener("click", () => start("tdm"));
 battleRoyaleButton?.addEventListener("click", () => start("battle-royale"));
 
+host.events.on("network:server-error", ({ error, room, mode, endpoint } = {}) => {
+  reportServerError(error ?? {}, {
+    diagnosticSource: "live-websocket",
+    room,
+    mode,
+    endpoint,
+  });
+});
+
 host.events.on("network:error", (details = {}) => {
   lastNetworkFailure = { ...details };
   if (connection) connection.textContent = "Соединение прервано. Переподключение";
-  // Probe silently. If the runtime is healthy, the reconnect loop gets a
-  // chance to recover before anything is presented as a game error.
-  probeServerRuntime(details.mode ?? host.services.get("network").mode, details);
+  reportError("Ошибка подключения", details.message ?? "WebSocket connection failed", details);
+  diagnoseServerFailure(
+    details.mode ?? host.services.get("network").mode,
+    details.room ?? host.services.get("network").room,
+    details,
+  );
 });
 
 host.events.on("network:disconnected", (details = {}) => {
   lastNetworkFailure = { ...(lastNetworkFailure ?? {}), ...details, phase: "close" };
   setButtonsDisabled(Boolean(details.willReconnect));
   if (details.willReconnect && connection) connection.textContent = "Соединение прервано. Переподключение";
+  if (Number(details.code) !== 1000) {
+    reportError("Соединение закрыто с ошибкой", details.reason || `WebSocket закрыт с кодом ${details.code ?? "unknown"}`, {
+      ...details,
+      phase: "close",
+    });
+    diagnoseServerFailure(
+      details.mode ?? host.services.get("network").mode,
+      details.room ?? host.services.get("network").room,
+      lastNetworkFailure,
+    );
+  }
 });
 
-host.events.on("network:reconnecting", ({ attempt, delay, mode } = {}) => {
+host.events.on("network:reconnecting", ({ attempt, delay } = {}) => {
   setButtonsDisabled(true);
   if (connection) connection.textContent = `Повторное подключение, попытка ${attempt ?? "?"}`;
-  if (attempt >= NETWORK_ERROR_ATTEMPT_THRESHOLD) {
-    const details = {
-      ...(lastNetworkFailure ?? {}),
-      mode,
-      attempt,
-      nextDelayMs: delay,
-      message: lastNetworkFailure?.message ?? "WebSocket connection failed",
-    };
-    probeServerRuntime(mode ?? host.services.get("network").mode, details, { reportTransportFailure: true });
-  }
+  if (lastNetworkFailure) lastNetworkFailure = { ...lastNetworkFailure, attempt, nextDelayMs: delay };
 });
 
 host.events.on("network:reconnected", ({ resumed } = {}) => {

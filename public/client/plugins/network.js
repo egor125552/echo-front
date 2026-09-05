@@ -33,8 +33,6 @@ function loadOrCreateSessionId() {
     const persistent = localStorage.getItem(PLAYER_STORAGE_KEY);
     if (isPlayerSessionId(persistent)) return persistent.toLowerCase();
 
-    // Migrate the previous tab-only identity once so existing players keep the
-    // same id when this release first loads.
     const previous = sessionStorage.getItem(SESSION_STORAGE_KEY);
     const id = isPlayerSessionId(previous) ? previous.toLowerCase() : crypto.randomUUID();
     localStorage.setItem(PLAYER_STORAGE_KEY, id);
@@ -191,6 +189,13 @@ export async function setup(ctx) {
         emitGamePacket(data);
       } else if (data.type === "events") {
         for (const packet of data.events ?? []) emitGamePacket(packet);
+      } else if (data.type === "server-error") {
+        ctx.events.emit("network:server-error", {
+          room,
+          mode: desiredMode,
+          endpoint: "/api/play",
+          error: data.error ?? null,
+        });
       }
     });
 
@@ -247,6 +252,7 @@ export async function setup(ctx) {
     send,
     get playerId() { return playerId; },
     get sessionId() { return sessionId; },
+    get room() { return desiredRoom; },
     get mode() { return desiredMode; },
     get connected() { return socket?.readyState === WebSocket.OPEN; },
     get reconnecting() { return Boolean(desiredRoom && !this.connected); },

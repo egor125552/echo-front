@@ -8,7 +8,26 @@ export { MatchRoom };
 
 function errorText(error) {
   const message = String(error?.message ?? error ?? "Unknown server error");
-  return message.slice(0, 500);
+  return message.slice(0, 1000);
+}
+
+function errorStack(error) {
+  return error?.stack ? String(error.stack).slice(0, 5000) : null;
+}
+
+function assertProbeSnapshot(snapshot, mode, playerId, label) {
+  if (!snapshot || typeof snapshot !== "object") {
+    throw new Error(`Runtime probe received invalid ${label} snapshot for ${mode}`);
+  }
+  if (!Array.isArray(snapshot.entities)) {
+    throw new Error(`Runtime probe ${label} snapshot has no entity list for ${mode}`);
+  }
+  if (!snapshot.entities.some((entity) => entity?.id === playerId)) {
+    throw new Error(`Runtime probe ${label} snapshot does not contain the connected player for ${mode}`);
+  }
+  if (mode === "battle-royale" && snapshot.mode !== "battle-royale") {
+    throw new Error(`Runtime probe ${label} snapshot has wrong Battle Royale mode`);
+  }
 }
 
 export default {
@@ -28,24 +47,61 @@ export default {
 
     if (url.pathname === "/api/runtime-probe") {
       const headers = { "Cache-Control": "no-store" };
-      if (!ENGINE_CONTROL.enabled) {
-        return Response.json({ ok: false, error: "Runtime probe is disabled" }, { status: 404, headers });
-      }
       const mode = normalizeGameMode(url.searchParams.get("mode"));
       let game = null;
+      let phase = "create-game";
       try {
         game = await createEchoFrontGame({ mode });
-        return Response.json({ ok: true, mode }, { headers });
+
+        const probePlayerId = crypto.randomUUID();
+        phase = "connect-human";
+        game.api.connectHuman(probePlayerId);
+
+        phase = "initial-snapshot";
+        const initialSnapshot = typeof game.api.snapshotFor === "function"
+          ? game.api.snapshotFor(probePlayerId)
+          : game.api.snapshot();
+        assertProbeSnapshot(initialSnapshot, mode, probePlayerId, "initial");
+
+        phase = "first-input";
+        game.api.handleInput(probePlayerId, {
+          forward: 0,
+          strafe: 0,
+          turn: 0,
+          sprint: false,
+          fireHeld: false,
+        }, Date.now());
+
+        phase = "first-step";
+        game.api.step?.(0.05, Date.now());
+
+        phase = "post-input-snapshot";
+        const nextSnapshot = typeof game.api.snapshotFor === "function"
+          ? game.api.snapshotFor(probePlayerId)
+          : game.api.snapshot();
+        assertProbeSnapshot(nextSnapshot, mode, probePlayerId, "post-input");
+
+        phase = "complete";
+        return Response.json({ ok: true, mode, phase }, { headers });
       } catch (error) {
         return Response.json({
           ok: false,
           mode,
+          phase,
           error: errorText(error),
           errorName: String(error?.name ?? "Error").slice(0, 80),
+          errorStack: errorStack(error),
         }, { status: 500, headers });
       } finally {
         try { await game?.host?.stop?.(); } catch {}
       }
+    }
+
+    if (url.pathname === "/api/play-error") {
+      const rawRoom = (url.searchParams.get("room") || "public").slice(0, 64);
+      const mode = normalizeGameMode(url.searchParams.get("mode"));
+      const room = env.MATCH_ROOM.getByName(`${mode}:${rawRoom}`);
+      return room.fetch(request);
     }
 
     if (url.pathname === "/api/diagnostics") {
