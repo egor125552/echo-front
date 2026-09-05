@@ -8,7 +8,11 @@ export { MatchRoom };
 
 function errorText(error) {
   const message = String(error?.message ?? error ?? "Unknown server error");
-  return message.slice(0, 500);
+  return message.slice(0, 1000);
+}
+
+function errorStack(error) {
+  return error?.stack ? String(error.stack).slice(0, 5000) : null;
 }
 
 function assertProbeSnapshot(snapshot, mode, playerId, label) {
@@ -43,9 +47,6 @@ export default {
 
     if (url.pathname === "/api/runtime-probe") {
       const headers = { "Cache-Control": "no-store" };
-      if (!ENGINE_CONTROL.enabled) {
-        return Response.json({ ok: false, error: "Runtime probe is disabled" }, { status: 404, headers });
-      }
       const mode = normalizeGameMode(url.searchParams.get("mode"));
       let game = null;
       let phase = "create-game";
@@ -89,10 +90,18 @@ export default {
           phase,
           error: errorText(error),
           errorName: String(error?.name ?? "Error").slice(0, 80),
+          errorStack: errorStack(error),
         }, { status: 500, headers });
       } finally {
         try { await game?.host?.stop?.(); } catch {}
       }
+    }
+
+    if (url.pathname === "/api/play-error") {
+      const rawRoom = (url.searchParams.get("room") || "public").slice(0, 64);
+      const mode = normalizeGameMode(url.searchParams.get("mode"));
+      const room = env.MATCH_ROOM.getByName(`${mode}:${rawRoom}`);
+      return room.fetch(request);
     }
 
     if (url.pathname === "/api/diagnostics") {
