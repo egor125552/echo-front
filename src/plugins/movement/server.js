@@ -8,6 +8,11 @@ export const CHARACTER_MAX_FALL_SPEED = 16;
 
 const NAVIGABLE_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
 const STICKY_OBSTACLE_KINDS = new Set(["crate", "loot-crate"]);
+const STAIR_ASSIST_SAFE_INSET = 0.36;
+const STAIR_ASSIST_CAPTURE_MARGIN = 0.28;
+const STAIR_ASSIST_LONGITUDINAL_PADDING = 1.2;
+const STAIR_ASSIST_VERTICAL_PADDING = 0.65;
+const STAIR_ASSIST_MAX_RATIO = 0.1;
 
 export function normalizeFootstepSurface(value) {
   const surface = String(value ?? "default").trim().toLowerCase();
@@ -73,9 +78,72 @@ function hasStickyObstacleCollision(moved = {}) {
     STICKY_OBSTACLE_KINDS.has(String(collision?.worldObject?.kind ?? "")));
 }
 
+function finite(value, fallback = 0) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function stairEdgeAssist(position, attempted, walls = []) {
+  const movementDistance = Math.hypot(attempted.x, attempted.z);
+  if (movementDistance < 0.001 || !position) return attempted;
+
+  for (const stair of walls) {
+    if (String(stair?.kind ?? "") !== "building-stair") continue;
+
+    const run = Math.max(0.01, Math.abs(finite(stair.run)));
+    const width = Math.max(0.01, Math.abs(finite(stair.width)));
+    const rise = Math.max(0, Math.abs(finite(stair.rise)));
+    const direction = String(stair.risesToward ?? "west");
+    const northSouth = direction === "north" || direction === "south";
+    const centerLongitudinal = northSouth ? finite(stair.z) : finite(stair.x);
+    const centerLateral = northSouth ? finite(stair.x) : finite(stair.z);
+    const positionLongitudinal = northSouth ? finite(position.z) : finite(position.x);
+    const positionLateral = northSouth ? finite(position.x) : finite(position.z);
+    const attemptedLongitudinal = northSouth ? finite(attempted.z) : finite(attempted.x);
+    const attemptedLateral = northSouth ? finite(attempted.x) : finite(attempted.z);
+
+    // Only correct forward traversal along the stair. Sideways crossing and
+    // deliberate strafing stay completely manual.
+    if (Math.abs(attemptedLongitudinal) < 0.01
+      || Math.abs(attemptedLongitudinal) < Math.abs(attemptedLateral) * 1.1) continue;
+
+    const halfRun = run / 2;
+    const halfWidth = width / 2;
+    if (Math.abs(positionLongitudinal - centerLongitudinal) > halfRun + STAIR_ASSIST_LONGITUDINAL_PADDING) continue;
+    if (Math.abs(positionLateral - centerLateral) > halfWidth + STAIR_ASSIST_CAPTURE_MARGIN) continue;
+
+    const lowY = finite(stair.y);
+    const y = finite(position.y);
+    if (y < lowY - STAIR_ASSIST_VERTICAL_PADDING
+      || y > lowY + rise + STAIR_ASSIST_VERTICAL_PADDING) continue;
+
+    const safeHalfWidth = Math.max(0.05, halfWidth - STAIR_ASSIST_SAFE_INSET);
+    const projectedOffset = positionLateral + attemptedLateral - centerLateral;
+    if (Math.abs(projectedOffset) <= safeHalfWidth) return attempted;
+
+    const targetOffset = Math.max(-safeHalfWidth, Math.min(safeHalfWidth, projectedOffset));
+    const requestedCorrection = targetOffset - projectedOffset;
+    const maxCorrection = movementDistance * STAIR_ASSIST_MAX_RATIO;
+    const correction = Math.max(-maxCorrection, Math.min(maxCorrection, requestedCorrection));
+    if (Math.abs(correction) < 0.0001) return attempted;
+
+    const correctedLateral = attemptedLateral + correction;
+    const correctedDistance = Math.hypot(attemptedLongitudinal, correctedLateral);
+    const speedScale = correctedDistance > 0.0001 ? movementDistance / correctedDistance : 1;
+    const correctedLongitudinal = attemptedLongitudinal * speedScale;
+    const normalizedLateral = correctedLateral * speedScale;
+
+    return northSouth
+      ? { ...attempted, x: normalizedLateral, z: correctedLongitudinal }
+      : { ...attempted, x: correctedLongitudinal, z: normalizedLateral };
+  }
+
+  return attempted;
+}
+
 export const manifest = {
   id: "movement",
-  version: "2.4.1",
+  version: "2.5.0",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -202,14 +270,23 @@ export async function setup(ctx) {
           const strafe = rawStrafe * scale;
 
           const distance = speed * safeDt;
-          const dx = (
+          let dx = (
             Math.sin(transform.angle) * forward +
             Math.cos(transform.angle) * strafe
           ) * distance;
-          const dz = (
+          let dz = (
             -Math.cos(transform.angle) * forward +
             Math.sin(transform.angle) * strafe
           ) * distance;
+
+          if (!entity.bot
+            && Math.abs(rawForward) >= 0.2
+            && Math.abs(rawStrafe) <= 0.08
+            && Array.isArray(map.walls)) {
+            const assisted = stairEdgeAssist(transform, { x: dx, z: dz }, map.walls);
+            dx = assisted.x;
+            dz = assisted.z;
+          }
 
           const previousVerticalVelocity = Number(transform.verticalVelocity) || 0;
           const verticalVelocity = Math.max(
