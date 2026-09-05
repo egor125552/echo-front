@@ -11,6 +11,7 @@ import * as spawnProtection from "../plugins/spawn-protection/server.js";
 import * as social from "../plugins/social/server.js";
 import * as targetAssist from "../plugins/target-assist/server.js";
 import * as combat from "../plugins/combat/server.js";
+import * as projectiles from "../plugins/rapier-projectiles/server.js";
 import * as healthRegeneration from "../plugins/health-regeneration/server.js";
 import * as weapons from "../plugins/weapons/server.js";
 import * as weaponProgression from "../plugins/weapon-progression/server.js";
@@ -23,6 +24,7 @@ import * as botFill from "../plugins/bot-fill/server.js";
 import * as matchApi from "../plugins/match-api/server.js";
 import * as socialIntegration from "../plugins/social-match-integration/server.js";
 import * as networkTuning from "../plugins/network-tuning/server.js";
+import * as projectileLifecycle from "../plugins/rapier-projectile-lifecycle/server.js";
 
 export const echoFrontPreset = [
   entities,
@@ -38,6 +40,7 @@ export const echoFrontPreset = [
   social,
   targetAssist,
   combat,
+  projectiles,
   healthRegeneration,
   weapons,
   weaponProgression,
@@ -50,4 +53,5 @@ export const echoFrontPreset = [
   matchApi,
   socialIntegration,
   networkTuning,
+  projectileLifecycle,
 ];
