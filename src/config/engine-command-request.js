@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 9051402,
+  id: 9051403,
   mode: "battle-royale",
-  room: "stair-edge-assist-active",
+  room: "stair-forgiving-collision",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -18,10 +18,7 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
           },
         },
       },
-      {
-        command: "service.call",
-        args: { service: "battle-royale", method: "arm", arguments: [] },
-      },
+      { command: "service.call", args: { service: "battle-royale", method: "arm", arguments: [] } },
       {
         command: "service.call",
         args: {
@@ -84,10 +81,10 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         command: "entity.spawn",
         args: {
           spec: {
-            id: "stair-no-side-magnet",
+            id: "stair-warehouse-descend-edge",
             kind: "player",
             bot: false,
-            position: { x: 70, y: 0, z: 2.2, angle: 0 },
+            position: { x: 66.6, y: 3.2, z: 2.15, angle: 1.5707963267948966 },
           },
         },
       },
@@ -96,13 +93,59 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
         args: {
           service: "movement",
           method: "setInput",
-          arguments: ["stair-no-side-magnet", { forward: 1, strafe: 0, turn: 0, sprint: false }],
+          arguments: ["stair-warehouse-descend-edge", { forward: 1, strafe: 0, turn: 0, sprint: false }],
         },
       },
-      { command: "game.step", args: { dt: 0.05, steps: 8 } },
-      { command: "entity.inspect", args: { entityId: "stair-no-side-magnet" } },
-      { command: "entity.remove", args: { entityId: "stair-no-side-magnet" } }
+      { command: "game.step", args: { dt: 0.05, steps: 30 } },
+      { command: "entity.inspect", args: { entityId: "stair-warehouse-descend-edge" } },
+      { command: "entity.remove", args: { entityId: "stair-warehouse-descend-edge" } },
+
+      {
+        command: "entity.spawn",
+        args: {
+          spec: {
+            id: "stair-warehouse-edge-sprint",
+            kind: "player",
+            bot: false,
+            position: { x: 73.4, y: 0, z: 2.15, angle: -1.5707963267948966 },
+          },
+        },
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "movement",
+          method: "setInput",
+          arguments: ["stair-warehouse-edge-sprint", { forward: 1, strafe: 0, turn: 0, sprint: true }],
+        },
+      },
+      { command: "game.step", args: { dt: 0.05, steps: 20 } },
+      { command: "entity.inspect", args: { entityId: "stair-warehouse-edge-sprint" } },
+      { command: "entity.remove", args: { entityId: "stair-warehouse-edge-sprint" } },
+
+      {
+        command: "entity.spawn",
+        args: {
+          spec: {
+            id: "stair-warehouse-parallel-outside",
+            kind: "player",
+            bot: false,
+            position: { x: 73.4, y: 0, z: 2.65, angle: -1.5707963267948966 },
+          },
+        },
+      },
+      {
+        command: "service.call",
+        args: {
+          service: "movement",
+          method: "setInput",
+          arguments: ["stair-warehouse-parallel-outside", { forward: 1, strafe: 0, turn: 0, sprint: false }],
+        },
+      },
+      { command: "game.step", args: { dt: 0.05, steps: 20 } },
+      { command: "entity.inspect", args: { entityId: "stair-warehouse-parallel-outside" } },
+      { command: "entity.remove", args: { entityId: "stair-warehouse-parallel-outside" } }
     ],
   },
-  requestedAt: "2026-09-05T14:10:00Z",
+  requestedAt: "2026-09-05T14:18:00Z",
 });
