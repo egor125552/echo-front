@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 9051405,
+  id: 9051406,
   mode: "battle-royale",
-  room: "stair-full-edge-traversal",
+  room: "stair-subtle-assist-final",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -37,6 +37,24 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
 
       {
         command: "entity.spawn",
+        args: { spec: { id: "warehouse-edge-sprint", kind: "player", bot: false, position: { x: 73.4, y: 0, z: -2.15, angle: -1.5707963267948966 } } },
+      },
+      { command: "service.call", args: { service: "movement", method: "setInput", arguments: ["warehouse-edge-sprint", { forward: 1, strafe: 0, turn: 0, sprint: true }] } },
+      { command: "game.step", args: { dt: 0.05, steps: 40 } },
+      { command: "entity.inspect", args: { entityId: "warehouse-edge-sprint" } },
+      { command: "entity.remove", args: { entityId: "warehouse-edge-sprint" } },
+
+      {
+        command: "entity.spawn",
+        args: { spec: { id: "warehouse-parallel-outside", kind: "player", bot: false, position: { x: 73.4, y: 0, z: 2.65, angle: -1.5707963267948966 } } },
+      },
+      { command: "service.call", args: { service: "movement", method: "setInput", arguments: ["warehouse-parallel-outside", { forward: 1, strafe: 0, turn: 0, sprint: false }] } },
+      { command: "game.step", args: { dt: 0.05, steps: 20 } },
+      { command: "entity.inspect", args: { entityId: "warehouse-parallel-outside" } },
+      { command: "entity.remove", args: { entityId: "warehouse-parallel-outside" } },
+
+      {
+        command: "entity.spawn",
         args: { spec: { id: "warehouse-center-full-up", kind: "player", bot: false, position: { x: 73.4, y: 0, z: 0, angle: -1.5707963267948966 } } },
       },
       { command: "service.call", args: { service: "movement", method: "setInput", arguments: ["warehouse-center-full-up", { forward: 1, strafe: 0, turn: 0, sprint: false }] } },
@@ -45,5 +63,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "entity.remove", args: { entityId: "warehouse-center-full-up" } }
     ],
   },
-  requestedAt: "2026-09-05T14:34:00Z",
+  requestedAt: "2026-09-05T14:40:00Z",
 });
