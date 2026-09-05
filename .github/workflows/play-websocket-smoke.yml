@@ -1,0 +1,48 @@
+name: Play WebSocket Smoke
+
+on:
+  push:
+    paths:
+      - src/**
+      - public/client/plugins/network.js
+      - scripts/check-play-websocket.mjs
+      - .github/workflows/play-websocket-smoke.yml
+  pull_request:
+    paths:
+      - src/**
+      - public/client/plugins/network.js
+      - scripts/check-play-websocket.mjs
+      - .github/workflows/play-websocket-smoke.yml
+  workflow_dispatch:
+
+jobs:
+  play-websocket:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+
+      - name: Start local Worker
+        run: |
+          timeout 90s npx wrangler dev --port 8787 > /tmp/echo-front-play-websocket.log 2>&1 &
+          echo $! > /tmp/echo-front-play-websocket.pid
+          for i in {1..40}; do
+            if curl --max-time 3 --silent --fail http://127.0.0.1:8787/api/health > /tmp/health.json; then
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/echo-front-play-websocket.log || true
+          echo "Local Worker did not become healthy"
+          exit 1
+
+      - name: Connect through real play WebSocket
+        run: node scripts/check-play-websocket.mjs ws://127.0.0.1:8787
+
+      - name: Show Worker log on failure
+        if: failure()
+        run: cat /tmp/echo-front-play-websocket.log || true
