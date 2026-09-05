@@ -3,7 +3,7 @@ export const PROJECTILE_MAX_STEP = 1 / 60;
 
 export const manifest = {
   id: "rapier-projectiles",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["rapier-physics", "entities", "teams", "combat"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
@@ -11,10 +11,6 @@ export const manifest = {
 function finite(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
-}
-
-function clamp(value, minimum, maximum) {
-  return Math.max(minimum, Math.min(maximum, finite(value)));
 }
 
 function colliderHandle(colliderOrHandle) {
@@ -32,24 +28,13 @@ function normalize3(direction = {}) {
   return { x: x / length, y: y / length, z: z / length };
 }
 
-function actualContact(world, first, second) {
-  let touching = false;
-  try {
-    world.contactPair(first, second, (manifold) => {
-      if (touching) return;
-      if ((Number(manifold?.numContacts?.()) || 0) > 0
-        || (Number(manifold?.numSolverContacts?.()) || 0) > 0) touching = true;
-    });
-  } catch {}
-  return touching;
-}
-
 export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const entities = ctx.services.get("entities");
   const teams = ctx.services.get("teams");
   const combat = ctx.services.get("combat");
   const world = physics.world;
+  const RAPIER = physics.RAPIER;
 
   const slots = [];
   const slotsByCollider = new Map();
@@ -64,6 +49,7 @@ export async function setup(ctx) {
   let expiredTotal = 0;
   let recycledAtCapacity = 0;
   let peakActive = 0;
+  let collisionEventsTotal = 0;
 
   const previousEntityIdForCollider = typeof physics.entityIdForCollider === "function"
     ? physics.entityIdForCollider.bind(physics)
@@ -97,8 +83,8 @@ export async function setup(ctx) {
   };
 
   // Movement creates character colliders lazily as entities spawn. Register every
-  // one in the shared resolver so projectile contacts identify the actual entity
-  // without a second collision model.
+  // one in the shared resolver so a collision event can identify the actual entity
+  // without any hand-written overlap or trajectory math.
   const originalCreateCharacter = physics.createCharacter.bind(physics);
   physics.createCharacter = (entityId, position) => {
     const entry = originalCreateCharacter(entityId, position);
@@ -158,7 +144,12 @@ export async function setup(ctx) {
       ageSeconds: 0,
       spawnedAt: 0,
       generation: 0,
+      lastReason: "created",
     };
+    try {
+      const activeEvents = Number(slot.collider.activeEvents?.()) || 0;
+      slot.collider.setActiveEvents(activeEvents | RAPIER.ActiveEvents.COLLISION_EVENTS);
+    } catch {}
     setSlotEnabled(slot, false);
     slots.push(slot);
     slotsByCollider.set(slot.collider.handle, slot);
@@ -168,6 +159,7 @@ export async function setup(ctx) {
   function deactivate(slot, reason = "inactive") {
     if (!slot?.active) return false;
     slot.active = false;
+    slot.lastReason = reason;
     activeCount = Math.max(0, activeCount - 1);
     try { slot.body.setLinvel({ x: 0, y: 0, z: 0 }, false); } catch {}
     try { slot.body.setAngvel({ x: 0, y: 0, z: 0 }, false); } catch {}
@@ -196,8 +188,6 @@ export async function setup(ctx) {
     const weaponId = String(spec.weaponId ?? "unknown");
     const speed = Math.max(1, finite(spec.speed, 120));
     const range = Math.max(1, finite(spec.range, 28));
-    const radius = clamp(spec.radius, 0.008, 0.04) || 0.018;
-    const mass = clamp(spec.mass, 0.001, 0.03) || 0.006;
     if (!direction || !shooterId) return null;
 
     const slot = acquireSlot();
@@ -212,12 +202,8 @@ export async function setup(ctx) {
     slot.lifetimeSeconds = range / speed;
     slot.ageSeconds = 0;
     slot.spawnedAt = finite(spec.now, currentNow);
+    slot.lastReason = "flying";
 
-    // The pool uses one tiny Rapier rigid body shape for every firearm. Per-shot
-    // mass/radius are retained for diagnostics; trajectory itself is exclusively
-    // Rapier velocity + gravity + CCD/contact solving.
-    slot.mass = mass;
-    slot.radius = radius;
     setSlotEnabled(slot, true);
     slot.body.setTranslation({
       x: finite(spec.origin?.x),
@@ -247,21 +233,32 @@ export async function setup(ctx) {
     return slot.projectileId;
   }
 
-  function contactForSlot(slot) {
-    let best = null;
-    world.contactPairsWith(slot.collider, (other) => {
-      if (!slot.active || !other || !actualContact(world, slot.collider, other)) return;
-      if (slotsByCollider.has(other.handle)) return;
-      const targetId = physics.entityIdForCollider?.(other) ?? null;
-      const candidate = { collider: other, targetId };
-      if (!best || (targetId && !best.targetId)) best = candidate;
-    });
-    return best;
+  function fallbackRagdollOwner(collider) {
+    // battle-royale-ragdoll decorates physics.raycast with the owning entity for
+    // its body-part colliders. A tiny Rapier ray originating at that collider's
+    // own center is only an ownership lookup; collision and trajectory still come
+    // exclusively from the CCD collision event that brought us here.
+    if (!collider || typeof physics.raycast !== "function") return null;
+    try {
+      const p = collider.translation();
+      const hit = physics.raycast(
+        { x: finite(p?.x), y: finite(p?.y), z: finite(p?.z) },
+        { x: 0, y: 1, z: 0 },
+        0.002,
+        null,
+      );
+      return hit?.colliderHandle === collider.handle ? (hit.entityId ?? null) : null;
+    } catch {
+      return null;
+    }
   }
 
-  function resolveContact(slot, contact, now) {
-    if (!slot.active || !contact) return;
-    const targetId = contact.targetId;
+  function resolveContact(slot, otherHandle, now) {
+    if (!slot?.active) return;
+    if (slotsByCollider.has(otherHandle)) return;
+    const other = typeof world.getCollider === "function" ? world.getCollider(otherHandle) : null;
+    let targetId = physics.entityIdForCollider?.(other ?? otherHandle) ?? null;
+    if (!targetId && other) targetId = fallbackRagdollOwner(other);
     const target = targetId ? entities.get(targetId) : null;
     const sameTeam = targetId
       ? teams.teamOf(slot.shooterId) === teams.teamOf(targetId)
@@ -302,30 +299,72 @@ export async function setup(ctx) {
     deactivate(slot, "impact");
   }
 
-  function afterPhysicsStep(dt, now = currentNow) {
+  function handleCollisionEvent(handle1, handle2, started) {
+    if (!started) return;
+    const slot1 = slotsByCollider.get(handle1) ?? null;
+    const slot2 = slotsByCollider.get(handle2) ?? null;
+    if (!slot1 && !slot2) return;
+    collisionEventsTotal += 1;
+    if (slot1?.active && !slot2) resolveContact(slot1, handle2, currentNow);
+    if (slot2?.active && !slot1) resolveContact(slot2, handle1, currentNow);
+  }
+
+  // Rapier's EventQueue is owned by the shared physics plugin. Intercept the
+  // actual world.step call so the same queue can be drained for COLLISION_EVENTS
+  // immediately after CCD solving, while leaving contact-force events for the
+  // existing physics diagnostics to drain afterwards.
+  const originalWorldStep = world.step.bind(world);
+  world.step = (eventQueue) => {
+    const result = originalWorldStep(eventQueue);
+    if (eventQueue && typeof eventQueue.drainCollisionEvents === "function") {
+      eventQueue.drainCollisionEvents((handle1, handle2, started) => {
+        handleCollisionEvent(handle1, handle2, Boolean(started));
+      });
+    }
+    return result;
+  };
+
+  function afterPhysicsStep(dt) {
     const safeDt = Math.max(0, Math.min(0.1, finite(dt)));
     physicsStepCount += 1;
     for (const slot of slots) {
       if (!slot.active) continue;
-      const contact = contactForSlot(slot);
-      if (contact) {
-        resolveContact(slot, contact, now);
-        continue;
-      }
       slot.ageSeconds += safeDt;
       if (slot.ageSeconds >= slot.lifetimeSeconds) deactivate(slot, "expired");
     }
   }
 
-  // Every real Rapier step, including the vehicle substeps in Battle Royale,
-  // immediately resolves projectile contact pairs. This prevents a fast bullet
-  // from touching and bouncing away between two game ticks without being seen.
   const originalPhysicsStep = physics.step.bind(physics);
   physics.step = (dt) => {
     const result = originalPhysicsStep(dt);
-    afterPhysicsStep(dt, currentNow);
+    afterPhysicsStep(dt);
     return result;
   };
+
+  function activeSnapshot(limit = 8) {
+    const result = [];
+    for (const slot of slots) {
+      if (!slot.active) continue;
+      const position = slot.body.translation();
+      const velocity = slot.body.linvel();
+      result.push({
+        projectileId: slot.projectileId,
+        poolIndex: slot.index,
+        shooterId: slot.shooterId,
+        weaponId: slot.weaponId,
+        ageSeconds: slot.ageSeconds,
+        lifetimeSeconds: slot.lifetimeSeconds,
+        x: finite(position?.x),
+        y: finite(position?.y),
+        z: finite(position?.z),
+        vx: finite(velocity?.x),
+        vy: finite(velocity?.y),
+        vz: finite(velocity?.z),
+      });
+      if (result.length >= Math.max(1, Math.floor(finite(limit, 8)))) break;
+    }
+    return result;
+  }
 
   const api = {
     spawn,
@@ -334,9 +373,11 @@ export async function setup(ctx) {
     activeCount() { return activeCount; },
     physicsStepCount() { return physicsStepCount; },
     maxPhysicsStep: PROJECTILE_MAX_STEP,
+    activeSnapshot,
     stats() {
       return {
         engine: "rapier3d",
+        collisionSource: "rapier-collision-events",
         pooled: true,
         poolSize: slots.length,
         poolCapacity: MAX_PROJECTILE_POOL,
@@ -347,6 +388,7 @@ export async function setup(ctx) {
         worldImpactTotal,
         expiredTotal,
         recycledAtCapacity,
+        collisionEventsTotal,
         physicsStepCount,
       };
     },
