@@ -12,6 +12,22 @@ function entitySnapshot(game, entityId) {
   return game.api.snapshot().entities.find((entity) => entity.id === entityId) ?? null;
 }
 
+function durability(game, entityId) {
+  const snapshot = entitySnapshot(game, entityId);
+  return {
+    health: Number(snapshot?.health) || 0,
+    armor: Number(snapshot?.armor) || 0,
+  };
+}
+
+function sameDurability(first, second) {
+  return first.health === second.health && first.armor === second.armor;
+}
+
+function totalDurability(state) {
+  return state.health + state.armor;
+}
+
 async function main() {
   const game = await createEchoFrontGame({ mode: "tdm" });
   try {
@@ -27,9 +43,6 @@ async function main() {
     game.api.connectHuman(SHOOTER_ID);
     game.api.connectHuman(TARGET_ID);
 
-    // Let TDM finish its own match-start/respawn sequence first. Otherwise the
-    // first simulation tick legitimately reapplies spawn protection and masks an
-    // otherwise-correct physical projectile hit.
     let now = Date.now() + 3000;
     for (let frame = 0; frame < 4; frame += 1) {
       now += 1000 / 60;
@@ -62,35 +75,35 @@ async function main() {
       "Every firearm must keep its own projectile velocity",
     );
 
-    const healthBefore = entitySnapshot(game, TARGET_ID)?.health;
-    assert(Number.isFinite(healthBefore), "Target health is unavailable");
+    const durabilityBefore = durability(game, TARGET_ID);
+    assert(totalDurability(durabilityBefore) > 0, "Target durability is unavailable");
     assert(weapons.fire(SHOOTER_ID, now), "Pistol did not spawn a projectile");
 
-    const healthImmediatelyAfterFire = entitySnapshot(game, TARGET_ID)?.health;
+    const durabilityImmediatelyAfterFire = durability(game, TARGET_ID);
     assert(
-      healthImmediatelyAfterFire === healthBefore,
-      `Hitscan regression: health changed inside weapons.fire (${healthBefore} -> ${healthImmediatelyAfterFire})`,
+      sameDurability(durabilityImmediatelyAfterFire, durabilityBefore),
+      `Hitscan regression: durability changed inside weapons.fire (${JSON.stringify(durabilityBefore)} -> ${JSON.stringify(durabilityImmediatelyAfterFire)})`,
     );
     assert(projectiles.activeCount() === 1, "A real projectile was not left active after firing");
 
-    let healthAfterFlight = healthImmediatelyAfterFire;
+    let durabilityAfterFlight = durabilityImmediatelyAfterFire;
     const flightTrace = [];
-    for (let frame = 0; frame < 45 && healthAfterFlight === healthBefore; frame += 1) {
+    for (let frame = 0; frame < 45 && sameDurability(durabilityAfterFlight, durabilityBefore); frame += 1) {
       now += 1000 / 60;
       game.api.step(1 / 60, now);
-      healthAfterFlight = entitySnapshot(game, TARGET_ID)?.health;
+      durabilityAfterFlight = durability(game, TARGET_ID);
       if (frame < 16) {
         flightTrace.push({
           frame,
-          health: healthAfterFlight,
+          durability: durabilityAfterFlight,
           active: projectiles.activeSnapshot(2),
           stats: projectiles.stats(),
         });
       }
     }
     assert(
-      healthAfterFlight < healthBefore,
-      `Rapier projectile crossed the target without applying damage (${healthBefore} -> ${healthAfterFlight}); trace=${JSON.stringify(flightTrace)}`,
+      totalDurability(durabilityAfterFlight) < totalDurability(durabilityBefore),
+      `Rapier projectile crossed the target without applying damage (${JSON.stringify(durabilityBefore)} -> ${JSON.stringify(durabilityAfterFlight)}); trace=${JSON.stringify(flightTrace)}`,
     );
     assert(projectiles.stats().hitTotal >= 1, "Rapier contact was not recorded as a projectile hit");
 
@@ -100,19 +113,19 @@ async function main() {
     movement.teleport(TARGET_ID, { x: 0, y: 0, z: -20, angle: Math.PI });
     spawnProtection.clear(TARGET_ID);
     now += 500;
-    const dodgeHealthBefore = entitySnapshot(game, TARGET_ID)?.health;
+    const dodgeBefore = durability(game, TARGET_ID);
     assert(weapons.fire(SHOOTER_ID, now), "Second pistol projectile did not spawn");
-    assert(entitySnapshot(game, TARGET_ID)?.health === dodgeHealthBefore, "Second shot became hitscan");
+    assert(sameDurability(durability(game, TARGET_ID), dodgeBefore), "Second shot became hitscan");
     movement.teleport(TARGET_ID, { x: 4, y: 0, z: -20, angle: Math.PI });
 
     for (let frame = 0; frame < 45; frame += 1) {
       now += 1000 / 60;
       game.api.step(1 / 60, now);
     }
-    const dodgeHealthAfter = entitySnapshot(game, TARGET_ID)?.health;
+    const dodgeAfter = durability(game, TARGET_ID);
     assert(
-      dodgeHealthAfter === dodgeHealthBefore,
-      `Dodged physical projectile still damaged target (${dodgeHealthBefore} -> ${dodgeHealthAfter})`,
+      sameDurability(dodgeAfter, dodgeBefore),
+      `Dodged physical projectile still damaged target (${JSON.stringify(dodgeBefore)} -> ${JSON.stringify(dodgeAfter)})`,
     );
 
     // Saturation is bounded: oldest active projectiles are recycled instead of
@@ -139,9 +152,11 @@ async function main() {
       ok: true,
       engine: stats.engine,
       collisionSource: stats.collisionSource,
-      noHitscan: healthImmediatelyAfterFire === healthBefore,
-      hitAfterRapierSteps: healthAfterFlight < healthBefore,
-      dodgeWorked: dodgeHealthAfter === dodgeHealthBefore,
+      noHitscan: sameDurability(durabilityImmediatelyAfterFire, durabilityBefore),
+      hitAfterRapierSteps: totalDurability(durabilityAfterFlight) < totalDurability(durabilityBefore),
+      impactBefore: durabilityBefore,
+      impactAfter: durabilityAfterFlight,
+      dodgeWorked: sameDurability(dodgeAfter, dodgeBefore),
       pistolVelocity: weapons.definitions.pistol.muzzleVelocity,
       rifleVelocity: weapons.definitions.rifle.muzzleVelocity,
       poolSize: stats.poolSize,
