@@ -1,9 +1,11 @@
 export const manifest = {
   id: "rapier-cardinal-ramps",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["rapier-physics"],
   capabilities: ["services.consume"],
 };
+
+const STAIR_COLLISION_SIDE_MARGIN = 0.4;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -30,20 +32,36 @@ function axisQuaternion(axis, angle) {
   };
 }
 
+function forgivingStairSpec(spec = {}) {
+  if (String(spec.kind ?? "") !== "building-stair") return spec;
+  const navigableWidth = Math.max(0.4, Math.abs(finite(spec.width, 2)));
+  return {
+    ...spec,
+    width: navigableWidth + STAIR_COLLISION_SIDE_MARGIN * 2,
+    navigableWidth,
+    collisionSideMargin: STAIR_COLLISION_SIDE_MARGIN,
+  };
+}
+
 export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const originalCreateRamp = physics.createRamp.bind(physics);
 
   physics.createRamp = (spec = {}) => {
-    const direction = String(spec.risesToward ?? "west");
+    // FPS-style forgiving collision: navigation and authored stair width stay
+    // unchanged, while the actual walkable Rapier ramp extends only 40 cm past
+    // each side. A slight approach miss can still catch the stair, without a
+    // visible snap, camera turn, or large magnetic pull toward its centre.
+    const collisionSpec = forgivingStairSpec(spec);
+    const direction = String(collisionSpec.risesToward ?? "west");
     if (direction !== "north" && direction !== "south") {
-      return originalCreateRamp(spec);
+      return originalCreateRamp(collisionSpec);
     }
 
-    const run = Math.max(0.01, Math.abs(finite(spec.run, 4)));
-    const rise = Math.max(0, finite(spec.rise));
-    const width = Math.max(0.4, Math.abs(finite(spec.width, 2)));
-    const thickness = Math.max(0.04, Math.abs(finite(spec.thickness, 0.2)));
+    const run = Math.max(0.01, Math.abs(finite(collisionSpec.run, 4)));
+    const rise = Math.max(0, finite(collisionSpec.rise));
+    const width = Math.max(0.4, Math.abs(finite(collisionSpec.width, 2)));
+    const thickness = Math.max(0.04, Math.abs(finite(collisionSpec.thickness, 0.2)));
     const slopeAngle = Math.atan2(rise, run);
 
     // Build the already proven east-rising Rapier slope, then yaw the entire
@@ -51,7 +69,7 @@ export async function setup(ctx) {
     // CharacterController one continuous walkable surface instead of relying
     // on autostep heuristics for a stack of tiny cuboids.
     const collider = originalCreateRamp({
-      ...spec,
+      ...collisionSpec,
       run,
       rise,
       width,
@@ -69,9 +87,9 @@ export async function setup(ctx) {
     const base = collider.translation();
     const horizontalNormalOffset = Math.sin(slopeAngle) * thickness / 2;
     collider.setTranslation({
-      x: finite(spec.x),
+      x: finite(collisionSpec.x),
       y: base.y,
-      z: finite(spec.z) + (direction === "south" ? horizontalNormalOffset : -horizontalNormalOffset),
+      z: finite(collisionSpec.z) + (direction === "south" ? horizontalNormalOffset : -horizontalNormalOffset),
     });
     physics.syncQueries?.();
     return collider;
