@@ -33,13 +33,49 @@ export default {
       }
       const mode = normalizeGameMode(url.searchParams.get("mode"));
       let game = null;
+      let phase = "create-game";
       try {
         game = await createEchoFrontGame({ mode });
-        return Response.json({ ok: true, mode }, { headers });
+
+        const probePlayerId = crypto.randomUUID();
+        phase = "connect-human";
+        game.api.connectHuman(probePlayerId);
+
+        phase = "initial-snapshot";
+        const initialSnapshot = typeof game.api.snapshotFor === "function"
+          ? game.api.snapshotFor(probePlayerId)
+          : game.api.snapshot();
+        if (!initialSnapshot || initialSnapshot.mode !== mode) {
+          throw new Error(`Runtime probe received invalid initial snapshot for ${mode}`);
+        }
+
+        phase = "first-input";
+        game.api.handleInput(probePlayerId, {
+          forward: 0,
+          strafe: 0,
+          turn: 0,
+          sprint: false,
+          fireHeld: false,
+        }, Date.now());
+
+        phase = "first-step";
+        game.api.step?.(0.05, Date.now());
+
+        phase = "post-input-snapshot";
+        const nextSnapshot = typeof game.api.snapshotFor === "function"
+          ? game.api.snapshotFor(probePlayerId)
+          : game.api.snapshot();
+        if (!nextSnapshot || nextSnapshot.mode !== mode) {
+          throw new Error(`Runtime probe received invalid post-input snapshot for ${mode}`);
+        }
+
+        phase = "complete";
+        return Response.json({ ok: true, mode, phase }, { headers });
       } catch (error) {
         return Response.json({
           ok: false,
           mode,
+          phase,
           error: errorText(error),
           errorName: String(error?.name ?? "Error").slice(0, 80),
         }, { status: 500, headers });
