@@ -66,20 +66,26 @@ async function main() {
     assert(projectiles.activeCount() === 1, "A real projectile was not left active after firing");
 
     let healthAfterFlight = healthImmediatelyAfterFire;
+    const flightTrace = [];
     for (let frame = 0; frame < 45 && healthAfterFlight === healthBefore; frame += 1) {
       now += 1000 / 60;
       game.api.step(1 / 60, now);
       healthAfterFlight = entitySnapshot(game, TARGET_ID)?.health;
+      if (frame < 16) {
+        flightTrace.push({
+          frame,
+          health: healthAfterFlight,
+          active: projectiles.activeSnapshot(2),
+          stats: projectiles.stats(),
+        });
+      }
     }
     assert(
       healthAfterFlight < healthBefore,
-      `Rapier projectile crossed the target without applying damage (${healthBefore} -> ${healthAfterFlight})`,
+      `Rapier projectile crossed the target without applying damage (${healthBefore} -> ${healthAfterFlight}); trace=${JSON.stringify(flightTrace)}`,
     );
     assert(projectiles.stats().hitTotal >= 1, "Rapier contact was not recorded as a projectile hit");
 
-    // Fire at the old position and move the target before Rapier advances. With
-    // hitscan this would already be too late; with a physical projectile the
-    // target can actually dodge the trajectory.
     movement.teleport(SHOOTER_ID, { x: 0, y: 0, z: 0, angle: 0 });
     movement.teleport(TARGET_ID, { x: 0, y: 0, z: -20, angle: Math.PI });
     now += 500;
@@ -98,8 +104,6 @@ async function main() {
       `Dodged physical projectile still damaged target (${dodgeHealthBefore} -> ${dodgeHealthAfter})`,
     );
 
-    // Capacity is deliberately bounded. Saturation recycles the oldest physical
-    // projectile instead of allocating unbounded rigid bodies in a Worker.
     for (let index = 0; index < MAX_PROJECTILE_POOL + 17; index += 1) {
       projectiles.spawn({
         shooterId: SHOOTER_ID,
@@ -121,6 +125,7 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       engine: stats.engine,
+      collisionSource: stats.collisionSource,
       noHitscan: healthImmediatelyAfterFire === healthBefore,
       hitAfterRapierSteps: healthAfterFlight < healthBefore,
       dodgeWorked: dodgeHealthAfter === dodgeHealthBefore,
