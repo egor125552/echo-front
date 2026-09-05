@@ -8,6 +8,10 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function approximate(actual, expected, tolerance = 0.0001) {
+  return Math.abs(Number(actual) - Number(expected)) <= tolerance;
+}
+
 function entitySnapshot(game, entityId) {
   return game.api.snapshot().entities.find((entity) => entity.id === entityId) ?? null;
 }
@@ -70,6 +74,10 @@ async function main() {
     );
     assert(weapons.definitions.pistol.muzzleVelocity === 120, "Pistol projectile speed changed unexpectedly");
     assert(weapons.definitions.rifle.muzzleVelocity === 200, "Rifle projectile speed changed unexpectedly");
+    assert(approximate(weapons.definitions.pistol.projectileMass, 0.008), "Pistol projectile mass changed unexpectedly");
+    assert(approximate(weapons.definitions.pistol.projectileRadius, 0.005), "Pistol projectile radius changed unexpectedly");
+    assert(approximate(weapons.definitions.rifle.projectileMass, 0.004), "Rifle projectile mass changed unexpectedly");
+    assert(approximate(weapons.definitions.rifle.projectileRadius, 0.003), "Rifle projectile radius changed unexpectedly");
     assert(
       weapons.definitions.rifle.muzzleVelocity > weapons.definitions.pistol.muzzleVelocity,
       "Every firearm must keep its own projectile velocity",
@@ -85,6 +93,10 @@ async function main() {
       `Hitscan regression: durability changed inside weapons.fire (${JSON.stringify(durabilityBefore)} -> ${JSON.stringify(durabilityImmediatelyAfterFire)})`,
     );
     assert(projectiles.activeCount() === 1, "A real projectile was not left active after firing");
+    const firedProjectile = projectiles.activeSnapshot(4).find((item) => item.weaponId === "pistol");
+    assert(firedProjectile?.shape === "ball", "Pistol projectile is not using a Rapier ball collider");
+    assert(approximate(firedProjectile?.mass, 0.008), "Pistol projectile did not receive its physical mass");
+    assert(approximate(firedProjectile?.radius, 0.005), "Pistol projectile did not receive its physical radius");
 
     let durabilityAfterFlight = durabilityImmediatelyAfterFire;
     const flightTrace = [];
@@ -107,8 +119,6 @@ async function main() {
     );
     assert(projectiles.stats().hitTotal >= 1, "Rapier contact was not recorded as a projectile hit");
 
-    // The target is moved after the trigger pull but before Rapier advances. A
-    // hitscan weapon would have already damaged it; a real projectile can miss.
     movement.teleport(SHOOTER_ID, { x: 0, y: 0, z: 0, angle: 0 });
     movement.teleport(TARGET_ID, { x: 0, y: 0, z: -20, angle: Math.PI });
     spawnProtection.clear(TARGET_ID);
@@ -128,8 +138,81 @@ async function main() {
       `Dodged physical projectile still damaged target (${JSON.stringify(dodgeBefore)} -> ${JSON.stringify(dodgeAfter)})`,
     );
 
-    // Saturation is bounded: oldest active projectiles are recycled instead of
-    // allocating an unbounded number of Rapier rigid bodies in a Worker.
+    // Rapier gravity must bend the trajectory without any custom ballistic position updates.
+    now += 500;
+    const gravityId = projectiles.spawn({
+      shooterId: SHOOTER_ID,
+      weaponId: "gravity-probe",
+      damage: 0,
+      speed: 120,
+      range: 24,
+      mass: 0.008,
+      radius: 0.005,
+      origin: { x: 80, y: 30, z: 80 },
+      direction: { x: 1, y: 0, z: 0 },
+      now,
+    });
+    assert(gravityId, "Gravity probe projectile was not created");
+    const gravityStart = projectiles.activeSnapshot(8).find((item) => item.projectileId === gravityId);
+    assert(gravityStart, "Gravity probe snapshot is unavailable");
+    for (let frame = 0; frame < 6; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+    }
+    const gravityAfter = projectiles.activeSnapshot(8).find((item) => item.projectileId === gravityId);
+    assert(gravityAfter, "Gravity probe expired too early");
+    const measuredDrop = gravityStart.y - gravityAfter.y;
+    assert(measuredDrop > 0.025, `Rapier gravity did not produce measurable bullet drop (${measuredDrop})`);
+    assert(gravityAfter.vy < -0.5, `Rapier gravity did not create downward velocity (${gravityAfter.vy})`);
+    for (let frame = 0; frame < 8; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+    }
+    assert(
+      !projectiles.activeSnapshot(MAX_PROJECTILE_POOL).some((item) => item.projectileId === gravityId),
+      "Gravity probe did not expire at its bounded lifetime",
+    );
+
+    // A static Rapier wall must physically terminate the projectile before it can continue through it.
+    const testWall = physics.createWall({
+      x: 60,
+      y: 0,
+      z: 60,
+      hx: 0.12,
+      hz: 2,
+      height: 4,
+      kind: "projectile-test-wall",
+    });
+    const impactsBeforeWall = projectiles.stats().worldImpactTotal;
+    const wallProjectileId = projectiles.spawn({
+      shooterId: SHOOTER_ID,
+      weaponId: "wall-probe",
+      damage: 0,
+      speed: 120,
+      range: 20,
+      mass: 0.008,
+      radius: 0.005,
+      origin: { x: 55, y: 1, z: 60 },
+      direction: { x: 1, y: 0, z: 0 },
+      now,
+    });
+    assert(wallProjectileId, "Wall probe projectile was not created");
+    for (let frame = 0; frame < 12; frame += 1) {
+      now += 1000 / 120;
+      game.api.step(1 / 120, now);
+      if (!projectiles.activeSnapshot(16).some((item) => item.projectileId === wallProjectileId)) break;
+    }
+    const wallStats = projectiles.stats();
+    assert(
+      wallStats.worldImpactTotal > impactsBeforeWall,
+      "Rapier wall did not register a physical projectile impact",
+    );
+    assert(
+      !projectiles.activeSnapshot(16).some((item) => item.projectileId === wallProjectileId),
+      "Projectile remained active after hitting a Rapier wall",
+    );
+    physics.removeWall(testWall);
+
     for (let index = 0; index < MAX_PROJECTILE_POOL + 17; index += 1) {
       projectiles.spawn({
         shooterId: SHOOTER_ID,
@@ -143,6 +226,8 @@ async function main() {
       });
     }
     const stats = projectiles.stats();
+    assert(stats.projectileShape === "ball", "Projectile pool is not using Rapier ball colliders");
+    assert(stats.gravityDriven === true, "Projectile system is not marked as Rapier-gravity driven");
     assert(stats.poolCapacity === MAX_PROJECTILE_POOL, "Projectile pool capacity changed unexpectedly");
     assert(stats.poolSize <= MAX_PROJECTILE_POOL, "Projectile pool allocated beyond its hard cap");
     assert(stats.active <= MAX_PROJECTILE_POOL, "Active projectile count exceeded the hard cap");
@@ -152,6 +237,7 @@ async function main() {
       ok: true,
       engine: stats.engine,
       collisionSource: stats.collisionSource,
+      projectileShape: stats.projectileShape,
       noHitscan: sameDurability(durabilityImmediatelyAfterFire, durabilityBefore),
       hitAfterRapierSteps: totalDurability(durabilityAfterFlight) < totalDurability(durabilityBefore),
       impactBefore: durabilityBefore,
@@ -159,6 +245,13 @@ async function main() {
       dodgeWorked: sameDurability(dodgeAfter, dodgeBefore),
       pistolVelocity: weapons.definitions.pistol.muzzleVelocity,
       rifleVelocity: weapons.definitions.rifle.muzzleVelocity,
+      pistolMass: weapons.definitions.pistol.projectileMass,
+      rifleMass: weapons.definitions.rifle.projectileMass,
+      pistolRadius: weapons.definitions.pistol.projectileRadius,
+      rifleRadius: weapons.definitions.rifle.projectileRadius,
+      measuredDropAfter100ms: measuredDrop,
+      downwardVelocityAfter100ms: gravityAfter.vy,
+      wallImpactWorked: wallStats.worldImpactTotal > impactsBeforeWall,
       poolSize: stats.poolSize,
       poolCapacity: stats.poolCapacity,
       recycledAtCapacity: stats.recycledAtCapacity,
