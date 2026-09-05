@@ -8,11 +8,6 @@ export const CHARACTER_MAX_FALL_SPEED = 16;
 
 const NAVIGABLE_SUPPORT_KINDS = new Set(["ground", "building-floor", "building-stair"]);
 const STICKY_OBSTACLE_KINDS = new Set(["crate", "loot-crate"]);
-const STAIR_EDGE_SAFE_INSET = 0.4;
-const STAIR_EDGE_CAPTURE_MARGIN = 0.28;
-const STAIR_EDGE_LONGITUDINAL_PADDING = 1.2;
-const STAIR_EDGE_VERTICAL_PADDING = 0.65;
-const STAIR_EDGE_ASSIST_RATIO = 0.18;
 
 export function normalizeFootstepSurface(value) {
   const surface = String(value ?? "default").trim().toLowerCase();
@@ -78,79 +73,9 @@ function hasStickyObstacleCollision(moved = {}) {
     STICKY_OBSTACLE_KINDS.has(String(collision?.worldObject?.kind ?? "")));
 }
 
-function finite(value, fallback = 0) {
-  const number = Number(value);
-  return Number.isFinite(number) ? number : fallback;
-}
-
-function stairEdgeAssist(position, attempted, walls = []) {
-  const movementDistance = Math.hypot(attempted.x, attempted.z);
-  if (movementDistance < 0.001 || !position) return attempted;
-
-  for (const stair of walls) {
-    if (String(stair?.kind ?? "") !== "building-stair") continue;
-
-    const run = Math.max(0.01, Math.abs(finite(stair.run)));
-    const width = Math.max(0.01, Math.abs(finite(stair.width)));
-    const rise = Math.max(0, Math.abs(finite(stair.rise)));
-    const direction = String(stair.risesToward ?? "west");
-    const northSouth = direction === "north" || direction === "south";
-    const centerLongitudinal = northSouth ? finite(stair.z) : finite(stair.x);
-    const centerLateral = northSouth ? finite(stair.x) : finite(stair.z);
-    const positionLongitudinal = northSouth ? finite(position.z) : finite(position.x);
-    const positionLateral = northSouth ? finite(position.x) : finite(position.z);
-    const attemptedLongitudinal = northSouth ? finite(attempted.z) : finite(attempted.x);
-    const attemptedLateral = northSouth ? finite(attempted.x) : finite(attempted.z);
-
-    // Only help when the player is actually travelling along the staircase.
-    // Crossing a staircase sideways or deliberately strafing must remain fully manual.
-    if (Math.abs(attemptedLongitudinal) < 0.01
-      || Math.abs(attemptedLongitudinal) < Math.abs(attemptedLateral) * 1.1) continue;
-
-    const halfRun = run / 2;
-    const halfWidth = width / 2;
-    if (Math.abs(positionLongitudinal - centerLongitudinal) > halfRun + STAIR_EDGE_LONGITUDINAL_PADDING) continue;
-    if (Math.abs(positionLateral - centerLateral) > halfWidth + STAIR_EDGE_CAPTURE_MARGIN) continue;
-
-    const stairLowY = finite(stair.y);
-    const positionY = finite(position.y);
-    if (positionY < stairLowY - STAIR_EDGE_VERTICAL_PADDING
-      || positionY > stairLowY + rise + STAIR_EDGE_VERTICAL_PADDING) continue;
-
-    // A capsule close to the physical edge can have only part of its footprint
-    // supported by the ramp. Keep only that narrow edge band forgiving; players
-    // already well inside the stair keep their exact requested trajectory.
-    const safeInset = Math.min(
-      STAIR_EDGE_SAFE_INSET,
-      Math.max(0.05, halfWidth - 0.05),
-    );
-    const safeHalfWidth = Math.max(0, halfWidth - safeInset);
-    const projectedOffset = (positionLateral + attemptedLateral) - centerLateral;
-    if (Math.abs(projectedOffset) <= safeHalfWidth) return attempted;
-
-    const targetOffset = Math.max(-safeHalfWidth, Math.min(safeHalfWidth, projectedOffset));
-    const requestedCorrection = targetOffset - projectedOffset;
-    const maxCorrection = movementDistance * STAIR_EDGE_ASSIST_RATIO;
-    const correction = Math.max(-maxCorrection, Math.min(maxCorrection, requestedCorrection));
-    if (Math.abs(correction) < 0.0001) return attempted;
-
-    const correctedLateral = attemptedLateral + correction;
-    const correctedDistance = Math.hypot(attemptedLongitudinal, correctedLateral);
-    const distanceScale = correctedDistance > 0.0001 ? movementDistance / correctedDistance : 1;
-    const correctedLongitudinal = attemptedLongitudinal * distanceScale;
-    const normalizedLateral = correctedLateral * distanceScale;
-
-    return northSouth
-      ? { ...attempted, x: normalizedLateral, z: correctedLongitudinal }
-      : { ...attempted, x: correctedLongitudinal, z: normalizedLateral };
-  }
-
-  return attempted;
-}
-
 export const manifest = {
   id: "movement",
-  version: "2.4.0",
+  version: "2.4.1",
   requires: ["entities", "rapier-physics", "map-test-arena"],
   capabilities: [
     "services.consume", "services.provide",
@@ -277,23 +202,14 @@ export async function setup(ctx) {
           const strafe = rawStrafe * scale;
 
           const distance = speed * safeDt;
-          let dx = (
+          const dx = (
             Math.sin(transform.angle) * forward +
             Math.cos(transform.angle) * strafe
           ) * distance;
-          let dz = (
+          const dz = (
             -Math.cos(transform.angle) * forward +
             Math.sin(transform.angle) * strafe
           ) * distance;
-
-          if (!entity.bot
-            && Math.abs(rawForward) >= 0.2
-            && Math.abs(rawStrafe) <= 0.08
-            && Array.isArray(map.walls)) {
-            const assisted = stairEdgeAssist(transform, { x: dx, z: dz }, map.walls);
-            dx = assisted.x;
-            dz = assisted.z;
-          }
 
           const previousVerticalVelocity = Number(transform.verticalVelocity) || 0;
           const verticalVelocity = Math.max(
