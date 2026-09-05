@@ -38,6 +38,7 @@ async function main() {
     const projectiles = services.get("projectiles");
     const battleRoyale = services.get("battle-royale");
     const vehicles = services.get("vehicles");
+    const ragdoll = services.get("ragdoll");
 
     game.api.connectHuman(SHOOTER_ID);
     game.api.connectHuman(TARGET_ID);
@@ -114,9 +115,49 @@ async function main() {
       `Battle Royale Rapier projectile did not damage target (${durabilityBefore} -> ${durability(afterImpact)})`,
     );
 
+    // A live ragdoll replaces the ordinary character collider with Rapier body-part
+    // colliders. Verify projectile ownership still resolves to the same entity and
+    // damage is applied from the real CCD collision event, not from a hidden ray hit.
+    groundHuman(game, movement, TARGET_ID, { x: 0, y: 0, z: -10, angle: Math.PI });
+    const ragdollBefore = entitySnapshot(game, TARGET_ID);
+    const ragdollDurabilityBefore = durability(ragdollBefore);
+    assert(ragdoll.activate(TARGET_ID, {
+      reason: "projectile-test",
+      position: { x: 0, y: 0, z: -10 },
+      angle: Math.PI,
+      velocity: { x: 0, y: 0, z: 0 },
+    }, now), "Could not activate Battle Royale ragdoll target");
+
+    const ragdollProjectileId = projectiles.spawn({
+      shooterId: SHOOTER_ID,
+      weaponId: "ragdoll-projectile-test",
+      damage: 7,
+      speed: 120,
+      range: 28,
+      origin: { x: 0, y: 1, z: -0.55 },
+      direction: { x: 0, y: 0, z: -1 },
+      now,
+    });
+    assert(ragdollProjectileId, "Could not spawn projectile toward active ragdoll");
+    assert(
+      durability(entitySnapshot(game, TARGET_ID)) === ragdollDurabilityBefore,
+      "Ragdoll projectile applied damage before Rapier advanced",
+    );
+
+    let ragdollAfter = entitySnapshot(game, TARGET_ID);
+    for (let frame = 0; frame < 30 && durability(ragdollAfter) === ragdollDurabilityBefore; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+      ragdollAfter = entitySnapshot(game, TARGET_ID);
+    }
+    assert(
+      durability(ragdollAfter) < ragdollDurabilityBefore,
+      `Projectile hit active ragdoll without resolving entity damage (${ragdollDurabilityBefore} -> ${durability(ragdollAfter)})`,
+    );
+
     const stats = projectiles.stats();
     assert(stats.collisionSource === "rapier-collision-events", "Battle Royale projectile collision source is not Rapier");
-    assert(stats.hitTotal >= 1, "Battle Royale projectile contact was not recorded");
+    assert(stats.hitTotal >= 2, "Battle Royale projectile contacts were not recorded");
 
     console.log(JSON.stringify({
       ok: true,
@@ -128,6 +169,9 @@ async function main() {
       noHitscan: durability(immediatelyAfterFire) === durabilityBefore,
       impactBefore: { health: beforeImpact.health, armor: beforeImpact.armor },
       impactAfter: { health: afterImpact.health, armor: afterImpact.armor },
+      ragdollImpactBefore: { health: ragdollBefore.health, armor: ragdollBefore.armor },
+      ragdollImpactAfter: { health: ragdollAfter.health, armor: ragdollAfter.armor },
+      ragdollHitWorked: durability(ragdollAfter) < ragdollDurabilityBefore,
       hitTotal: stats.hitTotal,
       activeProjectiles: stats.active,
       poolSize: stats.poolSize,
