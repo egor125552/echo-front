@@ -171,7 +171,8 @@ export const BATTLE_ROYALE_BUILDINGS = Object.freeze([
         // The stair opening is deliberately wider than the ramp so a blind
         // player can stay on it without needing pixel-perfect steering.
         slabs: [
-          { x: 4.5, z: 0, width: 9.0, depth: 14.0 },
+          // Meet the ramp's upper edge at x=-0.5 without an open gap.
+          { x: 4.25, z: 0, width: 9.5, depth: 14.0 },
           { x: -8.0, z: 0, width: 2.0, depth: 14.0 },
           { x: -3.5, z: 4.6, width: 7.0, depth: 4.8 },
           { x: -3.5, z: -4.6, width: 7.0, depth: 4.8 },

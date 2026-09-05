@@ -1,3 +1,5 @@
+import { isStairSideCollision } from "./stair-obstacles.js";
+
 export const HUMAN_TURN_SPEED = 1.65;
 export const BOT_TURN_SPEED = 2.6;
 export const FOOTSTEP_VARIANT_COUNT = 3;
@@ -38,6 +40,15 @@ function blockageFromRapier(attempted, moved) {
   for (const collision of collisions) {
     const worldObject = collision?.worldObject;
     if (!worldObject) continue;
+    if (isStairSideCollision(collision)) {
+      return {
+        kind: "building-stair-side",
+        speech: "Боковая стенка лестницы. Подойди к её началу",
+        colliderHandle: collision.colliderHandle ?? null,
+        objectId: worldObject.stairId ?? null,
+        objectName: "боковая стенка лестницы",
+      };
+    }
     // Floors and stair ramps are support surfaces, not obstacles. Rapier may
     // report them while resolving slope/ground contact; announcing them as a
     // blocked move produces the misleading “Здесь лестница” loop.
@@ -60,6 +71,7 @@ function blockageFromRapier(attempted, moved) {
 
 export function hasOnlyNavigableSupportCollisions(moved = {}) {
   const collisions = Array.isArray(moved.collisions) ? moved.collisions : [];
+  if (collisions.some(isStairSideCollision)) return false;
   const worldKinds = collisions
     .map((collision) => String(collision?.worldObject?.kind ?? ""))
     .filter(Boolean);

@@ -1,5 +1,6 @@
 export const NAVIGATION_CHECKPOINT_SPACING = 72;
 export const NAVIGATION_CHECKPOINT_REACHED = 5.25;
+export const NAVIGATION_TRANSITION_REACHED = 0.35;
 export const NAVIGATION_ROUTE_REPLAN_MS = 2200;
 export const NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE = 6;
 export const NAVIGATION_DETOUR_CLEARANCE = 3.2;
@@ -117,7 +118,10 @@ function targetReached(transform, target) {
 
 function checkpointReached(transform, checkpoint) {
   if (!transform || !checkpoint) return false;
-  if (distance2(transform, checkpoint) > NAVIGATION_CHECKPOINT_REACHED) return false;
+  const reachDistance = checkpoint.mandatory
+    ? NAVIGATION_TRANSITION_REACHED
+    : NAVIGATION_CHECKPOINT_REACHED;
+  if (distance2(transform, checkpoint) > reachDistance) return false;
   return Math.abs(finite(transform.y) - finite(checkpoint.y)) <= CHECKPOINT_VERTICAL_TOLERANCE;
 }
 

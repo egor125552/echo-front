@@ -1,3 +1,5 @@
+import { stairHullPoints } from "./stair-shape.js";
+
 export const manifest = {
   id: "rapier-physics",
   version: "3.3.0",
@@ -279,6 +281,18 @@ async function createRapierPhysics() {
     const horizontalRun = Math.max(0.01, Math.abs(Number(run) || 0));
     const verticalRise = Math.max(0, Number(rise) || 0);
     const rampWidth = Math.max(0.02, Math.abs(Number(width) || 0));
+    if (spec.kind === "building-stair") {
+      const shape = RAPIER.ColliderDesc.convexHull(stairHullPoints(
+        horizontalRun, verticalRise, rampWidth, thickness, risesToward,
+      ));
+      if (!shape) throw new Error("Could not build solid staircase");
+      const collider = world.createCollider(shape.setTranslation(x, y, z));
+      rememberCollider(collider, {
+        ...spec, run: horizontalRun, rise: verticalRise, width: rampWidth, thickness,
+      });
+      syncQueries();
+      return collider;
+    }
     const slopeLength = Math.hypot(horizontalRun, verticalRise);
     const angleMagnitude = Math.atan2(verticalRise, horizontalRun);
     const angle = risesToward === "east" ? angleMagnitude : -angleMagnitude;

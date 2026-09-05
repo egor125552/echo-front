@@ -1,4 +1,5 @@
 import { BATTLE_ROYALE_BUILDINGS } from "../../config/battle-royale-buildings.js";
+import { hasLandingSupport } from "./landing-support.js";
 
 export const manifest = {
   id: "battle-royale-building-design-validator",
@@ -213,6 +214,9 @@ function validateBuilding(spec) {
       { x: endpoints.topInside.x - (String(stair.risesToward).match(/north|south/) ? widthOfStair * 0.34 : 0), z: endpoints.topInside.z - (String(stair.risesToward).match(/east|west/) ? widthOfStair * 0.34 : 0) },
     ];
     const slabs = floorSlabs(spec, highFloor);
+    if (!hasLandingSupport(stair, slabs, STAIR_APPROACH_CLEARANCE)) {
+      errors.push(`stair ${stairId} has an unsupported upper landing`);
+    }
     if (openingSamples.some((point) => slabs.some((slab) => slabContains(slab, point, -0.08)))) {
       errors.push(`stair ${stairId} runs into the upper floor; stairwell opening is missing or too small`);
     }

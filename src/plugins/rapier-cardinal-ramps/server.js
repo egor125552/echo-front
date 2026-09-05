@@ -53,6 +53,8 @@ export async function setup(ctx) {
     // each side. A slight approach miss can still catch the stair, without a
     // visible snap, camera turn, or large magnetic pull toward its centre.
     const collisionSpec = forgivingStairSpec(spec);
+    // Solid stair hulls already contain the requested cardinal orientation.
+    if (collisionSpec.kind === "building-stair") return originalCreateRamp(collisionSpec);
     const direction = String(collisionSpec.risesToward ?? "west");
     if (direction !== "north" && direction !== "south") {
       return originalCreateRamp(collisionSpec);

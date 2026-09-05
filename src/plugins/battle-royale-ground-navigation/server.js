@@ -1,3 +1,5 @@
+import { stairBypassPoints } from "./stair-bypass.js";
+
 export const GROUND_BYPASS_SIDE_CLEARANCE = 1.35;
 export const GROUND_BYPASS_END_CLEARANCE = 0.9;
 export const GROUND_BYPASS_REACHED = 0.55;
@@ -172,7 +174,19 @@ export async function setup(ctx) {
   const stair = stairBounds(map);
 
   function requiredWaypoints(from, target) {
-    return buildingNavigation.requiredWaypoints(from, target) ?? [];
+    if (!from || !target) return [];
+    const required = buildingNavigation.requiredWaypoints(from, target) ?? [];
+    const route = [];
+    let cursor = from;
+    for (const goal of [...required, target]) {
+      // A waypoint inside the low end belongs to an intentional ascent.
+      if (goal.kind !== "stair" || goal.transitionSide === "approach") {
+        route.push(...stairBypassPoints(cursor, goal, map.walls ?? []));
+      }
+      if (goal !== target) route.push(goal);
+      cursor = goal;
+    }
+    return route;
   }
 
   function navigationWaypoint(from, target) {

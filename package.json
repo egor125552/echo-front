@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check:vehicle-crashes": "node scripts/check-vehicle-crash-model.mjs"
+    "check:vehicle-crashes": "node scripts/check-vehicle-crash-model.mjs",
+    "check:buildings": "node scripts/check-building-stair-physics.mjs && node scripts/check-building-layouts.mjs && node scripts/check-building-traversal.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d": "0.19.3",
