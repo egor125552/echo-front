@@ -27,6 +27,14 @@ jobs:
           node-version: 22
       - run: npm install
 
+      - name: Check diagnostic JavaScript syntax
+        run: |
+          node --check public/client/bootstrap.js
+          node --check public/client/plugins/network.js
+          node --check src/index.js
+          node --check src/server/match-room.js
+          node --check scripts/check-play-websocket.mjs
+
       - name: Start local Worker
         run: |
           timeout 90s npx wrangler dev --port 8787 > /tmp/echo-front-play-websocket.log 2>&1 &
@@ -58,6 +66,13 @@ jobs:
 
       - name: Connect through real play WebSocket
         run: node scripts/check-play-websocket.mjs ws://127.0.0.1:8787
+
+      - name: Check healthy room error endpoint
+        run: |
+          BODY=$(curl --max-time 10 --silent --show-error --fail \
+            'http://127.0.0.1:8787/api/play-error?room=websocket-smoke&mode=battle-royale')
+          echo "$BODY"
+          printf '%s' "$BODY" | jq -e '.ok == true and .error == null' > /dev/null
 
       - name: Show Worker log on failure
         if: failure()
