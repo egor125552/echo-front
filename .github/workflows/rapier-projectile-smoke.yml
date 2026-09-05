@@ -1,0 +1,44 @@
+name: Rapier Projectile Smoke
+
+on:
+  push:
+    paths:
+      - src/plugins/rapier-projectiles/**
+      - src/plugins/rapier-projectile-lifecycle/**
+      - src/plugins/weapons/**
+      - src/plugins/combat/**
+      - src/plugins/rapier-physics/**
+      - src/presets/**
+      - scripts/check-rapier-projectiles.mjs
+      - .github/workflows/rapier-projectile-smoke.yml
+  pull_request:
+    paths:
+      - src/plugins/rapier-projectiles/**
+      - src/plugins/rapier-projectile-lifecycle/**
+      - src/plugins/weapons/**
+      - src/plugins/combat/**
+      - src/plugins/rapier-physics/**
+      - src/presets/**
+      - scripts/check-rapier-projectiles.mjs
+      - .github/workflows/rapier-projectile-smoke.yml
+  workflow_dispatch:
+
+jobs:
+  projectile-physics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install
+      - name: Check projectile JavaScript syntax
+        run: |
+          node --check src/plugins/rapier-projectiles/server.js
+          node --check src/plugins/rapier-projectile-lifecycle/server.js
+          node --check src/plugins/weapons/server.js
+          node --check src/presets/echo-front.js
+          node --check src/presets/battle-royale.js
+          node --check scripts/check-rapier-projectiles.mjs
+      - name: Verify physical projectile behavior
+        run: node scripts/check-rapier-projectiles.mjs
