@@ -9,6 +9,7 @@ const DEFINITIONS = {
     damage: 22,
     rpm: 300,
     range: 28,
+    muzzleVelocity: 120,
     soundKey: "weapon.pistol",
     soundRadius: 90,
     reloadMs: 1250,
@@ -23,6 +24,7 @@ const DEFINITIONS = {
     damage: 17,
     rpm: 600,
     range: 28,
+    muzzleVelocity: 200,
     soundKey: "weapon.rifle",
     soundRadius: 110,
     reloadMs: 1550,
@@ -31,8 +33,8 @@ const DEFINITIONS = {
 
 export const manifest = {
   id: "weapons",
-  version: "1.9.1",
-  requires: ["entities", "movement", "combat", "rapier-physics", "teams", "map-test-arena"],
+  version: "2.0.0",
+  requires: ["entities", "movement", "rapier-projectiles", "map-test-arena"],
   optional: ["aim-assist", "target-assist"],
   capabilities: [
     "services.consume", "services.provide",
@@ -53,9 +55,7 @@ function createWeapon(definition) {
 
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
-  const physics = ctx.services.get("physics");
-  const combat = ctx.services.get("combat");
-  const teams = ctx.services.get("teams");
+  const projectiles = ctx.services.get("projectiles");
   const map = ctx.services.get("map");
   const targeting = ctx.services.has("targeting") ? ctx.services.get("targeting") : null;
 
@@ -158,8 +158,16 @@ export async function setup(ctx) {
       y: (Number(transform.y) || 0) + 1,
       z: transform.z + direction.z * 0.55,
     };
-    const hit = physics.raycast(origin, direction, definition.range, entityId);
-    const actualTargetId = hit?.entityId ?? null;
+    const projectileId = projectiles.spawn({
+      shooterId: entityId,
+      weaponId: weapon.id,
+      damage: definition.damage,
+      speed: definition.muzzleVelocity,
+      range: definition.range,
+      origin,
+      direction,
+      now,
+    });
     const acousticZone = typeof map.acousticZoneAt === "function"
       ? map.acousticZoneAt(transform)
       : "outdoor";
@@ -177,25 +185,16 @@ export async function setup(ctx) {
       entityId,
       weaponId: weapon.id,
       ammo: weapon.ammo,
-      targetId: actualTargetId,
+      targetId: null,
       assistedTargetId: resolved?.targetId ?? null,
+      projectileId,
+      muzzleVelocity: definition.muzzleVelocity,
       x: transform.x,
       y: Number(transform.y) || 0,
       z: transform.z,
     });
 
-    if (actualTargetId) {
-      const target = entities.get(actualTargetId);
-      const sameTeam = teams.teamOf(entityId) === teams.teamOf(actualTargetId);
-      if (target?.alive && !sameTeam) {
-        combat.damage(actualTargetId, definition.damage, {
-          attackerId: entityId,
-          weaponId: weapon.id,
-          now,
-        });
-      }
-    }
-    return true;
+    return Boolean(projectileId);
   }
 
   const api = {
