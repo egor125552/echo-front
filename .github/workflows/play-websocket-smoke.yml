@@ -4,12 +4,14 @@ on:
   push:
     paths:
       - src/**
+      - public/client/bootstrap.js
       - public/client/plugins/network.js
       - scripts/check-play-websocket.mjs
       - .github/workflows/play-websocket-smoke.yml
   pull_request:
     paths:
       - src/**
+      - public/client/bootstrap.js
       - public/client/plugins/network.js
       - scripts/check-play-websocket.mjs
       - .github/workflows/play-websocket-smoke.yml
@@ -39,6 +41,20 @@ jobs:
           cat /tmp/echo-front-play-websocket.log || true
           echo "Local Worker did not become healthy"
           exit 1
+
+      - name: Probe full Battle Royale player startup
+        run: |
+          BODY=$(curl --max-time 30 --silent --show-error --fail \
+            'http://127.0.0.1:8787/api/runtime-probe?mode=battle-royale')
+          echo "$BODY"
+          printf '%s' "$BODY" | jq -e '.ok == true and .mode == "battle-royale" and .phase == "complete"' > /dev/null
+
+      - name: Probe full TDM player startup
+        run: |
+          BODY=$(curl --max-time 30 --silent --show-error --fail \
+            'http://127.0.0.1:8787/api/runtime-probe?mode=tdm')
+          echo "$BODY"
+          printf '%s' "$BODY" | jq -e '.ok == true and .mode == "tdm" and .phase == "complete"' > /dev/null
 
       - name: Connect through real play WebSocket
         run: node scripts/check-play-websocket.mjs ws://127.0.0.1:8787
