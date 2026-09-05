@@ -1,7 +1,7 @@
 export const ENGINE_COMMAND_REQUEST = Object.freeze({
-  id: 9051401,
+  id: 9051402,
   mode: "battle-royale",
-  room: "stair-edge-assist",
+  room: "stair-edge-assist-active",
   command: "engine.batch",
   repeat: 1,
   frameEvery: 1,
@@ -20,6 +20,10 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       {
         command: "service.call",
+        args: { service: "battle-royale", method: "arm", arguments: [] },
+      },
+      {
+        command: "service.call",
         args: {
           service: "movement",
           method: "setInput",
@@ -28,11 +32,6 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       },
       { command: "game.step", args: { dt: 0.05, steps: 30 } },
       { command: "entity.inspect", args: { entityId: "stair-warehouse-east-edge" } },
-      {
-        command: "service.call",
-        args: { service: "map", method: "locationAt", arguments: [{ x: 0, y: 0, z: 0 }] },
-        continueOnError: true,
-      },
       { command: "entity.remove", args: { entityId: "stair-warehouse-east-edge" } },
 
       {
@@ -105,5 +104,5 @@ export const ENGINE_COMMAND_REQUEST = Object.freeze({
       { command: "entity.remove", args: { entityId: "stair-no-side-magnet" } }
     ],
   },
-  requestedAt: "2026-09-05T14:05:00Z",
+  requestedAt: "2026-09-05T14:10:00Z",
 });
