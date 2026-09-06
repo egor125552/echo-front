@@ -268,9 +268,9 @@ export async function setup(ctx) {
       ...snapshot,
       navigation: decorateState(playerId, {
         ...originalNavigationStateFor(playerId, now),
-        selected: snapshot.navigation.selected,
-        target: snapshot.navigation.target,
-        route: snapshot.navigation.route,
+        // Keep the menu catalog and other fields added by earlier plugins.
+        // Flight changes route geometry, not which destinations are available.
+        ...snapshot.navigation,
       }),
       airNavigation: stateFor(playerId),
     };
