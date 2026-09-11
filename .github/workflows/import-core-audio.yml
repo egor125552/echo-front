@@ -30,9 +30,7 @@ jobs:
           curl -L --fail --retry 3 "$BASE/step-3.mp3" -o public/assets/audio/core/step-3.mp3
           curl -L --fail --retry 3 "$BASE/step-4.mp3" -o public/assets/audio/core/step-4.mp3
 
-          PISTOL='https://raw.githubusercontent.com/Gabrielsgp/hand-shotter/a9e2dac862291cbff1af8e2c3e82922c3aeb726c/songs/163456__lemudcrab__pistol-shot.wav'
-          curl -L --fail --retry 3 "$PISTOL" -o /tmp/pistol-shot.wav
-          ffmpeg -hide_banner -loglevel error -y -i /tmp/pistol-shot.wav -codec:a libmp3lame -q:a 2 public/assets/audio/core/pistol-shot.mp3
+          test -s public/assets/audio/core/pistol-shot.mp3
 
       - name: Save source map
         shell: bash
