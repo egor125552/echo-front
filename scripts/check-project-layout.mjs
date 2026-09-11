@@ -16,6 +16,8 @@ assert.equal(await exists('public/index.html'), true, 'Canonical public/index.ht
 assert.equal(await exists('public/styles.css'), true, 'Canonical public/styles.css is missing.');
 
 const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
+const servedClientDocs = tracked.filter((file) => file.startsWith('public/client/') && /\.(?:md|txt|rst)$/i.test(file));
+assert.deepEqual(servedClientDocs, [], `Documentation must not be served from public/client/: ${servedClientDocs.join(', ')}`);
 const audioExtensions = /\.(?:mp3|wav|ogg|m4a|aac|flac)$/i;
 const misplacedAudio = tracked.filter((file) => audioExtensions.test(file) && !file.startsWith('public/assets/audio/'));
 assert.deepEqual(
