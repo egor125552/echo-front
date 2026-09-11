@@ -15,6 +15,12 @@ assert.equal(await exists('styles.css'), false, 'Do not recreate root styles.css
 assert.equal(await exists('public/index.html'), true, 'Canonical public/index.html is missing.');
 assert.equal(await exists('public/styles.css'), true, 'Canonical public/styles.css is missing.');
 
+const indexHtml = await readFile('public/index.html', 'utf8');
+assert.match(indexHtml, /<link[^>]+href=["']\/styles\.css["']/i, 'public/index.html must load canonical /styles.css');
+assert.match(indexHtml, /bootstrap\.src\s*=\s*["']\/client\/bootstrap\.js["']/, 'public/index.html must load canonical /client/bootstrap.js');
+assert.equal(indexHtml.includes('/audio/'), false, 'public/index.html must not reference legacy /audio/ URLs');
+assert.equal(indexHtml.includes('public/client/'), false, 'public/index.html must use served /client/ URLs, not filesystem public/client/ paths');
+
 const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
 const servedClientDocs = tracked.filter((file) => file.startsWith('public/client/') && /\.(?:md|txt|rst)$/i.test(file));
 assert.deepEqual(servedClientDocs, [], `Documentation must not be served from public/client/: ${servedClientDocs.join(', ')}`);
