@@ -17,6 +17,7 @@ on:
       - '**/*.flac'
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
+      - scripts/check-client-imports.mjs
       - package.json
       - .github/workflows/project-layout.yml
   pull_request:
@@ -34,6 +35,7 @@ on:
       - '**/*.flac'
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
+      - scripts/check-client-imports.mjs
       - package.json
       - .github/workflows/project-layout.yml
   workflow_dispatch:
@@ -53,6 +55,8 @@ jobs:
         run: npm install
       - name: Verify one client tree and one audio tree
         run: npm run check:project-layout
+      - name: Verify client module imports
+        run: npm run check:client-imports
       - name: Verify client audio references
         run: npm run check:audio-references
       - name: Verify Worker bundle
