@@ -16,12 +16,7 @@ on:
       - '**/*.aac'
       - '**/*.flac'
       - scripts/check-project-layout.mjs
-      - scripts/check-audio-references.mjs
-      - scripts/check-audio-duplicates.mjs
-      - scripts/check-warzone-audio-assets.mjs
-      - scripts/check-footstep-audio-assets.mjs
-      - scripts/check-gdc-audio-assets.mjs
-      - scripts/check-runtime-audio-sets.mjs
+      - scripts/check-audio-assets.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -41,12 +36,7 @@ on:
       - '**/*.aac'
       - '**/*.flac'
       - scripts/check-project-layout.mjs
-      - scripts/check-audio-references.mjs
-      - scripts/check-audio-duplicates.mjs
-      - scripts/check-warzone-audio-assets.mjs
-      - scripts/check-footstep-audio-assets.mjs
-      - scripts/check-gdc-audio-assets.mjs
-      - scripts/check-runtime-audio-sets.mjs
+      - scripts/check-audio-assets.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -77,18 +67,8 @@ jobs:
         run: npm run check:client-preset
       - name: Verify server preset coverage
         run: npm run check:server-presets
-      - name: Verify client audio references
-        run: npm run check:audio-references
-      - name: Reject duplicate audio content
-        run: npm run check:audio-duplicates
-      - name: Verify Warzone runtime audio set
-        run: npm run check:warzone-audio
-      - name: Verify footstep runtime audio sets
-        run: npm run check:footstep-audio
-      - name: Verify GDC runtime audio set
-        run: npm run check:gdc-audio
-      - name: Verify environment and vehicle runtime audio sets
-        run: npm run check:runtime-audio-sets
+      - name: Verify runtime audio assets
+        run: npm run check:audio
       - name: Verify Worker bundle
         run: npx wrangler deploy --dry-run
       - name: Start local Worker
