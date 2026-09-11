@@ -1,0 +1,58 @@
+name: Space Parachute Input
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - client/plugins/input.js
+      - client/plugins/parachute-input.js
+      - public/client/plugins/input.js
+      - public/client/plugins/parachute-input.js
+      - src/plugins/battle-royale-jump/**
+      - src/plugins/battle-royale-parachute/**
+      - src/plugins/battle-royale-parachute-integration/**
+      - src/plugins/battle-royale-parachute-canopy/**
+      - src/plugins/battle-royale-ragdoll/**
+      - src/plugins/battle-royale-ragdoll-integration/**
+      - src/presets/battle-royale.js
+      - scripts/check-space-parachute-input.mjs
+      - package.json
+      - .github/workflows/space-parachute-input.yml
+  pull_request:
+    paths:
+      - client/plugins/input.js
+      - client/plugins/parachute-input.js
+      - public/client/plugins/input.js
+      - public/client/plugins/parachute-input.js
+      - src/plugins/battle-royale-jump/**
+      - src/plugins/battle-royale-parachute/**
+      - src/plugins/battle-royale-parachute-integration/**
+      - src/plugins/battle-royale-parachute-canopy/**
+      - src/plugins/battle-royale-ragdoll/**
+      - src/plugins/battle-royale-ragdoll-integration/**
+      - src/presets/battle-royale.js
+      - scripts/check-space-parachute-input.mjs
+      - package.json
+      - .github/workflows/space-parachute-input.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci
+      - name: Check regression test syntax
+        run: |
+          node --check client/plugins/input.js
+          node --check client/plugins/parachute-input.js
+          node --check scripts/check-space-parachute-input.mjs
+      - name: Verify Space context behavior
+        run: npm run check:space-parachute
