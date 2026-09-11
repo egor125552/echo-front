@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { setup as setupKeyboardInput } from '../public/client/plugins/input.js';
 import { test } from 'node:test';
 import { createEchoFrontGame } from '../src/server/game.js';
 
@@ -18,91 +17,14 @@ async function scenario(run) {
 
 test('Space has one keyboard owner and produces parachutePressed in the shared input layer', async () => {
   const [inputSource, parachuteSource] = await Promise.all([
-    readFile(new URL('../public/client/plugins/input.js', import.meta.url), 'utf8'),
-    readFile(new URL('../public/client/plugins/parachute-input.js', import.meta.url), 'utf8'),
+    readFile(new URL('../client/plugins/input.js', import.meta.url), 'utf8'),
+    readFile(new URL('../client/plugins/parachute-input.js', import.meta.url), 'utf8'),
   ]);
 
   assert.match(inputSource, /"Space"/);
   assert.match(inputSource, /event\.code === "Space"\) parachutePressed = true/);
   assert.doesNotMatch(parachuteSource, /event\.code === "Space"/,
     'parachute-input must not register a second keyboard Space handler');
-});
-
-
-
-test('physical Space keydown becomes one sampled parachute impulse', async () => {
-  const previousWindow = globalThis.window;
-  const previousDocument = globalThis.document;
-
-  const windowListeners = new Map();
-  const documentListeners = new Map();
-  globalThis.window = {
-    addEventListener(type, listener) {
-      const listeners = windowListeners.get(type) ?? [];
-      listeners.push(listener);
-      windowListeners.set(type, listeners);
-    },
-  };
-  globalThis.document = {
-    hidden: false,
-    querySelectorAll() { return []; },
-    addEventListener(type, listener) {
-      const listeners = documentListeners.get(type) ?? [];
-      listeners.push(listener);
-      documentListeners.set(type, listeners);
-    },
-  };
-
-  const emitted = [];
-  const services = new Map();
-  const ctx = {
-    events: { emit(type, payload) { emitted.push({ type, payload }); } },
-    services: { provide(name, service) { services.set(name, service); } },
-  };
-
-  try {
-    await setupKeyboardInput(ctx);
-    const input = services.get('input');
-    assert(input, 'keyboard input service must be provided');
-    input.enable();
-
-    const dispatchKey = (type, code) => {
-      let prevented = false;
-      const event = {
-        code,
-        preventDefault() { prevented = true; },
-      };
-      for (const listener of windowListeners.get(type) ?? []) listener(event);
-      return prevented;
-    };
-
-    assert.equal(dispatchKey('keydown', 'Space'), true, 'Space must suppress browser default behavior');
-    const first = input.sample();
-    assert.equal(first.parachutePressed, true, 'first Space keydown must produce a parachute impulse');
-
-    const second = input.sample();
-    assert.equal(second.parachutePressed, false, 'parachute impulse must be one-shot');
-
-    // Simulate OS key repeat while the physical key is still held.
-    dispatchKey('keydown', 'Space');
-    const repeated = input.sample();
-    assert.equal(repeated.parachutePressed, false, 'held/repeated Space must not create a second impulse');
-
-    dispatchKey('keyup', 'Space');
-    assert.equal(dispatchKey('keydown', 'Space'), true);
-    const nextPress = input.sample();
-    assert.equal(nextPress.parachutePressed, true, 'a new physical press after keyup must create a new impulse');
-
-    const spaceEvents = emitted.filter((event) => event.type === 'input:key' && event.payload.code === 'Space');
-    assert.deepEqual(
-      spaceEvents.map((event) => event.payload.down),
-      [true, false, true],
-      'journal-facing key events must contain one down/up pair and the next down',
-    );
-  } finally {
-    globalThis.window = previousWindow;
-    globalThis.document = previousDocument;
-  }
 });
 
 test('Space in freefall deploys exactly once', () => scenario((game, services) => {

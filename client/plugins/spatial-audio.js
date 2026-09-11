@@ -1,0 +1,407 @@
+export const manifest = {
+  id: "spatial-audio-web",
+  requires: ["cloudflare-session"],
+};
+
+export const HRTF_START_ANGLE = 0.95;
+export const HRTF_FULL_ANGLE = 1.45;
+export const MASTER_FILTER_MIN_HZ = 80;
+export const MASTER_FILTER_MAX_HZ = 18000;
+export const FOREGROUND_MUFFLE_STRENGTH = 0.15;
+export const DISTANCE_FADE_START_RATIO = 0.78;
+export const DISTANCE_AIR_MIN_HZ = 4200;
+export const OCCLUSION_MIN_HZ = 3000;
+
+function clamp01(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function smoothstep(edge0, edge1, value) {
+  const span = edge1 - edge0;
+  if (span <= 0) return value >= edge1 ? 1 : 0;
+  const t = Math.max(0, Math.min(1, (value - edge0) / span));
+  return t * t * (3 - 2 * t);
+}
+
+function wrappedAbsAngle(azimuth) {
+  return Math.abs(Math.atan2(Math.sin(azimuth), Math.cos(azimuth)));
+}
+
+function createReverbImpulse(audioContext, durationSeconds = 2.4, decay = 3.2) {
+  const length = Math.max(1, Math.floor(audioContext.sampleRate * durationSeconds));
+  const impulse = audioContext.createBuffer(2, length, audioContext.sampleRate);
+  for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+    const data = impulse.getChannelData(channel);
+    for (let i = 0; i < length; i += 1) {
+      const envelope = Math.pow(1 - i / length, decay);
+      data[i] = (Math.random() * 2 - 1) * envelope;
+    }
+  }
+  return impulse;
+}
+
+export function hybridSpatialMix(azimuth) {
+  const angle = wrappedAbsAngle(azimuth);
+  const blend = smoothstep(HRTF_START_ANGLE, HRTF_FULL_ANGLE, angle);
+  return {
+    pan: Math.max(-1, Math.min(1, Math.sin(azimuth))),
+    stereo: Math.cos(blend * Math.PI / 2),
+    hrtf: Math.sin(blend * Math.PI / 2),
+  };
+}
+
+export function localizeForListener(listener, position) {
+  const dx = position.x - listener.x;
+  const dy = (position.y ?? 0) - (listener.y ?? 0);
+  const dz = position.z - listener.z;
+  const localRight = dx * Math.cos(listener.angle) + dz * Math.sin(listener.angle);
+  const localForward = dx * Math.sin(listener.angle) - dz * Math.cos(listener.angle);
+  const azimuth = Math.atan2(localRight, localForward || 0.000001);
+  return {
+    dx,
+    dy,
+    dz,
+    localRight,
+    localUp: dy,
+    localForward,
+    azimuth,
+    distance: Math.hypot(dx, dy, dz),
+  };
+}
+
+export function distanceAttenuation(distance, {
+  maxDistance = 40,
+  referenceDistance = 2,
+  rolloffFactor = 0.5,
+  fadeStartRatio = DISTANCE_FADE_START_RATIO,
+} = {}) {
+  const d = Math.max(0, Number(distance) || 0);
+  const reference = Math.max(0.1, Number(referenceDistance) || 2);
+  const maximum = Math.max(reference + 0.01, Number(maxDistance) || 40);
+  const rolloff = Math.max(0, Number(rolloffFactor) || 0);
+  if (d >= maximum) return 0;
+  const inverse = d <= reference ? 1 : reference / (reference + rolloff * (d - reference));
+  const ratio = Math.max(0.5, Math.min(0.95, Number(fadeStartRatio) || DISTANCE_FADE_START_RATIO));
+  const fadeStart = Math.max(reference, maximum * ratio);
+  const tail = d <= fadeStart ? 1 : 1 - smoothstep(fadeStart, maximum, d);
+  return clamp01(inverse * tail);
+}
+
+export function distanceAirCutoff(distance, maxDistance = 40, minimumHz = DISTANCE_AIR_MIN_HZ) {
+  const d = Math.max(0, Number(distance) || 0);
+  const maximum = Math.max(1, Number(maxDistance) || 40);
+  const minimum = Math.max(1200, Math.min(MASTER_FILTER_MAX_HZ, Number(minimumHz) || DISTANCE_AIR_MIN_HZ));
+  const amount = Math.pow(clamp01(d / maximum), 1.2);
+  return MASTER_FILTER_MAX_HZ * Math.pow(minimum / MASTER_FILTER_MAX_HZ, amount);
+}
+
+export function occlusionCutoff(amount, minimumHz = OCCLUSION_MIN_HZ) {
+  const normalized = clamp01(amount);
+  const minimum = Math.max(1000, Math.min(MASTER_FILTER_MAX_HZ, Number(minimumHz) || OCCLUSION_MIN_HZ));
+  return MASTER_FILTER_MAX_HZ * Math.pow(minimum / MASTER_FILTER_MAX_HZ, normalized);
+}
+
+export function softenedMuffleCutoff(masterCutoff, strength = FOREGROUND_MUFFLE_STRENGTH) {
+  const numeric = Number(masterCutoff);
+  const cutoff = Math.max(
+    MASTER_FILTER_MIN_HZ,
+    Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
+  );
+  const amount = clamp01(strength);
+  if (amount <= 0) return MASTER_FILTER_MAX_HZ;
+  return MASTER_FILTER_MAX_HZ * Math.pow(cutoff / MASTER_FILTER_MAX_HZ, amount);
+}
+
+export async function setup(ctx) {
+  const network = ctx.services.get("network");
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  const audioContext = new AudioContextClass();
+  const buffers = new Map();
+  const activeChannels = new Map();
+  let listener = { x: 0, y: 0, z: 0, angle: 0 };
+  let injuryReverbMix = 0;
+  let environmentReverbMix = 0;
+  let reverbMix = 0;
+  let muffleCutoff = MASTER_FILTER_MAX_HZ;
+  let cabinMuffleCutoff = MASTER_FILTER_MAX_HZ;
+  let effectiveMuffleCutoff = MASTER_FILTER_MAX_HZ;
+  let foregroundMuffleCutoff = MASTER_FILTER_MAX_HZ;
+
+  const masterInput = audioContext.createGain();
+  const masterLowpass = audioContext.createBiquadFilter();
+  const foregroundInput = audioContext.createGain();
+  const foregroundLowpass = audioContext.createBiquadFilter();
+  const dryGain = audioContext.createGain();
+  const reverb = audioContext.createConvolver();
+  const wetGain = audioContext.createGain();
+  masterLowpass.type = "lowpass";
+  masterLowpass.Q.value = 0.7;
+  masterLowpass.frequency.value = MASTER_FILTER_MAX_HZ;
+  foregroundLowpass.type = "lowpass";
+  foregroundLowpass.Q.value = 0.55;
+  foregroundLowpass.frequency.value = MASTER_FILTER_MAX_HZ;
+  reverb.buffer = createReverbImpulse(audioContext);
+  dryGain.gain.value = 1;
+  wetGain.gain.value = 0;
+  masterInput.connect(masterLowpass);
+  masterLowpass.connect(dryGain).connect(audioContext.destination);
+  masterLowpass.connect(reverb).connect(wetGain).connect(audioContext.destination);
+  foregroundInput.connect(foregroundLowpass);
+  foregroundLowpass.connect(dryGain);
+  foregroundLowpass.connect(reverb);
+
+  ctx.events.on("game:snapshot", (snapshot) => {
+    const spectatorId = snapshot?.spectator?.active ? snapshot.spectator.targetId : null;
+    const observed = snapshot?.entities?.find((entity) => entity.id === (spectatorId ?? network.playerId));
+    if (observed) listener = { x: observed.x, y: observed.y ?? 0, z: observed.z, angle: observed.angle };
+  });
+
+  async function load(url) {
+    if (buffers.has(url)) return buffers.get(url);
+    const promise = fetch(url)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Audio HTTP ${response.status}: ${url}`);
+        return response.arrayBuffer();
+      })
+      .then((data) => audioContext.decodeAudioData(data));
+    buffers.set(url, promise);
+    return promise;
+  }
+
+  function stopChannel(channel) {
+    const sources = activeChannels.get(channel);
+    if (!sources) return;
+    activeChannels.delete(channel);
+    for (const source of sources) {
+      try { source.stop(); } catch {}
+    }
+  }
+
+  function trackSource(source, channel, replace = false) {
+    if (!channel) return;
+    if (replace) stopChannel(channel);
+    const sources = activeChannels.get(channel) ?? new Set();
+    sources.add(source);
+    activeChannels.set(channel, sources);
+    source.addEventListener("ended", () => {
+      const current = activeChannels.get(channel);
+      if (!current) return;
+      current.delete(source);
+      if (!current.size) activeChannels.delete(channel);
+    }, { once: true });
+  }
+
+  function targetParam(param, value, timeConstant = 0.25) {
+    const constant = Math.max(0.01, Number(timeConstant) || 0.25);
+    param.setTargetAtTime(value, audioContext.currentTime, constant);
+  }
+
+  function applyReverbMix() {
+    reverbMix = 1 - (1 - clamp01(injuryReverbMix)) * (1 - clamp01(environmentReverbMix));
+    targetParam(dryGain.gain, 1 - reverbMix * 0.32, 0.28);
+    targetParam(wetGain.gain, reverbMix * 0.9, 0.34);
+  }
+
+  function setReverbMix(value) {
+    injuryReverbMix = clamp01(value);
+    applyReverbMix();
+  }
+
+  function setEnvironmentReverbMix(value) {
+    environmentReverbMix = clamp01(value);
+    applyReverbMix();
+  }
+
+  function normalizedMuffleCutoff(value) {
+    const numeric = Number(value);
+    return Math.max(
+      MASTER_FILTER_MIN_HZ,
+      Math.min(MASTER_FILTER_MAX_HZ, Number.isFinite(numeric) ? numeric : MASTER_FILTER_MAX_HZ),
+    );
+  }
+
+  function applyMuffleCutoffs() {
+    effectiveMuffleCutoff = Math.min(muffleCutoff, cabinMuffleCutoff);
+    foregroundMuffleCutoff = softenedMuffleCutoff(effectiveMuffleCutoff);
+    targetParam(masterLowpass.frequency, effectiveMuffleCutoff, 0.22);
+    targetParam(foregroundLowpass.frequency, foregroundMuffleCutoff, 0.18);
+  }
+
+  function setMuffleCutoff(value) {
+    muffleCutoff = normalizedMuffleCutoff(value);
+    applyMuffleCutoffs();
+  }
+
+  function setCabinMuffleCutoff(value) {
+    cabinMuffleCutoff = normalizedMuffleCutoff(value);
+    applyMuffleCutoffs();
+  }
+
+  function playCenteredBuffer(buffer, {
+    gain = 1,
+    channel = null,
+    replace = false,
+    loop = false,
+    foreground = false,
+  } = {}) {
+    const source = audioContext.createBufferSource();
+    const gainNode = audioContext.createGain();
+    source.buffer = buffer;
+    source.loop = Boolean(loop);
+    gainNode.gain.value = gain;
+    source.connect(gainNode).connect(foreground ? foregroundInput : masterInput);
+    trackSource(source, channel, replace);
+    source.start();
+    return {
+      source,
+      setGain(nextGain, timeConstant = 0.18) {
+        targetParam(gainNode.gain, Math.max(0, Number(nextGain) || 0), timeConstant);
+      },
+      stop() { try { source.stop(); } catch {} },
+    };
+  }
+
+  function localize(position) {
+    return localizeForListener(listener, position);
+  }
+
+  function rearCutoff(local) {
+    if (local.distance < 0.001) return MASTER_FILTER_MAX_HZ;
+    const rearAmount = Math.max(0, Math.min(1, -local.localForward / local.distance));
+    return MASTER_FILTER_MAX_HZ - rearAmount * 7000;
+  }
+
+  function playSpatialBuffer(buffer, position, {
+    radius = 40,
+    gain = 1,
+    referenceDistance = 2,
+    rolloffFactor = 0.5,
+    airAbsorptionMinHz = DISTANCE_AIR_MIN_HZ,
+    occlusion = 0,
+    channel = null,
+    replace = false,
+    loop = false,
+  } = {}) {
+    const local = localize(position);
+    const attenuation = distanceAttenuation(local.distance, {
+      maxDistance: radius,
+      referenceDistance,
+      rolloffFactor,
+    });
+    if (attenuation <= 0) return null;
+
+    const mix = hybridSpatialMix(local.azimuth);
+    const source = audioContext.createBufferSource();
+    const distanceGain = audioContext.createGain();
+    const occlusionGain = audioContext.createGain();
+    const occlusionFilter = audioContext.createBiquadFilter();
+    const airFilter = audioContext.createBiquadFilter();
+    const stereoPanner = audioContext.createStereoPanner();
+    const stereoGain = audioContext.createGain();
+    const hrtfPanner = audioContext.createPanner();
+    const rearFilter = audioContext.createBiquadFilter();
+    const hrtfGain = audioContext.createGain();
+    const occlusionAmount = clamp01(occlusion);
+
+    source.buffer = buffer;
+    source.loop = Boolean(loop);
+    distanceGain.gain.value = gain * attenuation;
+    occlusionGain.gain.value = 1 - occlusionAmount * 0.22;
+    occlusionFilter.type = "lowpass";
+    occlusionFilter.Q.value = 0.3;
+    occlusionFilter.frequency.value = occlusionCutoff(occlusionAmount);
+    airFilter.type = "lowpass";
+    airFilter.Q.value = 0.2;
+    airFilter.frequency.value = distanceAirCutoff(local.distance, radius, airAbsorptionMinHz);
+    stereoPanner.pan.value = mix.pan;
+
+    hrtfPanner.panningModel = "HRTF";
+    hrtfPanner.distanceModel = "inverse";
+    hrtfPanner.refDistance = 1;
+    hrtfPanner.maxDistance = 10000;
+    hrtfPanner.rolloffFactor = 0;
+    hrtfPanner.positionX.value = local.localRight;
+    hrtfPanner.positionY.value = local.localUp;
+    hrtfPanner.positionZ.value = -local.localForward;
+
+    rearFilter.type = "lowpass";
+    rearFilter.Q.value = 0.35;
+    rearFilter.frequency.value = rearCutoff(local);
+
+    const now = audioContext.currentTime;
+    stereoGain.gain.setValueAtTime(mix.stereo, now);
+    hrtfGain.gain.setValueAtTime(mix.hrtf, now);
+
+    source.connect(distanceGain).connect(occlusionGain).connect(occlusionFilter).connect(airFilter);
+    airFilter.connect(stereoPanner).connect(stereoGain).connect(masterInput);
+    airFilter.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(masterInput);
+    trackSource(source, channel, replace);
+    source.start();
+
+    return {
+      source,
+      update(nextPosition) {
+        const next = localize(nextPosition);
+        const nextMix = hybridSpatialMix(next.azimuth);
+        const nextAttenuation = distanceAttenuation(next.distance, {
+          maxDistance: radius,
+          referenceDistance,
+          rolloffFactor,
+        });
+        const at = audioContext.currentTime + 0.06;
+        stereoPanner.pan.linearRampToValueAtTime(nextMix.pan, at);
+        stereoGain.gain.linearRampToValueAtTime(nextMix.stereo, at);
+        hrtfGain.gain.linearRampToValueAtTime(nextMix.hrtf, at);
+        hrtfPanner.positionX.linearRampToValueAtTime(next.localRight, at);
+        hrtfPanner.positionY.linearRampToValueAtTime(next.localUp, at);
+        hrtfPanner.positionZ.linearRampToValueAtTime(-next.localForward, at);
+        rearFilter.frequency.linearRampToValueAtTime(rearCutoff(next), at);
+        airFilter.frequency.linearRampToValueAtTime(distanceAirCutoff(next.distance, radius, airAbsorptionMinHz), at);
+        distanceGain.gain.linearRampToValueAtTime(gain * nextAttenuation, at);
+      },
+      updateOcclusion(nextAmount) {
+        const normalized = clamp01(nextAmount);
+        const at = audioContext.currentTime + 0.08;
+        occlusionGain.gain.linearRampToValueAtTime(1 - normalized * 0.22, at);
+        occlusionFilter.frequency.linearRampToValueAtTime(occlusionCutoff(normalized), at);
+      },
+      fadeOut(durationSeconds = 0.28) {
+        const duration = Math.max(0.04, Number(durationSeconds) || 0.28);
+        const now = audioContext.currentTime;
+        const end = now + duration;
+        distanceGain.gain.cancelScheduledValues(now);
+        distanceGain.gain.setValueAtTime(distanceGain.gain.value, now);
+        distanceGain.gain.linearRampToValueAtTime(0, end);
+        try { source.stop(end + 0.02); } catch {}
+      },
+      stop() { try { source.stop(); } catch {} },
+    };
+  }
+
+  ctx.services.provide("audio", {
+    context: audioContext,
+    async resume() { if (audioContext.state !== "running") await audioContext.resume(); },
+    load,
+    stopChannel,
+    setReverbMix,
+    setEnvironmentReverbMix,
+    getReverbMix() { return reverbMix; },
+    getInjuryReverbMix() { return injuryReverbMix; },
+    getEnvironmentReverbMix() { return environmentReverbMix; },
+    setMuffleCutoff,
+    getMuffleCutoff() { return muffleCutoff; },
+    setCabinMuffleCutoff,
+    getCabinMuffleCutoff() { return cabinMuffleCutoff; },
+    getEffectiveMuffleCutoff() { return effectiveMuffleCutoff; },
+    getForegroundMuffleCutoff() { return foregroundMuffleCutoff; },
+    async playCentered(url, options = {}) {
+      const buffer = await load(url);
+      return playCenteredBuffer(buffer, options);
+    },
+    async playSpatial(url, position, options = {}) {
+      const buffer = await load(url);
+      return playSpatialBuffer(buffer, position, options);
+    },
+    playSpatialBuffer,
+  });
+}
