@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 async function exists(path) {
@@ -29,6 +29,22 @@ assert.deepEqual(
   misplacedClient,
   [],
   `Browser client files must live only under public/client/: ${misplacedClient.join(', ')}`,
+);
+
+
+const duplicatePublicFiles = [];
+for (const file of tracked) {
+  if (file.startsWith('public/')) continue;
+  if (!await exists(file)) continue;
+  const publicCopy = `public/${file}`;
+  if (!await exists(publicCopy)) continue;
+  const [source, served] = await Promise.all([readFile(file), readFile(publicCopy)]);
+  if (source.equals(served)) duplicatePublicFiles.push(`${file} <-> ${publicCopy}`);
+}
+assert.deepEqual(
+  duplicatePublicFiles,
+  [],
+  `Do not keep duplicate static files outside public/: ${duplicatePublicFiles.join(', ')}`,
 );
 
 console.log(`Project layout OK: one client tree and ${tracked.filter((f) => audioExtensions.test(f)).length} tracked audio files in one audio tree.`);
