@@ -6,7 +6,7 @@ export const manifest = {
     "respawn", "team-deathmatch", "bot-fill", "bot-combat",
   ],
   optional: [
-    "armor", "weapon-progression", "opening-round", "aim-steering",
+    "armor", "weapon-progression", "opening-round",
     "health-regeneration",
   ],
   capabilities: [
@@ -26,7 +26,6 @@ export async function setup(ctx) {
   const botCombat = ctx.services.get("bot-combat");
   const armorService = ctx.services.has("armor") ? ctx.services.get("armor") : null;
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
-  const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
     : null;
@@ -118,10 +117,7 @@ export async function setup(ctx) {
       }
     }
 
-    const movementInput = ended
-      ? input
-      : (aimSteering?.adjustInput(playerId, input, now) ?? input);
-    movement.setInput(playerId, movementInput);
+    movement.setInput(playerId, input);
     if (ended) return;
     if (input.firePressed) weapons.fire(playerId, now);
     if (input.reload) weapons.reload(playerId, now);

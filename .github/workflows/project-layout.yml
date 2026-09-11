@@ -19,6 +19,7 @@ on:
       - scripts/check-audio-references.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
+      - scripts/check-server-presets.mjs
       - package.json
       - .github/workflows/project-layout.yml
   pull_request:
@@ -38,6 +39,7 @@ on:
       - scripts/check-audio-references.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
+      - scripts/check-server-presets.mjs
       - package.json
       - .github/workflows/project-layout.yml
   workflow_dispatch:
@@ -63,6 +65,8 @@ jobs:
         run: npm run check:client-imports
       - name: Verify client preset and dependencies
         run: npm run check:client-preset
+      - name: Verify server preset coverage
+        run: npm run check:server-presets
       - name: Verify client audio references
         run: npm run check:audio-references
       - name: Verify Worker bundle

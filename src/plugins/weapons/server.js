@@ -39,7 +39,7 @@ export const manifest = {
   id: "weapons",
   version: "2.1.0",
   requires: ["entities", "movement", "rapier-projectiles", "map-test-arena"],
-  optional: ["aim-assist", "target-assist"],
+  optional: ["target-assist"],
   capabilities: [
     "services.consume", "services.provide",
     "components.register", "components.read", "components.write",

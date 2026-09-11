@@ -8,7 +8,7 @@ export const manifest = {
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat", "battle-royale-vehicle-fleet",
   ],
-  optional: ["armor", "aim-steering", "health-regeneration"],
+  optional: ["armor", "health-regeneration"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read", "events.on", "events.emit",
@@ -34,7 +34,6 @@ export async function setup(ctx) {
   const botCombat = ctx.services.get("bot-combat");
   const vehicles = ctx.services.get("vehicles");
   const armorService = ctx.services.has("armor") ? ctx.services.get("armor") : null;
-  const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
     : null;
@@ -241,8 +240,7 @@ export async function setup(ctx) {
       if (handleInteraction(playerId)) return;
     }
 
-    const movementInput = aimSteering?.adjustInput(playerId, input, now) ?? input;
-    movement.setInput(playerId, movementInput);
+    movement.setInput(playerId, input);
     if (input.firePressed) weapons.fire(playerId, now);
     if (input.reload) weapons.reload(playerId, now);
     if (input.selectDelta) weapons.select(playerId, input.selectDelta);
