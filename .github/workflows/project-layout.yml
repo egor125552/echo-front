@@ -18,6 +18,7 @@ on:
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
       - scripts/check-audio-duplicates.mjs
+      - scripts/check-warzone-audio-assets.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -39,6 +40,7 @@ on:
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
       - scripts/check-audio-duplicates.mjs
+      - scripts/check-warzone-audio-assets.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -73,6 +75,8 @@ jobs:
         run: npm run check:audio-references
       - name: Reject duplicate audio content
         run: npm run check:audio-duplicates
+      - name: Verify Warzone runtime audio set
+        run: npm run check:warzone-audio
       - name: Verify Worker bundle
         run: npx wrangler deploy --dry-run
       - name: Start local Worker
