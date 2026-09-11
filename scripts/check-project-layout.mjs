@@ -10,6 +10,10 @@ assert.equal(await exists('client'), false, 'Do not recreate root client/. Brows
 assert.equal(await exists('assets/audio'), false, 'Do not recreate assets/audio/. Game audio lives only in public/assets/audio/.');
 assert.equal(await exists('public/client'), true, 'Canonical browser client public/client/ is missing.');
 assert.equal(await exists('public/assets/audio'), true, 'Canonical audio directory public/assets/audio/ is missing.');
+assert.equal(await exists('index.html'), false, 'Do not recreate root index.html. Static browser files live in public/.');
+assert.equal(await exists('styles.css'), false, 'Do not recreate root styles.css. Static browser files live in public/.');
+assert.equal(await exists('public/index.html'), true, 'Canonical public/index.html is missing.');
+assert.equal(await exists('public/styles.css'), true, 'Canonical public/styles.css is missing.');
 
 const tracked = execFileSync('git', ['ls-files', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean);
 const audioExtensions = /\.(?:mp3|wav|ogg|m4a|aac|flac)$/i;
