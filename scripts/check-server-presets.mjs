@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve, dirname, relative } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { PluginHost } from '../src/core/plugin-host.js';
 import { battleRoyalePreset } from '../src/presets/battle-royale.js';
 import { echoFrontPreset } from '../src/presets/echo-front.js';
@@ -61,5 +62,32 @@ const unreachable = serverFiles
   .map((file) => relative(process.cwd(), file))
   .sort();
 assert.deepEqual(unreachable, [], `Server plugins not reachable from any preset:\n${unreachable.join('\n')}`);
+
+
+const manifestFiles = [];
+for (const entry of pluginDirs) {
+  if (!entry.isDirectory()) continue;
+  for (const name of ['server.js', 'index.js', 'integration.js']) {
+    const file = resolve('src/plugins', entry.name, name);
+    try {
+      const module = await import(pathToFileURL(file).href);
+      if (module.manifest?.id) manifestFiles.push({ file, manifest: module.manifest });
+    } catch {}
+  }
+}
+const knownPluginIds = new Set(manifestFiles.map(({ manifest }) => manifest.id));
+const staleOptionalDependencies = [];
+for (const { file, manifest } of manifestFiles) {
+  for (const optionalId of manifest.optional ?? []) {
+    if (!knownPluginIds.has(optionalId)) {
+      staleOptionalDependencies.push(`${relative(process.cwd(), file)}: ${manifest.id} -> ${optionalId}`);
+    }
+  }
+}
+assert.deepEqual(
+  staleOptionalDependencies,
+  [],
+  `Optional plugin dependencies must reference known plugin ids:\n${staleOptionalDependencies.join('\n')}`,
+);
 
 console.log(`Server presets OK: ${presets.size} presets resolve and all ${serverFiles.length} server plugins are reachable.`);
