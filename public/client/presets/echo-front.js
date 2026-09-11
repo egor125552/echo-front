@@ -19,6 +19,7 @@ import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
 import * as mapMenuActivation from "../plugins/map-menu-activation.js";
 import * as navigationStatus from "../plugins/battle-royale-navigation-status.js";
+import * as navigationAnnouncer from "../plugins/battle-royale-navigation-announcer.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face.js";
 import * as parachuteAudioPreload from "../plugins/parachute-audio-preload.js";
 import * as soundPack from "../plugins/core-sound-pack.js";
@@ -63,6 +64,7 @@ export const echoFrontClientPreset = [
   navigation,
   mapMenuActivation,
   navigationStatus,
+  navigationAnnouncer,
   navigationFace,
   parachuteAudioPreload,
   soundPack,

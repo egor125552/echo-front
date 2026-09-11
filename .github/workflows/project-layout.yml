@@ -18,6 +18,7 @@ on:
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
       - scripts/check-client-imports.mjs
+      - scripts/check-client-preset.mjs
       - package.json
       - .github/workflows/project-layout.yml
   pull_request:
@@ -36,6 +37,7 @@ on:
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
       - scripts/check-client-imports.mjs
+      - scripts/check-client-preset.mjs
       - package.json
       - .github/workflows/project-layout.yml
   workflow_dispatch:
@@ -55,8 +57,12 @@ jobs:
         run: npm install
       - name: Verify one client tree and one audio tree
         run: npm run check:project-layout
+      - name: Verify client JavaScript syntax
+        run: find public/client -name '*.js' -type f -print0 | xargs -0 -n1 node --check
       - name: Verify client module imports
         run: npm run check:client-imports
+      - name: Verify client preset and dependencies
+        run: npm run check:client-preset
       - name: Verify client audio references
         run: npm run check:audio-references
       - name: Verify Worker bundle
