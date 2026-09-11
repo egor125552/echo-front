@@ -20,6 +20,7 @@ on:
       - scripts/check-audio-duplicates.mjs
       - scripts/check-warzone-audio-assets.mjs
       - scripts/check-footstep-audio-assets.mjs
+      - scripts/check-gdc-audio-assets.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -43,6 +44,7 @@ on:
       - scripts/check-audio-duplicates.mjs
       - scripts/check-warzone-audio-assets.mjs
       - scripts/check-footstep-audio-assets.mjs
+      - scripts/check-gdc-audio-assets.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -81,6 +83,8 @@ jobs:
         run: npm run check:warzone-audio
       - name: Verify footstep runtime audio sets
         run: npm run check:footstep-audio
+      - name: Verify GDC runtime audio set
+        run: npm run check:gdc-audio
       - name: Verify Worker bundle
         run: npx wrangler deploy --dry-run
       - name: Start local Worker
