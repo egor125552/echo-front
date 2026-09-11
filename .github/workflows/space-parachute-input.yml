@@ -48,7 +48,7 @@ jobs:
         with:
           node-version: 22
       - name: Install dependencies
-        run: npm ci
+        run: npm install
       - name: Check regression test syntax
         run: |
           node --check client/plugins/input.js
