@@ -17,6 +17,7 @@ on:
       - '**/*.flac'
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
+      - scripts/check-audio-duplicates.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -37,6 +38,7 @@ on:
       - '**/*.flac'
       - scripts/check-project-layout.mjs
       - scripts/check-audio-references.mjs
+      - scripts/check-audio-duplicates.mjs
       - scripts/check-client-imports.mjs
       - scripts/check-client-preset.mjs
       - scripts/check-server-presets.mjs
@@ -69,6 +71,8 @@ jobs:
         run: npm run check:server-presets
       - name: Verify client audio references
         run: npm run check:audio-references
+      - name: Reject duplicate audio content
+        run: npm run check:audio-duplicates
       - name: Verify Worker bundle
         run: npx wrangler deploy --dry-run
       - name: Start local Worker
