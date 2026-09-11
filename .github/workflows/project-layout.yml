@@ -91,6 +91,11 @@ jobs:
           const paths = [
             '/client/bootstrap.js',
             '/assets/audio/core/pistol-shot.mp3',
+            '/assets/audio/footsteps/library/open-esport-concrete/jump-1.mp3',
+            '/assets/audio/footsteps/library/open-esport-concrete/land-1.mp3',
+            '/assets/audio/core/parachute/open-air/deploy-swish.mp3',
+            '/assets/audio/core/parachute/wind/wind-rush.mp3',
+            '/assets/audio/core/parachute/landing/ground-thump.mp3',
             '/assets/audio/environment/arena-ambient.mp3',
             '/assets/audio/vehicles/ts3/engine.mp3',
           ];

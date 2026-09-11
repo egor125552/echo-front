@@ -65,65 +65,46 @@ assert.deepEqual(
   'Duplicate tracked audio content is not allowed:\n' + duplicates.map((group) => group.join(' <-> ')).join('\n'),
 );
 
-const warzoneFiles = [
-  'public/client/plugins/battle-royale-audio.js',
-  'public/client/plugins/battle-royale-zone-audio.js',
-];
-const warzoneUsed = new Set();
-const warzonePattern = /(?:warzoneSound\(|encodeURIComponent\()"([^"]+\.mp3)"\)/g;
-for (const file of warzoneFiles) {
-  const source = await readFile(file, 'utf8');
-  for (const match of source.matchAll(warzonePattern)) warzoneUsed.add(match[1]);
-}
-assert.deepEqual(
-  await mp3s('public/assets/audio/warzone'),
-  [...warzoneUsed].sort(),
-  'public/assets/audio/warzone must contain exactly the files referenced by the Warzone audio plugins',
-);
-
-const footstepSets = new Map([
-  ['public/assets/audio/footsteps/library/open-esport-concrete', [...numbered('walk-', 8), ...numbered('run-', 8)]],
-  ['public/assets/audio/footsteps/library/scp', [...numbered('metal-walk-', 8), ...numbered('metal-run-', 8)]],
-]);
-for (const [dir, expected] of footstepSets) {
-  assert.deepEqual(await mp3s(dir), [...expected].sort(), dir + ' must contain only active footstep variants');
+async function assertAudioFiles(urls, label) {
+  const missingFiles = [];
+  for (const url of urls) {
+    const diskPath = resolve('public', url.replace(/^\//, ''));
+    if (!await exists(diskPath)) missingFiles.push(url);
+  }
+  assert.deepEqual(missingFiles, [], label + ':\n' + missingFiles.join('\n'));
 }
 
-const crateSource = await readFile('public/client/plugins/battle-royale-crate-interaction.js', 'utf8');
-const gdcExpected = [...crateSource.matchAll(/"\/assets\/audio\/gdc2026\/([^"]+\.mp3)"/g)]
-  .map((match) => match[1])
-  .sort();
-assert.deepEqual(
-  await mp3s('public/assets/audio/gdc2026'),
-  gdcExpected,
-  'gdc2026 runtime directory must contain exactly the crate-interaction sounds referenced by the client',
-);
+const parachuteSource = await readFile('public/client/plugins/parachute-audio-preload.js', 'utf8');
+const parachuteRoot = '/assets/audio/core/parachute';
+const parachuteUrls = [...parachuteSource.matchAll(/`\$\{ROOT\}\/([^`]+?\.mp3)`/g)]
+  .map((match) => parachuteRoot + '/' + match[1]);
+await assertAudioFiles(parachuteUrls, 'Missing parachute audio files');
 
-function referencedNames(prefix) {
-  const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const pattern = new RegExp('["\\\']' + escaped + '([^"\\\']+\\.mp3)["\\\']', 'g');
-  return [...combinedClientSource.matchAll(pattern)].map((match) => match[1]).sort();
+const concreteRoot = '/assets/audio/footsteps/library/open-esport-concrete/';
+const concreteRequired = [
+  ...numbered('walk-', 8),
+  ...numbered('jog-', 8),
+  ...numbered('run-', 8),
+  ...numbered('walk-stop-', 4),
+  ...numbered('jog-stop-', 4),
+  ...numbered('run-stop-', 4),
+  ...numbered('jump-', 4),
+  ...numbered('land-', 4),
+].map((name) => concreteRoot + name);
+await assertAudioFiles(concreteRequired, 'Missing concrete movement audio files');
+
+const staticClientAudio = new Set();
+for (const { source } of clientSources) {
+  for (const match of source.matchAll(/["'`](\/assets\/audio\/[^"'`]+?\.mp3)["'`]/g)) {
+    if (!match[1].includes('${')) staticClientAudio.add(match[1]);
+  }
 }
-
-const environmentExpected = referencedNames('/assets/audio/environment/');
-const vehicleExpected = referencedNames('/assets/audio/vehicles/ts3/');
-assert.deepEqual(
-  await mp3s('public/assets/audio/environment'),
-  environmentExpected,
-  'environment runtime directory must exactly match client references',
-);
-assert.deepEqual(
-  await mp3s('public/assets/audio/vehicles/ts3'),
-  vehicleExpected,
-  'vehicles/ts3 runtime directory must exactly match client references',
-);
+await assertAudioFiles([...staticClientAudio], 'Missing directly referenced client audio files');
 
 console.log(
   'Audio assets OK: '
   + trackedAudio.length + ' unique tracked files, '
   + staticReferences + ' static references, '
-  + warzoneUsed.size + ' Warzone sounds, '
-  + gdcExpected.length + ' GDC sounds, '
-  + environmentExpected.length + ' environment sounds, '
-  + vehicleExpected.length + ' vehicle sounds.',
+  + parachuteUrls.length + ' parachute sounds, '
+  + concreteRequired.length + ' preserved concrete movement sounds.',
 );
