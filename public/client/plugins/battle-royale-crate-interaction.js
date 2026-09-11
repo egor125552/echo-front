@@ -3,11 +3,11 @@ export const manifest = {
   requires: ["keyboard-input", "cloudflare-session", "spatial-audio-web"],
 };
 
-const DRAG_URL = "/audio/gdc2026/METLFric_Large Metal Box, Drag, Geofon_344 Audio_Extreme Winds Vol 1.mp3";
-const START_RATTLE_URL = "/audio/gdc2026/MACHMech_Mechanism Counting Machine Interact Loose Container Short 01_ESM_HDLM.mp3";
-const LIGHT_IMPACT_URL = "/audio/gdc2026/METLImpt_Metal Old File Impact Tap Against Tire Iron Metallic Hit 01_ESM_HDGM.mp3";
-const HARD_IMPACT_URL = "/audio/gdc2026/METLImpt_METAL SWING HIT Weapon Swing To Metallic Body Impact And Resonant Tail 01_DDUMAIS_MWP2.mp3";
-const BODY_IMPACT_URL = "/audio/environment/metal-hit.mp3";
+const DRAG_URL = "/assets/audio/gdc2026/METLFric_Large Metal Box, Drag, Geofon_344 Audio_Extreme Winds Vol 1.mp3";
+const START_RATTLE_URL = "/assets/audio/gdc2026/MACHMech_Mechanism Counting Machine Interact Loose Container Short 01_ESM_HDLM.mp3";
+const LIGHT_IMPACT_URL = "/assets/audio/gdc2026/METLImpt_Metal Old File Impact Tap Against Tire Iron Metallic Hit 01_ESM_HDGM.mp3";
+const HARD_IMPACT_URL = "/assets/audio/gdc2026/METLImpt_METAL SWING HIT Weapon Swing To Metallic Body Impact And Resonant Tail 01_DDUMAIS_MWP2.mp3";
+const BODY_IMPACT_URL = "/assets/audio/environment/metal-hit.mp3";
 const LOOP_STALE_MS = 340;
 const LOW_SPEED_STOP_MS = 220;
 const MIN_DRAG_SPEED = 0.055;

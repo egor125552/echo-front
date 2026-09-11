@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { setup } from '../client/plugins/battle-royale-vehicle-audio.js';
+import { setup } from '../public/client/plugins/battle-royale-vehicle-audio.js';
 
 function makeHarness() {
   const handlers = new Map();

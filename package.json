@@ -9,8 +9,9 @@
     "check:vehicle-crashes": "node scripts/check-vehicle-crash-model.mjs",
     "check:buildings": "node scripts/check-building-stair-physics.mjs && node scripts/check-building-layouts.mjs && node scripts/check-building-traversal.mjs",
     "check:space-parachute": "node scripts/check-space-parachute-input.mjs",
-    "test": "npm run check:client-mirror && npm run check:space-parachute",
-    "check:client-mirror": "node scripts/check-client-mirror.mjs"
+    "test": "npm run check:project-layout && npm run check:audio-references && npm run check:space-parachute",
+    "check:project-layout": "node scripts/check-project-layout.mjs",
+    "check:audio-references": "node scripts/check-audio-references.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d": "0.19.3",

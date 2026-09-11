@@ -1,0 +1,51 @@
+name: Project Layout
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - client/**
+      - public/client/**
+      - assets/audio/**
+      - public/audio/**
+      - public/assets/audio/**
+      - '**/*.mp3'
+      - '**/*.wav'
+      - '**/*.ogg'
+      - '**/*.m4a'
+      - '**/*.aac'
+      - '**/*.flac'
+      - scripts/check-project-layout.mjs
+      - package.json
+      - .github/workflows/project-layout.yml
+  pull_request:
+    paths:
+      - client/**
+      - public/client/**
+      - assets/audio/**
+      - public/audio/**
+      - public/assets/audio/**
+      - '**/*.mp3'
+      - '**/*.wav'
+      - '**/*.ogg'
+      - '**/*.m4a'
+      - '**/*.aac'
+      - '**/*.flac'
+      - scripts/check-project-layout.mjs
+      - package.json
+      - .github/workflows/project-layout.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  canonical-layout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify one client tree and one audio tree
+        run: npm run check:project-layout

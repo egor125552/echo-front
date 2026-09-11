@@ -1,4 +1,4 @@
-export const AMBIENT_BED = "/audio/environment/arena-ambient.mp3";
+export const AMBIENT_BED = "/assets/audio/environment/arena-ambient.mp3";
 
 export const manifest = {
   id: "environment-audio",
