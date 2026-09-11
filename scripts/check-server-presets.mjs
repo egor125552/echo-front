@@ -19,6 +19,8 @@ const presets = new Map([
 for (const [name, plugins] of presets) {
   const host = new PluginHost({ plugins });
   assert.equal(host.plugins.length, plugins.length, `${name} preset must resolve every plugin`);
+  await host.start();
+  await host.stop();
 }
 
 const importPattern = /\b(?:import|export)\s+(?:[^'"`]*?\s+from\s+)?['"]([^'"]+)['"]/g;
