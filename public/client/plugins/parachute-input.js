@@ -109,16 +109,9 @@ export async function setup(ctx) {
   });
 
   window.addEventListener("keydown", (event) => {
-    if (!network.connected || event.repeat) return;
-    if (event.code === "Space") {
-      event.preventDefault();
-      trigger("key:Space:down");
-      return;
-    }
-    if (event.code === "KeyH") {
-      event.preventDefault();
-      announce(flightStatusText());
-    }
+    if (!network.connected || event.repeat || event.code !== "KeyH") return;
+    event.preventDefault();
+    announce(flightStatusText());
   }, { capture: true, passive: false });
 
   const button = document.querySelector('[data-touch-action="parachute"]');

@@ -19,6 +19,7 @@ const KEY_IDS = {
   ShiftRight: 11,
   KeyE: 12,
   KeyB: 13,
+  KeyN: 14,
 };
 
 export const ENTITY_FIELDS = [
@@ -86,7 +87,10 @@ export function encodeInputRecord(timeMs, input = {}) {
     Number(input.selectDelta) || 0,
     input.interactPressed ? 1 : 0,
     input.platePressed ? 1 : 0,
+    input.stimulantPressed ? 1 : 0,
+    input.parachutePressed ? 1 : 0,
     input.posePressed ? 1 : 0,
+    input.jumpPressed ? 1 : 0,
     input.navigationNextPressed ? 1 : 0,
     input.navigationTogglePressed ? 1 : 0,
     input.navigationFacePressed ? 1 : 0,
@@ -104,11 +108,11 @@ function persistentInputSignature(input = {}) {
 }
 
 function header(epochMs) {
-  return ["EFJ", 4, epochMs, {
+  return ["EFJ", 5, epochMs, {
     clock: "client milliseconds from journal start",
-    keys: "1 up,2 down,3 left,4 right,5 space,6 C,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B",
+    keys: "1 up,2 down,3 left,4 right,5 space,6 C,7 X,8 R,9 Z,10 left shift,11 right shift,12 E,13 B,14 N",
     k: "[k,t,key,down] exact browser key transition",
-    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed,posePressed,navigationNextPressed,navigationTogglePressed,navigationFacePressed] input sampled for server",
+    i: "[i,t,forward,strafe,turn,sprint,fireHeld,firePressed,reload,selectDelta,interactPressed,platePressed,stimulantPressed,parachutePressed,posePressed,jumpPressed,navigationNextPressed,navigationTogglePressed,navigationFacePressed] input sampled for server",
     n: "[n,t,index,id,name,bot,team,healthMax,armorMax] entity dictionary",
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
     c: `change=[entityIndex,bitmask,values...] bits: ${ENTITY_FIELDS.join(",")}`,
@@ -178,7 +182,10 @@ export async function setup(ctx) {
       || Number(input.selectDelta)
       || input.interactPressed
       || input.platePressed
+      || input.stimulantPressed
+      || input.parachutePressed
       || input.posePressed
+      || input.jumpPressed
       || input.navigationNextPressed
       || input.navigationTogglePressed
       || input.navigationFacePressed

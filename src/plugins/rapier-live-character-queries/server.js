@@ -92,14 +92,16 @@ export async function setup(ctx) {
 
   physics.lineOfSight = (from, to, excludeEntityId = null, targetEntityId = null) => {
     const dx = (Number(to?.x) || 0) - (Number(from?.x) || 0);
-    const dy = (Number(to?.y) || 0) - (Number(from?.y) || 0);
+    const fromHeight = physics.characterAimHeight?.(excludeEntityId) ?? 1;
+    const toHeight = physics.characterAimHeight?.(targetEntityId) ?? 1;
+    const dy = (Number(to?.y) || 0) + toHeight - (Number(from?.y) || 0) - fromHeight;
     const dz = (Number(to?.z) || 0) - (Number(from?.z) || 0);
     const distance = Math.hypot(dx, dy, dz);
     if (distance < 0.001) return true;
     const hit = physics.raycast(
       {
         x: Number(from?.x) || 0,
-        y: (Number(from?.y) || 0) + 1,
+        y: (Number(from?.y) || 0) + fromHeight,
         z: Number(from?.z) || 0,
       },
       { x: dx, y: dy, z: dz },

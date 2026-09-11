@@ -41,7 +41,8 @@ export async function setup(ctx) {
       if (!target) continue;
 
       const dx = target.x - origin.x;
-      const dy = (target.y ?? 0) - (origin.y ?? 0);
+      const dy = (target.y ?? 0) + (physics.characterAimHeight?.(enemy.id) ?? 1)
+        - (origin.y ?? 0) - (physics.characterAimHeight?.(entityId) ?? 1);
       const dz = target.z - origin.z;
       const distance = Math.hypot(dx, dy, dz);
       if (distance <= 0.001 || distance > maxDistance) continue;

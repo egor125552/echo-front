@@ -4,6 +4,7 @@ export const FINAL_ZONE_RADIUS = 35;
 export const ZONE_GRACE_MS = 3 * 60_000;
 export const ZONE_SHRINK_MS = 20 * 60_000;
 export const ZONE_DAMAGE_PER_SECOND = 12;
+export const ZONE_STEERING_BUFFER = 70;
 export const REMAINING_THRESHOLDS = [75, 50, 25, 10, 5, 2, 1];
 
 export const manifest = {
@@ -15,6 +16,25 @@ export const manifest = {
 
 function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+export function shouldSteerForZone(distance, radius) {
+  return Number(distance) >= Math.max(0, Number(radius) - ZONE_STEERING_BUFFER);
+}
+
+export function zoneSteeringPoint(x, z, radius) {
+  const px = Number(x) || 0;
+  const pz = Number(z) || 0;
+  const distance = Math.hypot(px, pz);
+  if (!shouldSteerForZone(distance, radius)) return null;
+  const safeRadius = Math.max(0, Number(radius) - ZONE_STEERING_BUFFER * 2);
+  const scale = distance > 0 ? Math.min(1, safeRadius / distance) : 0;
+  return { x: px * scale, y: 0, z: pz * scale, distance, radius: Number(radius) };
+}
+
+export function zoneDamageForElapsed(elapsedMs) {
+  const elapsed = Math.max(0, Number(elapsedMs) || 0);
+  return ZONE_DAMAGE_PER_SECOND * (elapsed / 1000);
 }
 
 export async function setup(ctx) {
@@ -94,6 +114,7 @@ export async function setup(ctx) {
     if (survivors.length > 1) return;
     phase = "ended";
     endedAt = now;
+    deploymentInProgress = false;
     winnerId = survivors[0]?.id ?? null;
     if (winnerId) placements.set(winnerId, 1);
     ctx.events.emit("battle-royale:ended", {
@@ -102,6 +123,28 @@ export async function setup(ctx) {
       total,
       endedAt,
     });
+  }
+
+  function recordElimination(entityId, killerId = null, now = Date.now(), reason = null) {
+    if (phase !== "active" || placements.has(entityId)) return false;
+    const alive = aliveEntities().length;
+    const placement = alive + 1;
+    placements.set(entityId, placement);
+    ctx.events.emit("battle-royale:eliminated", {
+      entityId, killerId, alive, placement, total, ...(reason ? { reason } : {}),
+    });
+    emitRemaining(alive);
+    if (deploymentInProgress) completeDeployment(now);
+    finish(now);
+    return true;
+  }
+
+  function forfeit(entityId, now = Date.now(), reason = "disconnect") {
+    if (phase !== "active") return false;
+    const entity = entities.get(entityId);
+    if (!entity?.alive) return false;
+    entities.setAlive(entityId, false);
+    return recordElimination(entityId, null, Number(now) || Date.now(), reason);
   }
 
   function completeDeployment(now = Date.now()) {
@@ -148,15 +191,19 @@ export async function setup(ctx) {
 
   function applyZone(now) {
     if (phase !== "active" || !zoneClockStartedAt || now < zoneClockStartedAt + ZONE_GRACE_MS) return;
-    if (lastZoneDamageAt && now - lastZoneDamageAt < 1000) return;
+    const zoneStartedAt = zoneClockStartedAt + ZONE_GRACE_MS;
+    const previousDamageAt = lastZoneDamageAt || zoneStartedAt;
+    const elapsedMs = Math.max(0, now - previousDamageAt);
+    if (elapsedMs < 1000) return;
     lastZoneDamageAt = now;
     const radius = zoneRadiusAt(now);
+    const damage = zoneDamageForElapsed(elapsedMs);
     for (const entity of aliveEntities()) {
       const transform = ctx.components.get(entity.id, "Transform");
       if (!transform) continue;
       const distance = Math.hypot(transform.x, transform.z);
       if (distance <= radius) continue;
-      const result = health.applyDamage(entity.id, ZONE_DAMAGE_PER_SECOND, {
+      const result = health.applyDamage(entity.id, damage, {
         attackerId: null,
         weaponId: "zone",
         now,
@@ -191,15 +238,8 @@ export async function setup(ctx) {
     completeDeployment(Number(now) || Date.now());
   });
 
-  ctx.events.on("entity:died", ({ entityId, killerId }) => {
-    if (phase !== "active") return;
-    const alive = aliveEntities().length;
-    const placement = alive + 1;
-    placements.set(entityId, placement);
-    ctx.events.emit("battle-royale:eliminated", { entityId, killerId, alive, placement, total });
-    emitRemaining(alive);
-    if (deploymentInProgress) completeDeployment(Date.now());
-    finish(Date.now());
+  ctx.events.on("entity:died", ({ entityId, killerId, now }) => {
+    recordElimination(entityId, killerId, Number(now) || Date.now());
   });
 
   ctx.services.provide("battle-royale", {
@@ -208,15 +248,17 @@ export async function setup(ctx) {
     status,
     zoneRadiusAt,
     placementOf(entityId) { return placements.get(entityId) ?? null; },
+    forfeit,
     canAct() { return phase === "active"; },
     isActive() { return phase === "active"; },
     zoneSteeringTarget(entityId, now = Date.now()) {
       const transform = ctx.components.get(entityId, "Transform");
       if (!transform || phase !== "active") return null;
       const radius = zoneRadiusAt(now);
-      const distance = Math.hypot(transform.x, transform.z);
-      if (distance < radius * 0.82) return null;
-      return { x: 0, y: 0, z: 0, distance, radius };
+      // Steering is an imminent-boundary warning, not a generic pull toward
+      // the centre. With a 1450 m opening zone the whole 2 km map is safe,
+      // so bots at the outer corners must be free to use that space.
+      return zoneSteeringPoint(transform.x, transform.z, radius);
     },
   });
 }

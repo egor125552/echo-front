@@ -20,6 +20,8 @@ export function sampleKeyboardState(pressed, {
   reload = false,
   selectDelta = 0,
   platePressed = false,
+  stimulantPressed = false,
+  parachutePressed = false,
   interactPressed = false,
 } = {}) {
   const weaponModifier = pressed.has("KeyZ");
@@ -33,6 +35,8 @@ export function sampleKeyboardState(pressed, {
     reload,
     selectDelta,
     platePressed,
+    stimulantPressed,
+    parachutePressed,
     interactPressed,
   };
 }
@@ -58,12 +62,14 @@ export async function setup(ctx) {
   let reload = false;
   let selectDelta = 0;
   let platePressed = false;
+  let stimulantPressed = false;
+  let parachutePressed = false;
   let interactPressed = false;
 
   const clickSuppression = new WeakMap();
   const handled = new Set([
-    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
-    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE",
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
+    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE", "KeyN",
   ]);
   const opposite = { forward: "back", back: "forward", left: "right", right: "left" };
   const movementButtons = [...document.querySelectorAll("[data-touch-control]")];
@@ -151,6 +157,7 @@ export async function setup(ctx) {
     else if (action === "weapon-prev") selectDelta = -1;
     else if (action === "weapon-next") selectDelta = 1;
     else if (action === "armor-plate") platePressed = true;
+    else if (action === "stimulant") stimulantPressed = true;
     else if (action === "interact") interactPressed = true;
     else return false;
     emitTouch(action, true);
@@ -204,6 +211,8 @@ export async function setup(ctx) {
     reload = false;
     selectDelta = 0;
     platePressed = false;
+    stimulantPressed = false;
+    parachutePressed = false;
     interactPressed = false;
     syncPressedState();
     if (hadState) {
@@ -224,6 +233,8 @@ export async function setup(ctx) {
       }
       if (event.code === "KeyR") reload = true;
       if (event.code === "KeyB") platePressed = true;
+      if (event.code === "KeyN") stimulantPressed = true;
+      if (event.code === "Space") parachutePressed = true;
       if (event.code === "KeyE") interactPressed = true;
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
       if (pressed.has("KeyZ") && event.code === "ArrowRight") selectDelta = 1;
@@ -352,6 +363,7 @@ export async function setup(ctx) {
       if (action === "weapon-prev") selectDelta = -1;
       if (action === "weapon-next") selectDelta = 1;
       if (action === "armor-plate") platePressed = true;
+      if (action === "stimulant") stimulantPressed = true;
       if (action === "interact") interactPressed = true;
       emitTouch(action, true);
       notifyChanged(`touch:${action}`);
@@ -381,12 +393,14 @@ export async function setup(ctx) {
         fireHeld: touch.fireHeld || virtual.fireHeld,
       };
       const sample = sampleInputState(pressed, mergedTouch, {
-        firePressed, reload, selectDelta, platePressed, interactPressed,
+        firePressed, reload, selectDelta, platePressed, stimulantPressed, parachutePressed, interactPressed,
       });
       firePressed = false;
       reload = false;
       selectDelta = 0;
       platePressed = false;
+      stimulantPressed = false;
+      parachutePressed = false;
       interactPressed = false;
       return sample;
     },

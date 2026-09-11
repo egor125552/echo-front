@@ -357,7 +357,7 @@ export async function setup(ctx) {
     const entity = entities.get(playerId);
     const transform = ctx.components.get(playerId, "Transform");
     const body = bodyState();
-    if (!entity?.alive || entity.bot || !transform || !body) return false;
+    if (!entity?.alive || !transform || transform.downed || !body) return false;
     if (distance3(transform, body) > VEHICLE_ENTER_DISTANCE) return false;
     driverId = playerId;
     input = { throttle: 0, steering: 0, handbrake: false, nitro: false };

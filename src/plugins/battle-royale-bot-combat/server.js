@@ -463,8 +463,34 @@ export async function setup(ctx) {
       memory = null;
     }
     const zoneTarget = battleRoyale.zoneSteeringTarget(bot.id, now);
+    // A huge map should stay geographically distributed without becoming empty.
+    // If an on-foot bot can actually see a live enemy in the same local region,
+    // close the distance first; weapon engagement still begins only inside the
+    // normal 28 m combat envelope.
+    let distantContact = null;
+    if (!visibleEnemies.length && typeof perception.nearestVisibleEnemy === "function") {
+      if ((state.nextDistantContactAt ?? 0) <= now) {
+        const fresh = perception.nearestVisibleEnemy(bot.id, 105, { now });
+        state.nextDistantContactAt = now + 350;
+        state.distantContact = fresh?.transform ? {
+          entityId: fresh.entityId,
+          x: fresh.transform.x,
+          y: fresh.transform.y,
+          z: fresh.transform.z,
+          seenAt: now,
+          expiresAt: now + 700,
+        } : null;
+      }
+      distantContact = state.distantContact?.expiresAt > now ? state.distantContact : null;
+    } else if (visibleEnemies.length) {
+      state.distantContact = null;
+      state.nextDistantContactAt = now + 350;
+    }
+    const contactInterest = distantContact
+      ? { kind: "visual-contact-interest", ...distantContact }
+      : null;
     const interestTarget = !visibleEnemies.length
-      ? interest.targetFor(bot.id, transform, now)
+      ? (contactInterest ?? interest.targetFor(bot.id, transform, now))
       : null;
     const previousDecision = brain.commitmentFor(bot.id);
     const traversal = traversalFor(
@@ -514,7 +540,7 @@ export async function setup(ctx) {
       for (const bot of bots.all()) {
         if (!bot.alive) continue;
         const state = ctx.components.get(bot.id, "Bot");
-        if (!state || now < (state.nextThinkAt ?? 0)) continue;
+        if (!state || state.vehicleControl || now < (state.nextThinkAt ?? 0)) continue;
         think(bot, now);
       }
     },

@@ -272,7 +272,9 @@ export async function setup(ctx) {
 
           const turnSpeed = entity.bot ? BOT_TURN_SPEED : HUMAN_TURN_SPEED;
           transform.angle += input.turn * turnSpeed * safeDt;
-          const speed = input.sprint ? 5.4 : 3.25;
+          const speed = Number.isFinite(transform.movementSpeed)
+            ? Math.max(0, transform.movementSpeed)
+            : (input.sprint ? 5.4 : 3.25);
           const rawForward = input.forward;
           const strafeFactor = entity.bot ? 0.7 : 1;
           const rawStrafe = input.strafe * strafeFactor;
@@ -368,10 +370,10 @@ export async function setup(ctx) {
           const horizontalMoved = Math.hypot(moved.x, moved.z);
           if (horizontalMoved < 0.0001) continue;
           transform.stepDistance += horizontalMoved;
-          const threshold = input.sprint ? 1.15 : 1.55;
+          const threshold = transform.downed ? 0.65 : (input.sprint ? 1.15 : 1.55);
           if (transform.stepDistance >= threshold) {
             transform.stepDistance %= threshold;
-            const gait = input.sprint ? "run" : "walk";
+            const gait = transform.downed ? "crawl" : (input.sprint ? "run" : "walk");
             const surface = normalizeFootstepSurface(
               typeof map.surfaceAt === "function"
                 ? map.surfaceAt({ x: transform.x, y: transform.y, z: transform.z })
@@ -384,7 +386,7 @@ export async function setup(ctx) {
             transform.stepIndex = (transform.stepIndex % variantCount) + 1;
             ctx.events.emit("sound:spatial", {
               entityId,
-              key: footstepKey(surface, transform.stepIndex),
+              key: transform.downed ? "injury.crawl" : footstepKey(surface, transform.stepIndex),
               surface,
               gait,
               variant: transform.stepIndex,
@@ -394,7 +396,7 @@ export async function setup(ctx) {
               x: transform.x,
               y: transform.y,
               z: transform.z,
-              radius: input.sprint ? FOOTSTEP_SPRINT_RADIUS : FOOTSTEP_WALK_RADIUS,
+              radius: transform.downed ? 12 : (input.sprint ? FOOTSTEP_SPRINT_RADIUS : FOOTSTEP_WALK_RADIUS),
             });
           }
         }

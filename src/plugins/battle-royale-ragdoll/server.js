@@ -138,6 +138,11 @@ export async function setup(ctx) {
   const { RAPIER, world } = physics;
 
   const active = new Map();
+
+  function setRagdollFlag(entityId, value) {
+    const transform = ctx.components.get(entityId, "Transform");
+    if (transform) transform.ragdollActive = Boolean(value);
+  }
   const ragdollColliderOwners = new Map();
   const characterColliderOwners = new Map();
 
@@ -318,6 +323,7 @@ export async function setup(ctx) {
     const transform = ctx.components.get(entityId, "Transform");
     if (!entity || !transform) return false;
     if (!options.dead && !entity.alive) return false;
+    if (!options.dead && transform.downed) return false;
 
     const base = options.position ?? {
       x: Number(transform.x) || 0,
@@ -339,6 +345,7 @@ export async function setup(ctx) {
     physics.setCharacterEnabled(entityId, false);
     transform.verticalVelocity = 0;
     transform.grounded = false;
+    transform.ragdollActive = true;
 
     const entry = {
       entityId,
@@ -446,6 +453,9 @@ export async function setup(ctx) {
   }
 
   function detectVehiclePedestrianHits(now) {
+    // The fleet-wide plugin owns vehicle/pedestrian physics in BR. Keep this
+    // legacy fallback only for presets that do not install that service.
+    if (ctx.services.has("fleet-pedestrian-ragdoll")) return;
     const vehicle = vehicles.stateFor();
     const speed = Math.max(0, Number(vehicle?.speed) || 0);
     if (speed < VEHICLE_PEDESTRIAN_HIT_SPEED) return;
@@ -708,6 +718,7 @@ export async function setup(ctx) {
 
     removeBodies(entry);
     active.delete(entityId);
+    setRagdollFlag(entityId, false);
     movement.setInput(entityId, {});
     physics.setCharacterEnabled(entityId, true);
 
@@ -780,6 +791,7 @@ export async function setup(ctx) {
     }
     removeBodies(entry);
     active.delete(entry.entityId);
+    setRagdollFlag(entry.entityId, false);
     const entity = entities.get(entry.entityId);
     if (entity?.alive) {
       physics.setCharacterEnabled(entry.entityId, true);
@@ -812,6 +824,7 @@ export async function setup(ctx) {
     }
     removeBodies(entry);
     active.delete(entry.entityId);
+    setRagdollFlag(entry.entityId, false);
     ctx.events.emit("ragdoll:ended", {
       entityId: entry.entityId,
       reason,

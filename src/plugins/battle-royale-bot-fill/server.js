@@ -1,11 +1,11 @@
 export const TARGET_PLAYERS = 96;
 export const HUMAN_START_CLEARANCE = 75;
-export const BOT_MAX_START_RADIUS = 325;
+export const BOT_MAX_START_RADIUS = 1300;
+export const BOT_START_GRID_MARGIN = 90;
 
-const SAFE_REPLACEMENT_RADIUS = BOT_MAX_START_RADIUS;
 const SAFE_REPLACEMENT_ATTEMPTS = 512;
-const SOURCE_START_RADII = Object.freeze([125, 190, 255, 320, 385]);
-const COMPACT_START_RADII = Object.freeze([125, 175, 225, 275, 325]);
+const BOT_START_COLUMNS = 12;
+const BOT_START_ROWS = 8;
 
 export const manifest = {
   id: "bot-fill",
@@ -20,28 +20,17 @@ function distance2(a, b) {
   return Math.hypot((a.x ?? 0) - (b.x ?? 0), (a.z ?? 0) - (b.z ?? 0));
 }
 
-function compactInitialSpawn(spawn) {
-  if (!spawn) return spawn;
-  const radius = Math.hypot(Number(spawn.x) || 0, Number(spawn.z) || 0);
-  if (radius < 0.001) return { ...spawn };
-
-  let ring = 0;
-  let error = Infinity;
-  for (let i = 0; i < SOURCE_START_RADII.length; i += 1) {
-    const candidateError = Math.abs(radius - SOURCE_START_RADII[i]);
-    if (candidateError >= error) continue;
-    error = candidateError;
-    ring = i;
+function buildWorldWideSpawns(halfSize) {
+  const limit = Math.max(120, (Number(halfSize) || 1000) - BOT_START_GRID_MARGIN);
+  const points = [];
+  for (let row = 0; row < BOT_START_ROWS; row += 1) {
+    const z = -limit + (2 * limit * row) / (BOT_START_ROWS - 1);
+    for (let column = 0; column < BOT_START_COLUMNS; column += 1) {
+      const x = -limit + (2 * limit * column) / (BOT_START_COLUMNS - 1);
+      points.push(Object.freeze({ x, y: 0, z, angle: Math.atan2(-x, z) }));
+    }
   }
-
-  const targetRadius = COMPACT_START_RADII[ring];
-  const scale = targetRadius / radius;
-  return {
-    ...spawn,
-    x: (Number(spawn.x) || 0) * scale,
-    y: Number(spawn.y) || 0,
-    z: (Number(spawn.z) || 0) * scale,
-  };
+  return Object.freeze(points);
 }
 
 export async function setup(ctx) {
@@ -52,12 +41,14 @@ export async function setup(ctx) {
   const map = ctx.services.get("map");
   let serial = 0;
   let replacementCursor = 0;
+  let worldSpawnCursor = 0;
+  const worldWideSpawns = buildWorldWideSpawns(map.halfSize);
 
   function spawnBot(position = null) {
     serial += 1;
     const team = serial;
     const spec = loadouts.create(serial, team);
-    const spawn = position ?? compactInitialSpawn(map.nextSpawn());
+    const spawn = position ?? { ...worldWideSpawns[worldSpawnCursor++ % worldWideSpawns.length] };
     entities.spawn({ ...spec, position: spawn });
     return spec.id;
   }
@@ -82,19 +73,11 @@ export async function setup(ctx) {
   }
 
   function safeReplacementPosition(reservedHumanSpawn) {
-    const golden = Math.PI * (3 - Math.sqrt(5));
     let best = null;
     let bestClearance = -Infinity;
-
     for (let attempt = 0; attempt < SAFE_REPLACEMENT_ATTEMPTS; attempt += 1) {
-      const angle = replacementCursor * golden;
-      replacementCursor += 1;
-      const candidate = {
-        x: Math.cos(angle) * SAFE_REPLACEMENT_RADIUS,
-        y: 0,
-        z: Math.sin(angle) * SAFE_REPLACEMENT_RADIUS,
-      };
-      candidate.angle = Math.atan2(-candidate.x, candidate.z);
+      const source = worldWideSpawns[replacementCursor++ % worldWideSpawns.length];
+      const candidate = { ...source };
       const clearance = candidateClearance(candidate, reservedHumanSpawn);
       if (clearance > bestClearance) {
         best = candidate;
@@ -102,8 +85,25 @@ export async function setup(ctx) {
       }
       if (clearance >= HUMAN_START_CLEARANCE) return candidate;
     }
-
     return best;
+  }
+
+  function distribution() {
+    const half = Math.max(1, Number(map.halfSize) || 1000);
+    const positions = bots.all().filter(bot => bot.alive).map(bot => physics.position(bot.id)).filter(Boolean);
+    const sectors = Array.from({ length: 4 }, () => Array(4).fill(0));
+    for (const p of positions) {
+      const column = Math.max(0, Math.min(3, Math.floor(((p.x + half) / (half * 2)) * 4)));
+      const row = Math.max(0, Math.min(3, Math.floor(((p.z + half) / (half * 2)) * 4)));
+      sectors[row][column] += 1;
+    }
+    const xs = positions.map(p => p.x), zs = positions.map(p => p.z);
+    return {
+      liveBots: positions.length,
+      minX: xs.length ? Math.min(...xs) : null, maxX: xs.length ? Math.max(...xs) : null,
+      minZ: zs.length ? Math.min(...zs) : null, maxZ: zs.length ? Math.max(...zs) : null,
+      sectors, worldHalfSize: half, spawnSlots: worldWideSpawns.length,
+    };
   }
 
   function ensure() {
@@ -147,5 +147,7 @@ export async function setup(ctx) {
     maxStartRadius: BOT_MAX_START_RADIUS,
     ensure,
     makeRoomForHuman,
+    distribution,
+    spawnPoints: worldWideSpawns,
   });
 }

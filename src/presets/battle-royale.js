@@ -78,6 +78,9 @@ import * as navigationStability from "../plugins/battle-royale-navigation-stabil
 import * as navigationLifecycle from "../plugins/battle-royale-navigation-lifecycle/server.js";
 import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/server.js";
 import * as projectileLifecycle from "../plugins/rapier-projectile-lifecycle/server.js";
+import * as injury from "../plugins/battle-royale-injury/server.js";
+import * as injuryIntegration from "../plugins/battle-royale-injury/integration.js";
+import * as botVehicles from "../plugins/battle-royale-bot-vehicles/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -160,4 +163,7 @@ export const battleRoyalePreset = [
   navigationLifecycle,
   dropzoneVehicle,
   projectileLifecycle,
+  injury,
+  injuryIntegration,
+  botVehicles,
 ];

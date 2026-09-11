@@ -42,6 +42,8 @@ export async function setup(ctx) {
           now,
         });
       }
+      const depleted = { entityId: targetId, source, now, downed: false };
+      if (health.current <= 0) ctx.events.emit("health:depleted", depleted);
       ctx.events.emit("health:changed", { entityId: targetId, health: health.current, maximum: health.maximum });
       if (health.current <= 0) {
         entities.setAlive(targetId, false);
@@ -49,10 +51,11 @@ export async function setup(ctx) {
           entityId: targetId,
           killerId: source.attackerId ?? null,
           weaponId: source.weaponId ?? null,
+          now,
         });
         return { applied, killed: true };
       }
-      return { applied, killed: false };
+      return { applied, killed: false, ...(depleted.downed ? { downed: true } : {}) };
     },
     heal(entityId, amount) {
       const health = ctx.components.get(entityId, "Health");

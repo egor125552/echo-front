@@ -2,7 +2,7 @@ export const manifest = {
   id: "battle-royale-bot-parachute",
   version: "1.0.1",
   requires: [
-    "entities", "movement", "battle-royale-parachute", "match-api", "battle-royale", "map-test-arena",
+    "entities", "movement", "battle-royale-parachute", "match-api", "map-test-arena",
   ],
   capabilities: [
     "services.consume", "services.provide",
@@ -17,8 +17,6 @@ const MIN_LAUNCH_OFFSET = 145;
 const LAUNCH_OFFSET_SPREAD = 115;
 const MIN_DEPLOY_ALTITUDE = 205;
 const DEPLOY_ALTITUDE_SPREAD = 145;
-const WAREHOUSE_DROP_PERCENT = 18;
-const UPPER_WAREHOUSE_PERCENT = 42;
 const MAX_TURN_COMMAND = 1;
 
 function clamp(value, minimum, maximum) {
@@ -52,39 +50,11 @@ function distance2(a, b) {
   );
 }
 
-function warehouseTarget(seed, map) {
-  const building = map?.building;
-  if (!building) return null;
-  const upperY = Number(building.upperY) || 3.2;
-  const upper = ((seed >>> 8) % 100) < UPPER_WAREHOUSE_PERCENT;
-  if (!upper) {
-    const side = (seed >>> 16) % 4;
-    const padding = 5.5 + ((seed >>> 20) % 35) / 10;
-    const along = (((seed >>> 4) % 1000) / 1000 - 0.5) * 14;
-    if (side === 0) return { x: building.minX - padding, y: 0, z: along, kind: "warehouse-outside" };
-    if (side === 1) return { x: building.maxX + padding, y: 0, z: along, kind: "warehouse-outside" };
-    if (side === 2) return { x: (building.minX + building.maxX) / 2 + along, y: 0, z: building.minZ - padding, kind: "warehouse-outside" };
-    return { x: (building.minX + building.maxX) / 2 + along, y: 0, z: building.maxZ + padding, kind: "warehouse-outside" };
-  }
-
-  const points = [
-    { x: building.minX + 5.5, y: upperY, z: -7.5 },
-    { x: building.minX + 5.5, y: upperY, z: 7.5 },
-    { x: (building.minX + building.maxX) / 2 - 3.5, y: upperY, z: -7.0 },
-    { x: (building.minX + building.maxX) / 2 - 3.5, y: upperY, z: 7.0 },
-    { x: building.maxX - 4.5, y: upperY, z: -7.0 },
-    { x: building.maxX - 4.5, y: upperY, z: 7.0 },
-  ];
-  const point = points[(seed >>> 14) % points.length];
-  return { ...point, kind: "warehouse-upper" };
-}
-
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const movement = ctx.services.get("movement");
   const parachute = ctx.services.get("parachute");
   const matchApi = ctx.services.get("match-api");
-  const battleRoyale = ctx.services.get("battle-royale");
   const map = ctx.services.get("map");
 
   const originalStep = matchApi.step.bind(matchApi);
@@ -106,11 +76,6 @@ export async function setup(ctx) {
 
   function chooseTarget(bot, transform) {
     const seed = stableHash(`${bot.id}:drop:${generation}`);
-    if ((seed % 100) < WAREHOUSE_DROP_PERCENT) {
-      const hot = warehouseTarget(seed, map);
-      if (hot) return clampToMap(hot);
-    }
-
     const jitterAngle = ((seed >>> 6) % 65536) / 65536 * Math.PI * 2;
     const jitterDistance = 8 + ((seed >>> 18) % 23);
     return clampToMap({
@@ -359,10 +324,11 @@ export async function setup(ctx) {
   });
 
   matchApi.step = (dt, now = Date.now()) => {
-    const deploymentActive = Boolean(battleRoyale.status(now)?.deployment?.active);
-    if (!deploymentActive) return originalStep(dt, now);
-
-    const bots = deploymentBots();
+    const bots = deploymentBots().filter((bot) => {
+      const state = ctx.components.get(bot.id, "Parachute");
+      return assignments.has(bot.id) && state?.airborne;
+    });
+    if (!bots.length) return originalStep(dt, now);
     const saved = [];
     for (const bot of bots) {
       saved.push({ bot, botFlag: bot.bot, kind: bot.kind });

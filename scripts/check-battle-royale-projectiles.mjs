@@ -155,6 +155,125 @@ async function main() {
       `Projectile hit active ragdoll without resolving entity damage (${ragdollDurabilityBefore} -> ${durability(ragdollAfter)})`,
     );
 
+    // The vehicle layer correctly rejects an active ragdoll. Wait for the real
+    // physics-driven recovery before starting the seated-driver portion of this
+    // regression instead of relying on the old invalid "ragdoll can enter" path.
+    for (let frame = 0; frame < 600 && ragdoll.isActive(TARGET_ID); frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+    }
+    assert(!ragdoll.isActive(TARGET_ID), "Projectile target did not recover from ragdoll before vehicle test");
+
+    // A seated driver has its ordinary character collider disabled. A projectile
+    // hitting the real vehicle chassis must therefore still resolve to an occupant
+    // instead of disappearing as a harmless world impact. The chassis protects the
+    // occupant, so only a fraction of projectile damage should pass through.
+    const vehicleId = "br-jeep-2";
+    const vehicleBefore = vehicles.stateFor(vehicleId);
+    assert(vehicleBefore && !vehicleBefore.driverId, `${vehicleId} is unavailable for occupant projectile test`);
+    groundHuman(game, movement, TARGET_ID, {
+      x: vehicleBefore.x + 1.5, y: 0, z: vehicleBefore.z, angle: 0,
+    });
+    now += 500;
+    assert(vehicles.enter(TARGET_ID, now, vehicleId), "Could not seat projectile target in vehicle");
+    assert(vehicles.driverId(vehicleId) === TARGET_ID, "Vehicle driver seat did not contain projectile target");
+
+    const seatedBefore = entitySnapshot(game, TARGET_ID);
+    const seatedDurabilityBefore = durability(seatedBefore);
+    let seatedImpact = null;
+    const offImpact = game.host.events.on?.("projectile:impact", (payload) => {
+      if (payload?.vehicleId === vehicleId) seatedImpact = payload;
+    });
+    const vehicleState = vehicles.stateFor(vehicleId);
+    const origin = { x: vehicleState.x, y: vehicleState.y + 5, z: vehicleState.z };
+    const vehicleProjectileId = projectiles.spawn({
+      shooterId: SHOOTER_ID,
+      weaponId: "vehicle-occupant-projectile-test",
+      damage: 40,
+      speed: 120,
+      range: 30,
+      origin,
+      direction: { x: 0, y: -1, z: 0 },
+      now,
+    });
+    assert(vehicleProjectileId, "Could not spawn projectile toward occupied vehicle");
+
+    let seatedAfter = seatedBefore;
+    for (let frame = 0; frame < 30 && durability(seatedAfter) === seatedDurabilityBefore; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+      seatedAfter = entitySnapshot(game, TARGET_ID);
+    }
+    const seatedDamage = seatedDurabilityBefore - durability(seatedAfter);
+    assert(seatedDamage > 0, "Occupied vehicle chassis made the driver projectile-immune");
+    assert(seatedDamage < 40, `Vehicle chassis failed to reduce occupant damage (${seatedDamage})`);
+    assert(seatedImpact?.targetId === TARGET_ID, `Vehicle projectile resolved to ${seatedImpact?.targetId ?? "no target"} instead of driver`);
+    assert(seatedImpact?.vehicleId === vehicleId, "Vehicle projectile impact did not report vehicle id");
+    assert(Number(seatedImpact?.damageMultiplier) > 0 && Number(seatedImpact?.damageMultiplier) < 1, "Vehicle projectile impact did not apply a protective multiplier");
+    if (typeof offImpact === "function") offImpact();
+    vehicles.exit(TARGET_ID, now, "projectile-test-complete");
+
+    // The original br-jeep-1 uses the base vehicle plugin rather than the fleet
+    // wrapper. It must follow the same occupant-damage path as the added vehicles.
+    const primaryVehicleId = "br-jeep-1";
+    const primaryState = vehicles.stateFor(primaryVehicleId);
+    groundHuman(game, movement, TARGET_ID, { x: primaryState.x + 1.5, y: 0, z: primaryState.z, angle: 0 });
+    now += 500;
+    assert(vehicles.enter(TARGET_ID, now, primaryVehicleId), "Could not seat target in base BR jeep");
+    const primaryBefore = durability(entitySnapshot(game, TARGET_ID));
+    let primaryImpact = null;
+    const offPrimary = game.host.events.on?.("projectile:impact", (payload) => {
+      if (payload?.vehicleId === primaryVehicleId) primaryImpact = payload;
+    });
+    const primaryCar = vehicles.stateFor(primaryVehicleId);
+    projectiles.spawn({
+      shooterId: SHOOTER_ID, weaponId: "base-vehicle-projectile-test", damage: 40,
+      speed: 120, range: 30,
+      origin: { x: primaryCar.x, y: primaryCar.y + 5, z: primaryCar.z },
+      direction: { x: 0, y: -1, z: 0 }, now,
+    });
+    for (let frame = 0; frame < 30 && durability(entitySnapshot(game, TARGET_ID)) === primaryBefore; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+    }
+    const primaryDamage = primaryBefore - durability(entitySnapshot(game, TARGET_ID));
+    assert(primaryDamage > 0 && primaryDamage < 40, `Base BR jeep occupant damage failed (${primaryDamage})`);
+    assert(primaryImpact?.targetId === TARGET_ID, "Base BR jeep projectile did not resolve to driver");
+    if (typeof offPrimary === "function") offPrimary();
+    vehicles.exit(TARGET_ID, now, "base-projectile-test-complete");
+
+    // Friendly occupants must remain protected and the impact telemetry must say so.
+    const shooterTeam = game.host.components.get(SHOOTER_ID, "Team");
+    const targetTeam = game.host.components.get(TARGET_ID, "Team");
+    const originalTargetTeam = targetTeam?.id;
+    if (shooterTeam && targetTeam) targetTeam.id = shooterTeam.id;
+    const friendlyState = vehicles.stateFor(vehicleId);
+    groundHuman(game, movement, TARGET_ID, { x: friendlyState.x + 1.5, y: 0, z: friendlyState.z, angle: 0 });
+    now += 500;
+    assert(vehicles.enter(TARGET_ID, now, vehicleId), "Could not seat friendly projectile target");
+    const friendlyBefore = durability(entitySnapshot(game, TARGET_ID));
+    let friendlyImpact = null;
+    const offFriendly = game.host.events.on?.("projectile:impact", (payload) => {
+      if (payload?.vehicleId === vehicleId && payload?.weaponId === "friendly-vehicle-projectile-test") friendlyImpact = payload;
+    });
+    const friendlyCar = vehicles.stateFor(vehicleId);
+    projectiles.spawn({
+      shooterId: SHOOTER_ID, weaponId: "friendly-vehicle-projectile-test", damage: 40,
+      speed: 120, range: 30,
+      origin: { x: friendlyCar.x, y: friendlyCar.y + 5, z: friendlyCar.z },
+      direction: { x: 0, y: -1, z: 0 }, now,
+    });
+    for (let frame = 0; frame < 30 && !friendlyImpact; frame += 1) {
+      now += 1000 / 60;
+      game.api.step(1 / 60, now);
+    }
+    assert(durability(entitySnapshot(game, TARGET_ID)) === friendlyBefore, "Friendly occupied vehicle leaked projectile damage");
+    assert(friendlyImpact?.friendBlocked === true, "Friendly vehicle impact failed to report friendBlocked");
+    assert(friendlyImpact?.targetId === null, "Friendly vehicle impact incorrectly selected a damage target");
+    if (typeof offFriendly === "function") offFriendly();
+    vehicles.exit(TARGET_ID, now, "friendly-projectile-test-complete");
+    if (targetTeam && originalTargetTeam != null) targetTeam.id = originalTargetTeam;
+
     const stats = projectiles.stats();
     assert(stats.collisionSource === "rapier-collision-events", "Battle Royale projectile collision source is not Rapier");
     assert(stats.hitTotal >= 2, "Battle Royale projectile contacts were not recorded");
@@ -172,6 +291,9 @@ async function main() {
       ragdollImpactBefore: { health: ragdollBefore.health, armor: ragdollBefore.armor },
       ragdollImpactAfter: { health: ragdollAfter.health, armor: ragdollAfter.armor },
       ragdollHitWorked: durability(ragdollAfter) < ragdollDurabilityBefore,
+      vehicleOccupantHitWorked: seatedDamage > 0 && seatedDamage < 40,
+      vehicleOccupantDamage: seatedDamage,
+      vehicleOccupantMultiplier: seatedImpact?.damageMultiplier ?? null,
       hitTotal: stats.hitTotal,
       activeProjectiles: stats.active,
       poolSize: stats.poolSize,

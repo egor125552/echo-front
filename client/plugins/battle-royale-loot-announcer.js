@@ -21,6 +21,7 @@ export async function setup(ctx) {
     if (packet.event !== "loot:picked") return;
     const payload = packet.payload ?? {};
     if (payload.entityId !== network.playerId || payload.loot !== "rifle") return;
+
     if (payload.restocked) {
       announce(`Патроны к автомату: ${Math.max(0, Number(payload.quantity) || 0)}`);
       return;

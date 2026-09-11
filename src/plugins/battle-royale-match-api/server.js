@@ -39,6 +39,7 @@ export async function setup(ctx) {
     ? ctx.services.get("health-regeneration")
     : null;
   let humanSerial = 0;
+  const expiredHumanSessions = new Set();
 
   botFill.ensure();
   const spectatorTargets = new Map();
@@ -106,6 +107,14 @@ export async function setup(ctx) {
       };
     }
 
+    const matchStatus = battleRoyale.status();
+    if (expiredHumanSessions.has(playerId)) {
+      throw new Error(`Reconnect grace expired for this battle-royale session: ${playerId}`);
+    }
+    if (matchStatus.phase === "ended" || (matchStatus.phase === "active" && !matchStatus.deployment?.active)) {
+      throw new Error(`Battle royale already in progress; late join is not available: ${playerId}`);
+    }
+
     botFill.makeRoomForHuman();
     humanSerial += 1;
     const team = 100_000 + humanSerial;
@@ -130,16 +139,27 @@ export async function setup(ctx) {
     const entity = entities.get(playerId);
     if (!entity || entity.kind !== "human" || entity.bot) return false;
     movement.setInput(playerId, {});
+    if (vehicles.isDriving?.(playerId)) {
+      vehicles.setInput(playerId, { forward: 0, strafe: 0, sprint: true, fireHeld: false });
+    }
     armorService?.cancelPlating(playerId, "disconnect");
     return true;
   }
 
-  function disconnectHuman(playerId) {
+  function disconnectHuman(playerId, now = Date.now()) {
+    const entity = entities.get(playerId);
+    if (!entity || entity.kind !== "human" || entity.bot) return false;
+    const eventNow = Number(now) || Date.now();
+    const status = battleRoyale.status(eventNow);
     armorService?.cancelPlating(playerId, "disconnect");
     spectatorTargets.delete(playerId);
+    expiredHumanSessions.add(playerId);
+    if (status.phase === "active" && !status.deployment?.active && entity.alive) {
+      battleRoyale.forfeit?.(playerId, eventNow, "disconnect");
+    }
     entities.remove(playerId);
-    const phase = battleRoyale.status().phase;
-    if (phase === "waiting" || phase === "deploying") botFill.ensure();
+    if (status.phase === "waiting" || status.deployment?.active) botFill.ensure();
+    return true;
   }
 
   function hasInterruptingAction(input) {

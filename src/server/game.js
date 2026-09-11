@@ -45,6 +45,7 @@ function shouldForwardEvent(eventName) {
   const name = String(eventName ?? "");
   return FORWARDED_EVENTS.has(name)
     || name.startsWith("navigation:")
+    || name.startsWith("injury:")
     || name.startsWith("crate:");
 }
 

@@ -75,6 +75,8 @@ export async function setup(ctx) {
       showError("Ошибка игровой озвучки: синтез речи недоступен в этом браузере.", "unsupported");
       return;
     }
+    // Выключение пользователем, загрузка голосов, primed/ready и обычное
+    // воспроизведение не являются ошибками и не должны болтать через VoiceOver.
     if (enabled) clearHealthy();
     else clearHealthy();
   });

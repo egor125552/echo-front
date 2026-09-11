@@ -169,7 +169,7 @@ export class MatchRoom extends DurableObject {
         continue;
       }
       if (!reconnectExpired(disconnectedAt, now)) continue;
-      this.game.api.disconnectHuman(playerId);
+      this.game.api.disconnectHuman(playerId, now);
       this.disconnectedHumans.delete(playerId);
     }
   }

@@ -1,14 +1,23 @@
 import * as input from "../plugins/input.js";
+import * as keyboardCameraTurn from "../plugins/keyboard-camera-turn.js";
 import * as network from "../plugins/network.js";
 import * as parachuteInput from "../plugins/parachute-input.js";
+import * as parkourInput from "../plugins/parkour-input.js";
+import * as gamepadInput from "../plugins/gamepad-input.js";
 import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
+import * as gamepadHaptics from "../plugins/gamepad-haptics.js";
 import * as speechSettings from "../plugins/speech-settings.js";
+import * as socialProfile from "../plugins/social-profile.js";
+import * as accessibleMenus from "../plugins/accessible-menus.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as architecturalOcclusion from "../plugins/architectural-occlusion.js";
+import * as crateInteraction from "../plugins/battle-royale-crate-interaction.js";
+import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
+import * as mapMenuActivation from "../plugins/map-menu-activation.js";
 import * as navigationStatus from "../plugins/battle-royale-navigation-status.js";
 import * as navigationFace from "../plugins/battle-royale-navigation-face.js";
 import * as parachuteAudioPreload from "../plugins/parachute-audio-preload.js";
@@ -25,6 +34,7 @@ import * as ragdollAudio from "../plugins/battle-royale-ragdoll-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
 import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
+import * as injuryFeedback from "../plugins/injury-feedback.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
 import * as lootAnnouncer from "../plugins/battle-royale-loot-announcer.js";
@@ -33,16 +43,25 @@ import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js
 
 export const echoFrontClientPreset = [
   input,
+  keyboardCameraTurn,
   network,
   parachuteInput,
+  parkourInput,
+  gamepadInput,
   iphoneGestures,
   journal,
   smoothing,
+  gamepadHaptics,
   speechSettings,
+  socialProfile,
+  accessibleMenus,
   speechDiagnostics,
   spatialAudio,
   architecturalOcclusion,
+  crateInteraction,
+  audioResilience,
   navigation,
+  mapMenuActivation,
   navigationStatus,
   navigationFace,
   parachuteAudioPreload,
@@ -59,6 +78,7 @@ export const echoFrontClientPreset = [
   parachuteAudio,
   parachuteDynamicsAudio,
   lowHealthAudio,
+  injuryFeedback,
   hud,
   announcer,
   lootAnnouncer,

@@ -67,49 +67,68 @@ export async function setup(ctx) {
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
 
   function ejectFromVehicle(playerId, input, now) {
-    const vehicle = typeof vehicles.vehicleForDriver === "function"
-      ? vehicles.vehicleForDriver(playerId)
-      : vehicles.stateFor();
-    if (!vehicle || vehicle.driverId !== playerId) return false;
+    const isDriver = vehicles.isDriving(playerId);
+    const isPassenger = Boolean(vehicles.isPassenger?.(playerId));
+    const vehicle = isDriver
+      ? (typeof vehicles.vehicleForDriver === "function" ? vehicles.vehicleForDriver(playerId) : vehicles.stateFor())
+      : (isPassenger && typeof vehicles.vehicleForPassenger === "function" ? vehicles.vehicleForPassenger(playerId) : null);
+    if (!vehicle) return false;
+    if (isDriver && vehicle.driverId !== playerId) return false;
+    if (isPassenger && !vehicle.passengerIds?.includes(playerId)) return false;
     const speed = Math.max(0, Number(vehicle.speed) || 0);
     if (speed < Number(ragdoll.constants?.vehicleEjectSpeed ?? 3.5)) return false;
 
     const linvel = vehicle.linvel ?? { x: 0, y: 0, z: 0 };
     const angle = Number(vehicle.angle) || 0;
-    const velocityDelta = ejectionVelocityDelta(speed, angle, input);
-    const launchVelocity = {
-      x: (Number(linvel.x) || 0) + velocityDelta.x,
-      y: (Number(linvel.y) || 0) + velocityDelta.y,
-      z: (Number(linvel.z) || 0) + velocityDelta.z,
-    };
+    const passengerIds = isDriver && vehicle.id && typeof vehicles.passengerIds === "function"
+      ? vehicles.passengerIds(vehicle.id)
+      : [];
+
+    function activateEjected(entityId, ejectionInput, passengerIndex = null) {
+      const velocityDelta = ejectionVelocityDelta(speed, angle, ejectionInput);
+      const spread = passengerIndex == null ? 1 : 1 + Math.floor(passengerIndex / 2) * 0.15;
+      const launchVelocity = {
+        x: (Number(linvel.x) || 0) + velocityDelta.x * spread,
+        y: (Number(linvel.y) || 0) + velocityDelta.y,
+        z: (Number(linvel.z) || 0) + velocityDelta.z * spread,
+      };
+      const transform = ctx.components.get(entityId, "Transform");
+      const activated = ragdoll.activate(entityId, {
+        reason: "vehicle-eject",
+        position: transform ? { x: transform.x, y: transform.y + 0.12, z: transform.z } : undefined,
+        angle,
+        velocity: launchVelocity,
+      }, now);
+      if (!activated) return false;
+      ctx.events.emit("ragdoll:vehicle-eject", {
+        entityId,
+        vehicleId: vehicle.id ?? null,
+        vehicleKind: vehicle.kind ?? null,
+        passenger: passengerIndex != null || (isPassenger && entityId === playerId),
+        passengerIndex,
+        speed,
+        speedKph: speed * 3.6,
+        inheritedVelocity: {
+          x: Number(linvel.x) || 0,
+          y: Number(linvel.y) || 0,
+          z: Number(linvel.z) || 0,
+        },
+        launchVelocity,
+        upwardDelta: velocityDelta.y,
+        outwardDelta: Math.hypot(velocityDelta.x, velocityDelta.z) * spread,
+        now,
+      });
+      return true;
+    }
 
     if (!vehicles.exit(playerId, now, "jump-out")) return false;
-    const transform = ctx.components.get(playerId, "Transform");
-    const activated = ragdoll.activate(playerId, {
-      reason: "vehicle-eject",
-      position: transform ? { x: transform.x, y: transform.y + 0.12, z: transform.z } : undefined,
-      angle,
-      velocity: launchVelocity,
-    }, now);
-    if (!activated) return false;
-
-    ctx.events.emit("ragdoll:vehicle-eject", {
-      entityId: playerId,
-      vehicleId: vehicle.id ?? null,
-      vehicleKind: vehicle.kind ?? null,
-      speed,
-      speedKph: speed * 3.6,
-      inheritedVelocity: {
-        x: Number(linvel.x) || 0,
-        y: Number(linvel.y) || 0,
-        z: Number(linvel.z) || 0,
-      },
-      launchVelocity,
-      upwardDelta: velocityDelta.y,
-      outwardDelta: Math.hypot(velocityDelta.x, velocityDelta.z),
-      now,
-    });
-    return true;
+    const activated = activateEjected(playerId, input);
+    for (let index = 0; index < passengerIds.length; index += 1) {
+      const passengerId = passengerIds[index];
+      if (ragdoll.isActive(passengerId)) continue;
+      activateEjected(passengerId, { strafe: index % 2 === 0 ? -1 : 1 }, index);
+    }
+    return activated;
   }
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
@@ -120,7 +139,7 @@ export async function setup(ctx) {
       return;
     }
 
-    if (battleRoyale.isActive() && vehicles.isDriving(playerId) && input.interactPressed) {
+    if (battleRoyale.isActive() && (vehicles.isDriving(playerId) || vehicles.isPassenger?.(playerId)) && input.interactPressed) {
       if (ejectFromVehicle(playerId, input, now)) return;
     }
 

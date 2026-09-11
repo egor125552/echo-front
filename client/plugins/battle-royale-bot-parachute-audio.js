@@ -116,7 +116,7 @@ export async function setup(ctx) {
           rolloffFactor: 0.62,
         });
       }
-      phases.set(bot.id, phase);
+      phases.set(bot.id, airborne ? phase : phase);
     }
 
     for (const entityId of [...phases.keys()]) {

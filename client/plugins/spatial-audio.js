@@ -359,6 +359,22 @@ export async function setup(ctx) {
         airFilter.frequency.linearRampToValueAtTime(distanceAirCutoff(next.distance, radius, airAbsorptionMinHz), at);
         distanceGain.gain.linearRampToValueAtTime(gain * nextAttenuation, at);
       },
+      updateOcclusion(nextAmount) {
+        const normalized = clamp01(nextAmount);
+        const at = audioContext.currentTime + 0.08;
+        occlusionGain.gain.linearRampToValueAtTime(1 - normalized * 0.22, at);
+        occlusionFilter.frequency.linearRampToValueAtTime(occlusionCutoff(normalized), at);
+      },
+      fadeOut(durationSeconds = 0.28) {
+        const duration = Math.max(0.04, Number(durationSeconds) || 0.28);
+        const now = audioContext.currentTime;
+        const end = now + duration;
+        distanceGain.gain.cancelScheduledValues(now);
+        distanceGain.gain.setValueAtTime(distanceGain.gain.value, now);
+        distanceGain.gain.linearRampToValueAtTime(0, end);
+        try { source.stop(end + 0.02); } catch {}
+      },
+      stop() { try { source.stop(); } catch {} },
     };
   }
 

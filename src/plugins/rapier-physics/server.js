@@ -340,7 +340,7 @@ async function createRapierPhysics() {
       RAPIER.ColliderDesc.capsule(CHARACTER_HALF_HEIGHT, CHARACTER_RADIUS)
         .setTranslation(x, y + CHARACTER_BASE_OFFSET, z),
     );
-    const entry = { collider };
+    const entry = { collider, baseOffset: CHARACTER_BASE_OFFSET, downed: false };
     characters.set(entityId, entry);
     colliderToEntity.set(collider.handle, entityId);
     syncQueries();
@@ -372,14 +372,38 @@ async function createRapierPhysics() {
     const entry = characters.get(entityId);
     if (!entry) return null;
     const p = entry.collider.translation();
-    return { x: p.x, y: p.y - CHARACTER_BASE_OFFSET, z: p.z };
+    return { x: p.x, y: p.y - entry.baseOffset, z: p.z };
   }
 
   function teleport(entityId, { x, y = 0, z }) {
     const entry = characters.get(entityId);
     if (!entry) return;
-    entry.collider.setTranslation({ x, y: y + CHARACTER_BASE_OFFSET, z });
+    entry.collider.setTranslation({ x, y: y + entry.baseOffset, z });
     syncQueries();
+  }
+
+  function setCharacterDowned(entityId, downed) {
+    const entry = characters.get(entityId);
+    if (!entry) return false;
+    if (entry.downed === Boolean(downed)) return true;
+    const feet = position(entityId);
+    const halfHeight = downed ? 0.05 : CHARACTER_HALF_HEIGHT;
+    const baseOffset = halfHeight + CHARACTER_RADIUS + CHARACTER_CONTROLLER_OFFSET;
+    const center = { ...feet, y: feet.y + baseOffset + (downed ? 0 : 0.06) };
+    const shape = new RAPIER.Capsule(halfHeight, CHARACTER_RADIUS);
+    if (!downed) {
+      let blocked = false;
+      world.intersectionsWithShape(center, { x: 0, y: 0, z: 0, w: 1 }, shape,
+        () => { blocked = true; return false; },
+        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, entry.collider);
+      if (blocked) return false;
+    }
+    entry.collider.setShape(shape);
+    entry.collider.setTranslation(center);
+    entry.baseOffset = baseOffset;
+    entry.downed = Boolean(downed);
+    syncQueries();
+    return true;
   }
 
   function createDynamicCuboid(bodyId, spec = {}) {
@@ -554,14 +578,14 @@ async function createRapierPhysics() {
     };
   }
 
-  function supportSurfaceBelow(position) {
+  function supportSurfaceBelow(position, baseOffset = CHARACTER_BASE_OFFSET) {
     const ray = new RAPIER.Ray(
       { x: position.x, y: position.y, z: position.z },
      { x: 0, y: -1, z: 0 },
     );
     const hit = world.castRay(
       ray,
-      CHARACTER_BASE_OFFSET + CHARACTER_SUPPORT_SNAP_DISTANCE + CHARACTER_SUPPORT_PENETRATION_LIMIT,
+      baseOffset + CHARACTER_SUPPORT_SNAP_DISTANCE + CHARACTER_SUPPORT_PENETRATION_LIMIT,
       true,
       undefined,
       undefined,
@@ -581,11 +605,11 @@ async function createRapierPhysics() {
     };
   }
 
-  function stabilizeCharacterOnSupport(position, dy) {
+  function stabilizeCharacterOnSupport(position, dy, baseOffset) {
     if (dy > 0) return { position, grounded: false };
-    const support = supportSurfaceBelow(position);
+    const support = supportSurfaceBelow(position, baseOffset);
     if (!support) return { position, grounded: false };
-    const desiredCenterY = support.y + CHARACTER_BASE_OFFSET;
+    const desiredCenterY = support.y + baseOffset;
     const gap = position.y - desiredCenterY;
     if (gap > CHARACTER_SUPPORT_SNAP_DISTANCE || gap < -CHARACTER_SUPPORT_PENETRATION_LIMIT) {
       return { position, grounded: false };
@@ -613,7 +637,7 @@ async function createRapierPhysics() {
     }
     const p = entry.collider.translation();
     let next = { x: p.x + corrected.x, y: p.y + corrected.y, z: p.z + corrected.z };
-    const stabilized = stabilizeCharacterOnSupport(next, dy);
+    const stabilized = stabilizeCharacterOnSupport(next, dy, entry.baseOffset);
     next = stabilized.position;
     grounded = grounded || stabilized.grounded;
     const applied = { x: next.x - p.x, y: next.y - p.y, z: next.z - p.z };
@@ -751,6 +775,8 @@ async function createRapierPhysics() {
     setWallEnabled,
     removeWall,
     createCharacter,
+    setCharacterDowned,
+    characterAimHeight(entityId) { return characters.get(entityId)?.downed ? 0.32 : 1; },
     removeCharacter,
     setCharacterEnabled,
     isCharacterCollider,
@@ -773,6 +799,13 @@ async function createRapierPhysics() {
     setDynamicBodyLinearVelocity,
     removeDynamicBody,
     step,
+    colliderInfo(colliderOrHandle) {
+      const handle = Number.isFinite(Number(colliderOrHandle))
+        ? Number(colliderOrHandle)
+        : Number(colliderOrHandle?.handle);
+      if (!Number.isFinite(handle)) return null;
+      return colliderInfo(handle);
+    },
     contactForceCursor() {
       return contactForceEventCount;
     },

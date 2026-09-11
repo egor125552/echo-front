@@ -12,6 +12,9 @@ export const manifest = {
 };
 
 const VEHICLE_PEDESTRIAN_HIT_SPEED = 3.0;
+const FORCE_BACKED_MIN_SPEED = 1.8;
+const FORCE_BACKED_MIN_NEWTONS = 80_000;
+const FORCE_REFERENCE_NEWTONS = 1_000_000;
 const SAME_VEHICLE_HIT_COOLDOWN_MS = 1200;
 
 function pairHasActualContact(world, colliderA, colliderB) {
@@ -68,7 +71,7 @@ export async function setup(ctx) {
     return originalRemoveCharacter(entityId);
   };
 
-  function detectFleetPedestrianHits(now, beforeFleet = []) {
+  function detectFleetPedestrianHits(now, beforeFleet = [], contactForceCursor = 0) {
     const beforeById = new Map(beforeFleet.map((vehicle) => [vehicle.id, vehicle]));
     const afterFleet = typeof vehicles.snapshot === "function" ? vehicles.snapshot() : [];
 
@@ -77,14 +80,17 @@ export async function setup(ctx) {
       const before = beforeById.get(vehicle.id);
       const impactDriverId = vehicle.driverId ?? before?.driverId ?? null;
       const impactSpeed = Math.max(speedOf(before), speedOf(vehicle));
-      if (impactSpeed < VEHICLE_PEDESTRIAN_HIT_SPEED) continue;
 
       const body = physics.dynamicBody(vehicle.id);
-      const chassisCollider = body?.collider?.(0);
-      if (!chassisCollider) continue;
+      if (!body) continue;
 
       const hitIds = new Set();
-      world.contactPairsWith(chassisCollider, (other) => {
+      // The outer presence shell also has real contacts. A pedestrian can
+      // hit the side of that shell without ever touching the smaller chassis.
+      for (let index = 0; index < body.numColliders(); index++) {
+        const chassisCollider = body.collider(index);
+        if (!chassisCollider || chassisCollider.isSensor()) continue;
+        world.contactPairsWith(chassisCollider, (other) => {
         contactCandidates += 1;
         const entityId = characterColliderOwners.get(other.handle);
         if (!entityId
@@ -102,9 +108,17 @@ export async function setup(ctx) {
           return;
         }
         hitIds.add(entityId);
-      });
+        });
+      }
 
       if (!hitIds.size) continue;
+      const stepForces = typeof physics.contactForces === "function"
+        ? physics.contactForces(128, { bodyId: vehicle.id, impactsOnly: true })
+          .filter((record) => Number(record.sequence) > Number(contactForceCursor || 0))
+        : [];
+      const forceFor = (entityId) => stepForces
+        .filter((record) => record.collider1?.entityId === entityId || record.collider2?.entityId === entityId)
+        .reduce((best, record) => Math.max(best, Number(record.totalForceMagnitude) || 0), 0);
       const beforeVelocity = before?.linvel ?? null;
       const afterVelocity = vehicle.linvel ?? body.linvel?.() ?? { x: 0, y: 0, z: 0 };
       const linvel = velocityMagnitude(beforeVelocity) >= velocityMagnitude(afterVelocity)
@@ -112,11 +126,16 @@ export async function setup(ctx) {
         : afterVelocity;
       const horizontal = Math.hypot(Number(linvel?.x) || 0, Number(linvel?.z) || 0) || 1;
 
-      const carry = Math.min(0.9, 0.5 + impactSpeed * 0.018);
-      const knock = Math.min(5.2, 0.8 + impactSpeed * 0.14);
-      const lift = Math.min(2.8, 0.65 + impactSpeed * 0.07);
-
       for (const entityId of hitIds) {
+        const contactForce = forceFor(entityId);
+        const forceBacked = impactSpeed >= FORCE_BACKED_MIN_SPEED && contactForce >= FORCE_BACKED_MIN_NEWTONS;
+        if (!forceBacked && impactSpeed < VEHICLE_PEDESTRIAN_HIT_SPEED) continue;
+        const forceScale = forceBacked
+          ? Math.min(2.2, Math.max(0.45, Math.sqrt(contactForce / FORCE_REFERENCE_NEWTONS)))
+          : 1;
+        const carry = Math.min(0.94, 0.46 + impactSpeed * 0.019 + (forceScale - 1) * 0.08);
+        const knock = Math.min(6.2, (0.7 + impactSpeed * 0.13) * forceScale);
+        const lift = Math.min(3.2, (0.55 + impactSpeed * 0.055) * Math.sqrt(forceScale));
         const entityBefore = entities.get(entityId);
         const wasBot = Boolean(bots.isBot(entityId));
         const activated = ragdoll.activate(entityId, {
@@ -150,6 +169,11 @@ export async function setup(ctx) {
           previousDriverId: before?.driverId ?? null,
           impactSpeed,
           impactSpeedKph: impactSpeed * 3.6,
+          contactForce,
+          forceBacked,
+          forceScale,
+          knock,
+          lift,
           activated: Boolean(activated),
           now,
         };
@@ -168,6 +192,9 @@ export async function setup(ctx) {
           driverId: impactDriverId,
           speed: impactSpeed,
           speedKph: impactSpeed * 3.6,
+          contactForce,
+          forceBacked,
+          forceScale,
           now,
         });
       }
@@ -177,8 +204,9 @@ export async function setup(ctx) {
   const originalTickPhysics = vehicles.tickPhysics.bind(vehicles);
   vehicles.tickPhysics = (dt, now = Date.now()) => {
     const beforeFleet = typeof vehicles.snapshot === "function" ? vehicles.snapshot() : [];
+    const contactForceCursor = typeof physics.contactForceCursor === "function" ? physics.contactForceCursor() : 0;
     const result = originalTickPhysics(dt, now);
-    detectFleetPedestrianHits(now, beforeFleet);
+    detectFleetPedestrianHits(now, beforeFleet, contactForceCursor);
     return result;
   };
 
@@ -195,6 +223,9 @@ export async function setup(ctx) {
         hitCooldownMs: SAME_VEHICLE_HIT_COOLDOWN_MS,
         minimumHitSpeed: VEHICLE_PEDESTRIAN_HIT_SPEED,
         minimumHitSpeedKph: VEHICLE_PEDESTRIAN_HIT_SPEED * 3.6,
+        forceBackedMinSpeed: FORCE_BACKED_MIN_SPEED,
+        forceBackedMinSpeedKph: FORCE_BACKED_MIN_SPEED * 3.6,
+        forceBackedMinNewtons: FORCE_BACKED_MIN_NEWTONS,
         peakDetectedImpactSpeed,
         peakDetectedImpactSpeedKph: peakDetectedImpactSpeed * 3.6,
         lastHit,

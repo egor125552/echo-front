@@ -335,6 +335,65 @@ export async function setup(ctx) {
     return state;
   }
 
+  function navigationBuildingBounds() {
+    const entries = [];
+    if (map.building?.minX != null) {
+      entries.push({ id: String(map.building.id ?? "warehouse"), bounds: map.building });
+    }
+    for (const building of map.navigationBuildings ?? []) {
+      if (building?.bounds) entries.push({ id: String(building.id ?? ""), bounds: building.bounds });
+    }
+    return entries;
+  }
+
+  function segmentRectEntry(from, to, bounds, clearance = 0) {
+    const minX = finite(bounds?.minX) - clearance;
+    const maxX = finite(bounds?.maxX) + clearance;
+    const minZ = finite(bounds?.minZ) - clearance;
+    const maxZ = finite(bounds?.maxZ) + clearance;
+    const startInside = from.x >= minX && from.x <= maxX && from.z >= minZ && from.z <= maxZ;
+    if (startInside) return null;
+    let tMin = 0, tMax = 1;
+    for (const [start, delta, minimum, maximum] of [
+      [from.x, to.x - from.x, minX, maxX],
+      [from.z, to.z - from.z, minZ, maxZ],
+    ]) {
+      if (Math.abs(delta) < 1e-9) {
+        if (start < minimum || start > maximum) return null;
+        continue;
+      }
+      let a = (minimum - start) / delta;
+      let b = (maximum - start) / delta;
+      if (a > b) [a, b] = [b, a];
+      tMin = Math.max(tMin, a);
+      tMax = Math.min(tMax, b);
+      if (tMin > tMax) return null;
+    }
+    // A detour corner intentionally sits on the expanded boundary. Touching
+    // the obstacle only at the segment endpoint is safe; entering it earlier is not.
+    return tMin >= 0 && tMin < 0.999 ? tMin : null;
+  }
+
+  function firstVehicleBuildingClearanceHit(from, to) {
+    const fullDistance = Math.hypot(to.x - from.x, to.z - from.z);
+    if (fullDistance < 0.8) return null;
+    let best = null;
+    for (const building of navigationBuildingBounds()) {
+      const t = segmentRectEntry(from, to, building.bounds, NAVIGATION_VEHICLE_DETOUR_CLEARANCE);
+      if (t == null) continue;
+      const distance = fullDistance * t;
+      if (!best || distance < best.distance) {
+        best = {
+          distance,
+          travelled: distance,
+          worldObject: { kind: "building-wall", buildingId: building.id },
+          syntheticVehicleClearance: true,
+        };
+      }
+    }
+    return best;
+  }
+
   function routeObstacleCanBeSkipped(hit, target) {
     const object = hit?.worldObject ?? null;
     const kind = String(object?.kind ?? "");
@@ -349,13 +408,16 @@ export async function setup(ctx) {
     return false;
   }
 
-  function firstBlockingHit(from, to, target = null) {
+  function firstBlockingHit(from, to, target = null, options = {}) {
     const start = point(from);
     const end = point(to);
     const dx = end.x - start.x;
     const dz = end.z - start.z;
     const fullDistance = Math.hypot(dx, dz);
     if (fullDistance < 0.8) return null;
+    const clearanceHit = options.mode === "vehicle"
+      ? firstVehicleBuildingClearanceHit(start, end)
+      : null;
 
     const ux = dx / fullDistance;
     const uz = dz / fullDistance;
@@ -368,30 +430,33 @@ export async function setup(ctx) {
 
     for (let attempt = 0; attempt < MAX_RAY_SKIP_HITS; attempt += 1) {
       const remaining = fullDistance - travelled - 0.55;
-      if (remaining <= 0.2) return null;
+      if (remaining <= 0.2) return clearanceHit;
       const hit = physics.raycastWorld(
         origin,
         { x: ux, y: 0, z: uz },
         remaining,
       );
-      if (!hit) return null;
+      if (!hit) return clearanceHit;
+      const absoluteHitDistance = travelled + finite(hit.distance);
+      if (clearanceHit && clearanceHit.distance <= absoluteHitDistance) return clearanceHit;
       if (!routeObstacleCanBeSkipped(hit, target)) {
-        return { ...hit, travelled: travelled + finite(hit.distance) };
+        return { ...hit, travelled: absoluteHitDistance };
       }
       const advance = Math.max(0.7, finite(hit.distance) + 0.75);
       travelled += advance;
-      if (travelled >= fullDistance - 0.55) return null;
+      if (clearanceHit && clearanceHit.distance <= travelled) return clearanceHit;
+      if (travelled >= fullDistance - 0.55) return clearanceHit;
       origin = {
         x: start.x + ux * travelled,
         y: origin.y,
         z: start.z + uz * travelled,
       };
     }
-    return null;
+    return clearanceHit;
   }
 
-  function segmentClear(from, to, target = null) {
-    return firstBlockingHit(from, to, target) === null;
+  function segmentClear(from, to, target = null, options = {}) {
+    return firstBlockingHit(from, to, target, options) === null;
   }
 
   function expandedCorners(rect, y = 0, clearance = NAVIGATION_DETOUR_CLEARANCE) {
@@ -468,7 +533,7 @@ export async function setup(ctx) {
       const key = `${Math.round(p.x * 10)}:${Math.round(p.y * 10)}:${Math.round(p.z * 10)}`;
       if (used.has(key)) continue;
       const candidateTarget = p.doorId ? { ...target, allowDoorId: p.doorId } : target;
-      if (!segmentClear(from, p, candidateTarget)) continue;
+      if (!segmentClear(from, p, candidateTarget, options)) continue;
       const projectedDistance = distance3(from, p) + distance3(p, target.position);
       const genericLimit = directDistance + Math.max(
         options.mode === "vehicle" ? 100 : 60,
@@ -495,7 +560,7 @@ export async function setup(ctx) {
     let rapierBlockedSegments = 0;
 
     for (let depth = 0; depth < MAX_ROUTE_ANCHORS; depth += 1) {
-      const hit = firstBlockingHit(cursor, target.position, target);
+      const hit = firstBlockingHit(cursor, target.position, target, options);
       if (!hit) {
         anchors.push(copyWaypoint(target.position));
         break;

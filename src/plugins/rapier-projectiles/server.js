@@ -7,6 +7,7 @@ export const manifest = {
   id: "rapier-projectiles",
   version: "1.2.0",
   requires: ["rapier-physics", "entities", "teams", "combat"],
+  optional: ["battle-royale-vehicle", "battle-royale-vehicle-fleet"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
 
@@ -275,21 +276,44 @@ export async function setup(ctx) {
     }
   }
 
+  function vehicleOccupantForCollider(slot, otherHandle) {
+    const shooterId = slot?.shooterId ?? null;
+    const info = physics.colliderInfo?.(otherHandle);
+    const object = info?.worldObject ?? null;
+    if (!object || !["vehicle-chassis", "vehicle-ballast", "vehicle-presence"].includes(object.kind)) return null;
+    const vehicleId = object.vehicleId ?? object.bodyId ?? null;
+    if (!vehicleId || !ctx.services.has("vehicles")) return null;
+    const vehicles = ctx.services.get("vehicles");
+    const state = vehicles.stateFor?.(vehicleId) ?? null;
+    const occupants = [state?.driverId ?? vehicles.driverId?.(vehicleId) ?? null, ...(state?.passengerIds ?? vehicles.passengerIds?.(vehicleId) ?? [])]
+      .filter(Boolean);
+    if (!occupants.length) return { vehicleId, targetId: null, multiplier: 0, kind: state?.kind ?? object.vehicleKind ?? null };
+    const hostile = occupants.filter(id => id !== shooterId && teams.teamOf(id) !== teams.teamOf(shooterId));
+    if (!hostile.length) return { vehicleId, targetId: null, multiplier: 0, kind: state?.kind ?? object.vehicleKind ?? null, friendlyBlocked: true };
+    const seed = Math.abs(String(slot?.projectileId ?? "").split("").reduce((n, ch) => ((n * 33) ^ ch.charCodeAt(0)) | 0, 5381));
+    const targetId = hostile[seed % hostile.length];
+    const kind = state?.kind ?? object.vehicleKind ?? null;
+    return { vehicleId, targetId, multiplier: kind === "supercar" ? 0.5 : 0.35, kind };
+  }
+
   function resolveContact(slot, otherHandle, now) {
     if (!slot?.active) return;
     if (slotsByCollider.has(otherHandle)) return;
     const other = typeof world.getCollider === "function" ? world.getCollider(otherHandle) : null;
     let targetId = physics.entityIdForCollider?.(other ?? otherHandle) ?? null;
     if (!targetId && other) targetId = fallbackRagdollOwner(other);
+    const vehicleHit = !targetId ? vehicleOccupantForCollider(slot, otherHandle) : null;
+    if (vehicleHit?.targetId) targetId = vehicleHit.targetId;
     const target = targetId ? entities.get(targetId) : null;
     const sameTeam = targetId
       ? teams.teamOf(slot.shooterId) === teams.teamOf(targetId)
-      : false;
+      : Boolean(vehicleHit?.friendlyBlocked);
     let damaged = false;
     let damageResult = null;
+    const damageAmount = slot.damage * (vehicleHit?.targetId ? vehicleHit.multiplier : 1);
 
     if (target?.alive && targetId !== slot.shooterId && !sameTeam) {
-      damageResult = combat.damage(targetId, slot.damage, {
+      damageResult = combat.damage(targetId, damageAmount, {
         attackerId: slot.shooterId,
         weaponId: slot.weaponId,
         projectileId: slot.projectileId,
@@ -308,9 +332,12 @@ export async function setup(ctx) {
       projectileId: slot.projectileId,
       shooterId: slot.shooterId,
       targetId,
+      vehicleId: vehicleHit?.vehicleId ?? null,
+      vehicleKind: vehicleHit?.kind ?? null,
+      damageMultiplier: vehicleHit?.targetId ? vehicleHit.multiplier : 1,
       weaponId: slot.weaponId,
       damaged,
-      friendBlocked: Boolean(targetId && sameTeam),
+      friendBlocked: Boolean(sameTeam),
       x: finite(position?.x),
       y: finite(position?.y),
       z: finite(position?.z),

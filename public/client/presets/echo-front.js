@@ -34,6 +34,7 @@ import * as ragdollAudio from "../plugins/battle-royale-ragdoll-audio.js";
 import * as parachuteAudio from "../plugins/parachute-audio.js";
 import * as parachuteDynamicsAudio from "../plugins/parachute-dynamics-audio.js";
 import * as lowHealthAudio from "../plugins/low-health-audio.js";
+import * as injuryFeedback from "../plugins/injury-feedback.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
 import * as lootAnnouncer from "../plugins/battle-royale-loot-announcer.js";
@@ -77,6 +78,7 @@ export const echoFrontClientPreset = [
   parachuteAudio,
   parachuteDynamicsAudio,
   lowHealthAudio,
+  injuryFeedback,
   hud,
   announcer,
   lootAnnouncer,

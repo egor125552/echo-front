@@ -347,6 +347,10 @@ export async function setup(ctx) {
   ctx.events.on("vehicle:impact", (payload = {}) => {
     const entityId = payload.driverId;
     if (!entityId) return;
+    // Character contact is handled by fleet-pedestrian-ragdoll for the victim.
+    // Do not also classify the same body hit as a wall-like crash for the driver;
+    // a simultaneous wall/vehicle contact still arrives as its own impact event.
+    if (payload.otherEntityId && entities.get(payload.otherEntityId)) return;
     const speedBefore = Math.max(0, Number(payload.speedBefore) || 0);
     const deltaSpeed = Math.max(0, Number(payload.deltaSpeed) || 0);
     const crashSeverity = Math.max(0, Number(payload.crashSeverity) || 0);
@@ -426,7 +430,7 @@ export async function setup(ctx) {
     for (const impact of pendingVehicleImpacts.values()) {
       const entity = entities.get(impact.entityId);
       const vehicle = vehicles.stateFor(impact.vehicleId ?? undefined);
-      if (!entity?.alive || entity.bot || !vehicle || vehicle.driverId !== impact.entityId || ragdoll.isActive(impact.entityId)) continue;
+      if (!entity?.alive || !vehicle || vehicle.driverId !== impact.entityId || ragdoll.isActive(impact.entityId)) continue;
 
       const severity = Math.max(0, Number(impact.crashSeverity) || impact.deltaSpeed);
       crashTraumas += 1;

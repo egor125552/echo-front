@@ -232,7 +232,9 @@ export async function setup(ctx) {
   };
 
   vehicles.interact = (playerId, now = Date.now()) => {
-    if (vehicles.isDriving?.(playerId)) return originalVehicleInteract(playerId, now);
+    if (vehicles.isDriving?.(playerId) || vehicles.isPassenger?.(playerId)) {
+      return originalVehicleInteract(playerId, now);
+    }
     return vehicles.enter(playerId, now);
   };
 

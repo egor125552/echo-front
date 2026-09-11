@@ -3,8 +3,10 @@ export const manifest = {
   requires: ["spatial-audio-web", "cloudflare-session"],
 };
 
-const ENGINE_CHANNEL = "br-vehicle-engine";
-const BRAKE_CHANNEL = "br-vehicle-brake";
+const ENGINE_CHANNEL_PREFIX = "br-vehicle-engine";
+const BRAKE_CHANNEL_PREFIX = "br-vehicle-brake";
+const MAX_SIMULTANEOUS_ENGINES = 8;
+const ENGINE_FADE_OUT_SECONDS = 0.32;
 const TRUCK_ENGINE_RADIUS = 170;
 const SPORT_ENGINE_RADIUS = 220;
 const BRAKE_RADIUS = 105;
@@ -13,10 +15,12 @@ const CABIN_TRUCK_CUTOFF_HZ = 3600;
 const CABIN_SPORT_CUTOFF_HZ = 4600;
 const CABIN_OPEN_CUTOFF_HZ = 18000;
 const TRUCK_ENGINE_URL = "/audio/vehicles/ts3/ts3_truck_engine.mp3";
-const SPORT_ENGINE_URL = "/audio/vehicles/ts3/ts3_sport_engine.mp3";
+const SPORT_ENGINE_URL = "/audio/vehicles/ts3/engine.mp3";
 const BRAKE_URL = "/audio/vehicles/ts3/brake_builtin6.mp3";
 const TRUCK_LOOP_START_SECONDS = 0.249818594;
 const TRUCK_LOOP_END_SECONDS = 1.827619048;
+const SPORT_LOOP_START_SECONDS = 0.210612245;
+const SPORT_LOOP_END_SECONDS = 0.950249433;
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -47,10 +51,7 @@ export async function setup(ctx) {
     audio.load(BRAKE_URL),
   ]);
   const crashBuffer = createCrashBuffer(audio.context);
-  let engine = null;
-  let currentVehicleId = null;
-  let currentProfile = null;
-  let brakingActive = false;
+  const engines = new Map();
 
   function profileFor(vehicle) {
     return vehicle?.audioProfile === "sport" || vehicle?.kind === "supercar" ? "sport" : "truck";
@@ -64,12 +65,26 @@ export async function setup(ctx) {
     return profileFor(vehicle) === "sport" ? sportEngineBuffer : truckEngineBuffer;
   }
 
-  function stopEngine() {
-    audio.stopChannel(ENGINE_CHANNEL);
-    engine = null;
-    currentVehicleId = null;
-    currentProfile = null;
-    brakingActive = false;
+  function engineChannelFor(vehicleId) {
+    return `${ENGINE_CHANNEL_PREFIX}:${vehicleId}`;
+  }
+
+  function brakeChannelFor(vehicleId) {
+    return `${BRAKE_CHANNEL_PREFIX}:${vehicleId}`;
+  }
+
+  function stopEngine(vehicleId, { immediate = false } = {}) {
+    const state = engines.get(vehicleId);
+    if (!state) return;
+    engines.delete(vehicleId);
+    audio.stopChannel(brakeChannelFor(vehicleId));
+    if (!immediate && state.handle?.fadeOut) state.handle.fadeOut(ENGINE_FADE_OUT_SECONDS);
+    else if (state.handle?.stop) state.handle.stop();
+    else audio.stopChannel(engineChannelFor(vehicleId));
+  }
+
+  function stopAllEngines({ immediate = false } = {}) {
+    for (const vehicleId of [...engines.keys()]) stopEngine(vehicleId, { immediate });
   }
 
   function observedPlayerId(snapshot) {
@@ -102,7 +117,7 @@ export async function setup(ctx) {
     );
   }
 
-  function nearestAudibleVehicle(snapshot, listener) {
+  function audibleVehicles(snapshot, listener) {
     return (Array.isArray(snapshot?.vehicles) ? snapshot.vehicles : [])
       .map((vehicle) => ({
         vehicle,
@@ -110,7 +125,9 @@ export async function setup(ctx) {
         radius: radiusFor(vehicle),
       }))
       .filter((entry) => entry.distance <= entry.radius + 10)
-      .sort((a, b) => a.distance - b.distance)[0]?.vehicle ?? null;
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, MAX_SIMULTANEOUS_ENGINES)
+      .map((entry) => entry.vehicle);
   }
 
   function isBraking(vehicle) {
@@ -132,62 +149,83 @@ export async function setup(ctx) {
       referenceDistance: 2.5,
       rolloffFactor: 0.36,
       airAbsorptionMinHz: 4300,
+      occlusion: clamp(vehicle?.occlusion, 0, 1),
       loop: false,
-      channel: BRAKE_CHANNEL,
+      channel: brakeChannelFor(vehicle.id),
       replace: true,
     });
+  }
+
+  function startEngine(vehicle) {
+    const profile = profileFor(vehicle);
+    const occlusion = clamp(vehicle?.occlusion, 0, 1);
+    void audio.resume();
+    const handle = audio.playSpatialBuffer(bufferFor(vehicle), vehicle, {
+      radius: radiusFor(vehicle),
+      gain: profile === "sport" ? 0.66 : 0.58,
+      referenceDistance: profile === "sport" ? 3.2 : 2.8,
+      rolloffFactor: profile === "sport" ? 0.25 : 0.28,
+      airAbsorptionMinHz: profile === "sport" ? 5200 : 4300,
+      occlusion,
+      loop: true,
+      channel: engineChannelFor(vehicle.id),
+      replace: true,
+    });
+    if (!handle) return null;
+    if (handle.source) {
+      if (profile === "truck" && truckEngineBuffer.duration > TRUCK_LOOP_END_SECONDS) {
+        handle.source.loopStart = TRUCK_LOOP_START_SECONDS;
+        handle.source.loopEnd = TRUCK_LOOP_END_SECONDS;
+      } else if (profile === "sport" && sportEngineBuffer.duration > SPORT_LOOP_END_SECONDS) {
+        handle.source.loopStart = SPORT_LOOP_START_SECONDS;
+        handle.source.loopEnd = SPORT_LOOP_END_SECONDS;
+      }
+    }
+    const state = { handle, profile, braking: false };
+    engines.set(vehicle.id, state);
+    return state;
+  }
+
+  function updateVehicleEngine(vehicle) {
+    const profile = profileFor(vehicle);
+    let state = engines.get(vehicle.id);
+    if (state && state.profile !== profile) {
+      stopEngine(vehicle.id);
+      state = null;
+    }
+    if (!state) state = startEngine(vehicle);
+    if (!state?.handle) return;
+
+    state.handle.update?.(vehicle);
+    state.handle.updateOcclusion?.(clamp(vehicle?.occlusion, 0, 1));
+    const speedKph = Math.max(0, Number(vehicle.speedKph) || 0);
+    const throttle = Math.abs(Number(vehicle.input?.throttle) || 0);
+    const airborne = Math.max(0, 4 - (Number(vehicle.groundedWheels) || 0));
+    const rate = profile === "sport"
+      ? clamp(0.9 + speedKph / 145 + throttle * 0.5 + airborne * 0.02, 0.86, 2.5)
+      : clamp(0.78 + speedKph / 92 + throttle * 0.3 + airborne * 0.025, 0.76, 2.2);
+    state.handle.source?.playbackRate?.setTargetAtTime(rate, audio.context.currentTime, 0.09);
+
+    const braking = isBraking(vehicle);
+    if (braking && !state.braking) playBrake(vehicle);
+    state.braking = braking;
   }
 
   function updateEngine(snapshot) {
     if (snapshot?.mode !== "battle-royale") {
       audio.setCabinMuffleCutoff?.(CABIN_OPEN_CUTOFF_HZ);
-      stopEngine();
+      stopAllEngines();
       return;
     }
     updateCabinMuffle(snapshot);
     const listener = playerFor(snapshot);
-    const vehicle = listener ? nearestAudibleVehicle(snapshot, listener) : null;
-    if (!listener || !vehicle) {
-      stopEngine();
-      return;
+    const vehicles = listener ? audibleVehicles(snapshot, listener) : [];
+    const audibleIds = new Set(vehicles.map((vehicle) => vehicle.id));
+
+    for (const vehicleId of [...engines.keys()]) {
+      if (!audibleIds.has(vehicleId)) stopEngine(vehicleId);
     }
-
-    const profile = profileFor(vehicle);
-    if (!engine || currentVehicleId !== vehicle.id || currentProfile !== profile) {
-      stopEngine();
-      void audio.resume();
-      engine = audio.playSpatialBuffer(bufferFor(vehicle), vehicle, {
-        radius: radiusFor(vehicle),
-        gain: profile === "sport" ? 0.66 : 0.58,
-        referenceDistance: profile === "sport" ? 3.2 : 2.8,
-        rolloffFactor: profile === "sport" ? 0.25 : 0.28,
-        airAbsorptionMinHz: profile === "sport" ? 5200 : 4300,
-        loop: true,
-        channel: ENGINE_CHANNEL,
-        replace: true,
-      });
-      if (profile === "truck" && engine?.source && truckEngineBuffer.duration > TRUCK_LOOP_END_SECONDS) {
-        engine.source.loopStart = TRUCK_LOOP_START_SECONDS;
-        engine.source.loopEnd = TRUCK_LOOP_END_SECONDS;
-      }
-      currentVehicleId = vehicle.id;
-      currentProfile = profile;
-    }
-    if (!engine) return;
-
-    engine.update?.(vehicle);
-    const speedKph = Math.max(0, Number(vehicle.speedKph) || 0);
-    const throttle = Math.abs(Number(vehicle.input?.throttle) || 0);
-    const airborne = Math.max(0, 4 - (Number(vehicle.groundedWheels) || 0));
-
-    const rate = profile === "sport"
-      ? clamp(0.9 + speedKph / 145 + throttle * 0.5 + airborne * 0.02, 0.86, 2.5)
-      : clamp(0.78 + speedKph / 92 + throttle * 0.3 + airborne * 0.025, 0.76, 2.2);
-    engine.source?.playbackRate?.setTargetAtTime(rate, audio.context.currentTime, 0.09);
-
-    const braking = isBraking(vehicle);
-    if (braking && !brakingActive) playBrake(vehicle);
-    brakingActive = braking;
+    for (const vehicle of vehicles) updateVehicleEngine(vehicle);
   }
 
   ctx.events.on("game:snapshot", updateEngine);
@@ -208,13 +246,13 @@ export async function setup(ctx) {
       referenceDistance: 2.5,
       rolloffFactor: 0.42,
       airAbsorptionMinHz: 3900,
+      occlusion: clamp(payload?.occlusion, 0, 1),
       loop: false,
     });
   });
 
   ctx.events.on("network:disconnected", () => {
     audio.setCabinMuffleCutoff?.(CABIN_OPEN_CUTOFF_HZ);
-    audio.stopChannel(BRAKE_CHANNEL);
-    stopEngine();
+    stopAllEngines({ immediate: true });
   });
 }

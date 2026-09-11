@@ -6,7 +6,8 @@ const entities = game.host.services.get("entities");
 
 game.api.connectHuman(playerId);
 const deployment = game.api.snapshot().match;
-let now = deployment.deploymentEndsAt + 1;
+const profileStartedAt = Number(deployment.startedAt) || Date.now();
+let now = profileStartedAt;
 game.api.step(0.05, now);
 game.drainEvents();
 
@@ -59,7 +60,7 @@ for (let step = 1; step <= 2400; step += 1) {
       const weapon = damage?.weaponId ?? "unknown";
       deathByWeapon.set(weapon, (deathByWeapon.get(weapon) ?? 0) + 1);
       deaths.push({
-        second: Number(((now - deployment.deploymentEndsAt - 1) / 1000).toFixed(2)),
+        second: Number(((now - profileStartedAt) / 1000).toFixed(2)),
         victimId: payload.entityId,
         victimBot: Boolean(victim?.bot),
         killerId: payload.killerId ?? null,
@@ -71,7 +72,7 @@ for (let step = 1; step <= 2400; step += 1) {
     }
     if (packet.event === "battle-royale:remaining") {
       remaining.push({
-        second: Number(((now - deployment.deploymentEndsAt - 1) / 1000).toFixed(2)),
+        second: Number(((now - profileStartedAt) / 1000).toFixed(2)),
         alive: payload.alive,
         threshold: payload.threshold,
       });

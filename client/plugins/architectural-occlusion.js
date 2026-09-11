@@ -28,6 +28,11 @@ export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const originalPlaySpatial = audio.playSpatial.bind(audio);
   const originalPlaySpatialBuffer = audio.playSpatialBuffer.bind(audio);
-  audio.playSpatial = (url, position, options = {}) => originalPlaySpatial(url, position, withArchitecturalOcclusion(options));
-  audio.playSpatialBuffer = (buffer, position, options = {}) => originalPlaySpatialBuffer(buffer, position, withArchitecturalOcclusion(options));
+
+  audio.playSpatial = (url, position, options = {}) => (
+    originalPlaySpatial(url, position, withArchitecturalOcclusion(options))
+  );
+  audio.playSpatialBuffer = (buffer, position, options = {}) => (
+    originalPlaySpatialBuffer(buffer, position, withArchitecturalOcclusion(options))
+  );
 }

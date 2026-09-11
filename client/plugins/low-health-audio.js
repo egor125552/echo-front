@@ -47,6 +47,23 @@ export function heartbeatGainForRatio(ratio) {
   return 0.02 + normalized * 0.7;
 }
 
+export function downedRecoveryAudioState(self, now) {
+  const use = self?.stimulantUse;
+  const full = { progress: 0, intensity: 1, cutoff: MUFFLE_MIN_HZ };
+  if (!self?.downed || !use?.downed) return full;
+  const startedAt = Number(use.startedAt);
+  const completesAt = Number(use.completesAt);
+  if (!Number.isFinite(startedAt) || !Number.isFinite(completesAt) || completesAt <= startedAt) return full;
+  const progress = clamp01((Number(now) - startedAt) / (completesAt - startedAt));
+  const normalMaximum = Math.max(1, Number(self.normalHealthMax) || 200);
+  const revivedHealth = Math.min(normalMaximum, 100);
+  const recoveredIntensity = lowHealthIntensity(revivedHealth, normalMaximum);
+  const targetCutoff = muffleCutoffForIntensity(recoveredIntensity);
+  const intensity = 1 + (recoveredIntensity - 1) * progress;
+  const cutoff = MUFFLE_MIN_HZ * Math.pow(targetCutoff / MUFFLE_MIN_HZ, progress);
+  return { progress, intensity, cutoff };
+}
+
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
@@ -136,6 +153,17 @@ export async function setup(ctx) {
     }
 
     alive = true;
+    if (self.downed) {
+      // Injury feedback owns the supplied heartbeat in this state. While a
+      // revive stimulant is active, let the world open back up in sync with
+      // the real server-side 6 second progress instead of snapping at the end.
+      lastRatio = 1;
+      stopHeartbeat();
+      const recovery = downedRecoveryAudioState(self, snapshot.now);
+      audio.setReverbMix(recovery.intensity * MAX_REVERB_MIX);
+      audio.setMuffleCutoff(recovery.cutoff);
+      return;
+    }
     lastRatio = healthRatio(self.health, self.healthMax);
     applyIntensity(lowHealthIntensity(self.health, self.healthMax));
 
@@ -164,6 +192,7 @@ export async function setup(ctx) {
     woundedUrl: WOUNDED_URL,
     muffleMinHz: MUFFLE_MIN_HZ,
     muffleMaxHz: MUFFLE_MAX_HZ,
+    playWoundedCue,
     reset: resetEffects,
   });
 }
