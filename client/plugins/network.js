@@ -78,10 +78,13 @@ export async function setup(ctx) {
     }
   }
 
-  function sendInput() {
+  function sendInput(details = {}) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return;
     const sampled = input.sample();
-    ctx.events.emit("network:input-sampled", { input: sampled });
+    ctx.events.emit("network:input-sampled", {
+      input: sampled,
+      reason: details?.reason ?? null,
+    });
     send("input", { input: sampled });
   }
 
@@ -95,7 +98,7 @@ export async function setup(ctx) {
   function emitGamePacket(packet) {
     if (!packet?.event) return;
     ctx.events.emit("game:event", packet);
-    if (packet.event === "battle-royale:started") sendInput();
+    if (packet.event === "battle-royale:started") sendInput({ reason: "battle-royale:started" });
   }
 
   function clearReconnectTimer() {
@@ -146,7 +149,7 @@ export async function setup(ctx) {
     ws.addEventListener("open", () => {
       if (socket !== ws) return;
       input.enable();
-      sendInput();
+      sendInput({ reason: "network:open" });
       ctx.events.emit("network:connected", {
         room,
         mode,

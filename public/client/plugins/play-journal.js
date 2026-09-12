@@ -345,7 +345,22 @@ export async function setup(ctx) {
     append(["m", stamp(), "parkour-pose-input", { reason: reason ?? "" }]);
   });
   ctx.events.on("input:reset", ({ reason } = {}) => append(["m", stamp(), "input-reset", reason ?? null]));
-  ctx.events.on("network:input-sampled", ({ input }) => recordInput(input));
+  ctx.events.on("network:input-sampled", ({ input, reason } = {}) => {
+    recordInput(input);
+    const traceInputPipeline = Boolean(
+      String(reason ?? "").includes("Space")
+      || input?.parachutePressed
+      || input?.jumpPressed
+    );
+    if (traceInputPipeline) {
+      append(["m", stamp(), "input-pipeline", {
+        reason: reason ?? null,
+        parachutePressed: input?.parachutePressed ? 1 : 0,
+        jumpPressed: input?.jumpPressed ? 1 : 0,
+        posePressed: input?.posePressed ? 1 : 0,
+      }]);
+    }
+  });
   ctx.events.on("network:connected", (details = {}) => append(["m", stamp(), "connected", {
     room: details.room ?? "public",
     mode: details.mode ?? null,
