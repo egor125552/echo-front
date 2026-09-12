@@ -88,8 +88,8 @@ export async function setup(ctx) {
     navigationTogglePressed = false;
     return {
       ...sampled,
-      navigationNextPressed: next,
-      navigationTogglePressed: toggle,
+      navigationNextPressed: Boolean(sampled.navigationNextPressed || next),
+      navigationTogglePressed: Boolean(sampled.navigationTogglePressed || toggle),
     };
   };
 

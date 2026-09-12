@@ -102,7 +102,7 @@ export async function setup(ctx) {
       ...sampled,
       navigationNextPressed: Boolean(sampled.navigationNextPressed || next),
       navigationTogglePressed: Boolean(sampled.navigationTogglePressed || toggle),
-      navigationFacePressed: face,
+      navigationFacePressed: Boolean(sampled.navigationFacePressed || face),
     };
   };
 

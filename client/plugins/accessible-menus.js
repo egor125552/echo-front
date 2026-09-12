@@ -402,7 +402,7 @@ export async function setup(ctx) {
       ...base,
       ...(navigation ? {
         navigationSelectTargetId: navigation.targetId,
-        navigationTogglePressed: Boolean(navigation.activate),
+        navigationTogglePressed: Boolean(base.navigationTogglePressed || navigation.activate),
       } : {}),
       ...(roomRule ? { socialRoomRule: roomRule } : {}),
     };

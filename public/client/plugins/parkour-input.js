@@ -21,7 +21,7 @@ export async function setup(ctx) {
     const sampled = originalSample();
     const pressed = posePressed;
     posePressed = false;
-    return { ...sampled, posePressed: pressed };
+    return { ...sampled, posePressed: Boolean(sampled.posePressed || pressed) };
   };
 
   window.addEventListener("keydown", (event) => {
