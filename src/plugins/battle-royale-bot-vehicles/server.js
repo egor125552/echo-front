@@ -10,6 +10,10 @@ export const BOT_VEHICLE_ASSIGNMENTS_PER_SCAN = 12;
 export const BOT_VEHICLE_FAILURE_COOLDOWN_MS = 60_000;
 export const BOT_VEHICLE_CRASH_COOLDOWN_MS = 30_000;
 export const BOT_VEHICLE_RETRY_COOLDOWN_MS = 1_500;
+export const BOT_VEHICLE_APPROACH_INTERVAL_MS = 100;
+export const BOT_VEHICLE_DRIVE_INTERVAL_MS = 250;
+export const BOT_VEHICLE_NEAR_DRIVE_INTERVAL_MS = 50;
+export const BOT_VEHICLE_DETAILED_RADIUS = 320;
 const BOT_RAM_MAX_DISTANCE = 105;
 const BOT_RAM_COMMIT_MS = 5_000;
 const BOT_RAM_COOLDOWN_MS = 7_000;
@@ -44,12 +48,24 @@ export async function setup(ctx) {
   const everAssigned = new Set(), everDrivers = new Set();
   const counters = { ticks: 0, assigned: 0, entered: 0, exited: 0, recoveries: 0, trafficYields: 0, crossingYields: 0,
     ramAttempts: 0, hits: 0, waypointAdvances: 0, crashEjections: 0, emergencyYields: 0, pedestrianYields: 0,
-    headOnYields: 0, parkedAvoids: 0, emergencyBrakes: 0, deadlockResolutions: 0,
+    headOnYields: 0, parkedAvoids: 0, emergencyBrakes: 0, deadlockResolutions: 0, controlUpdates: 0,
     releaseReasons: Object.create(null), unavailableReasons: Object.create(null) };
   let lastScan = { eligible: 0, availableCars: 0, nearCar: 0, withGoal: 0, assigned: 0 };
   let internalInput = false, nextScan = 0;
   const transform = id => ctx.components.get(id, "Transform");
   const botState = id => ctx.components.get(id, "Bot");
+
+  function controlOffset(id, intervalMs) {
+    let hash = 0;
+    for (const ch of String(id)) hash = ((hash * 31) + ch.charCodeAt(0)) >>> 0;
+    return hash % Math.max(1, intervalMs);
+  }
+
+  function nextControlDeadline(id, now, intervalMs) {
+    const interval = Math.max(1, Number(intervalMs) || BOT_VEHICLE_DRIVE_INTERVAL_MS);
+    const offset = controlOffset(id, interval);
+    return (Math.floor((now - offset) / interval) + 1) * interval + offset;
+  }
   const originalInput = movement.setInput.bind(movement);
   const setFootInput = (id, input) => {
     internalInput = true;
@@ -114,7 +130,8 @@ export async function setup(ctx) {
       : clamp(22_000 + (initialDistance - BOT_VEHICLE_SEARCH_RADIUS) * 140, 22_000, 36_000);
     states.set(id, { phase: "approach", vehicleId, destination: { ...destination }, startedAt: now,
       approachTimeoutMs, initialApproachDistance: initialDistance,
-      phaseAt: now, previousSteering: 0, lastProgressAt: now, lastPosition: { ...car }, recoveries: 0, attempts: 0 });
+      phaseAt: now, previousSteering: 0, lastProgressAt: now, lastPosition: { ...car }, recoveries: 0, attempts: 0,
+      nextControlAt: now, lastControlAt: now });
     reservations.set(vehicleId, id);
     counters.assigned++;
     everAssigned.add(id);
@@ -551,7 +568,7 @@ export async function setup(ctx) {
       strafe: state.recoverTurn, sprint: false, fireHeld: false });
   }
 
-  function drive(id, state, dt, now, trafficCars) {
+  function drive(id, state, dt, now, trafficCars, humanPositions = []) {
     const car = vehicles.vehicleForDriver(id);
     if (!car || car.id !== state.vehicleId) { release(id, now, "driver-lost"); return; }
     const rotation = car.rotation;
@@ -567,9 +584,12 @@ export async function setup(ctx) {
     }
     // Once backing out, finish that maneuver before reconsidering a fight.
     if (state.phase === "reverse") { recover(id, state, car, now); return; }
-    const combatTarget = state.phase === "ram-turnaround" ? null : nearbyCombatTarget(id, car, now);
-    const vehicleRam = state.phase === "ram-turnaround" ? null : vehicleRamOpportunity(id, car, trafficCars, state, now);
-    const ram = state.phase === "ram-turnaround" ? null : vehicleRam ?? ramOpportunity(id, car, combatTarget, state, now);
+    const detailed = humanPositions.some(position => distance(car, position) <= BOT_VEHICLE_DETAILED_RADIUS);
+    const combatTarget = detailed && state.phase !== "ram-turnaround" ? nearbyCombatTarget(id, car, now) : null;
+    const vehicleRam = detailed && state.phase !== "ram-turnaround"
+      ? vehicleRamOpportunity(id, car, trafficCars, state, now) : null;
+    const ram = detailed && state.phase !== "ram-turnaround"
+      ? vehicleRam ?? ramOpportunity(id, car, combatTarget, state, now) : null;
     const recovery = ramRecovery.update(state, car, ram, now);
     if (recovery.stopReason) {
       stop(state, now, recovery.stopReason); vehicles.setInput(id, brakeInput(car)); return;
@@ -623,18 +643,22 @@ export async function setup(ctx) {
     }
     const avoidanceTraffic = ram?.vehicleId ? trafficCars.filter(other => other.id !== ram.vehicleId) : trafficCars;
     const followingTraffic = trafficAhead(car, avoidanceTraffic);
-    const crossing = crossingTraffic(car, avoidanceTraffic);
-    const actualCollisionRisk = predictedVehicleCollision(car, avoidanceTraffic);
+    const crossing = detailed ? crossingTraffic(car, avoidanceTraffic) : null;
+    const actualCollisionRisk = detailed ? predictedVehicleCollision(car, avoidanceTraffic) : null;
     // Future route directions change much more slowly than Rapier velocity.
     // Keep the real-velocity fail-safe at physics rate, but sample the planned
     // predictor at 5 Hz so 60+ drivers do not do an O(N²) route comparison 20 times/s.
-    if ((state.nextPlannedCollisionAt ?? 0) <= now) {
+    if (!detailed) {
+      state.plannedCollisionRisk = null;
+    } else if ((state.nextPlannedCollisionAt ?? 0) <= now) {
       state.plannedCollisionRisk = plannedVehicleCollision(id, state, car, avoidanceTraffic);
       state.nextPlannedCollisionAt = now + 200;
     }
     const plannedCollisionRisk = state.plannedCollisionRisk ?? null;
     const collisionRisk = actualCollisionRisk ?? plannedCollisionRisk;
-    const pedestrian = pedestrianAhead(id, car, ram?.vehicleId ? null : (ram?.entityId ?? null));
+    const pedestrian = detailed
+      ? pedestrianAhead(id, car, ram?.vehicleId ? null : (ram?.entityId ?? null))
+      : null;
     const leadVehicle = followingTraffic?.vehicleId ? vehicles.stateFor(followingTraffic.vehicleId) : null;
     const parkedLead = followingTraffic?.type === "following" && leadVehicle
       && !leadVehicle.occupied && leadVehicle.speed < .8 && followingTraffic.distance < 36;
@@ -932,16 +956,46 @@ export async function setup(ctx) {
   function tick(dt, now) {
     counters.ticks++;
     if (!battle.isActive()) return;
-    samplePedestrianMotion(now);
     for (const [vehicleId, until] of vehicleCooldowns) {
       if (until <= now) vehicleCooldowns.delete(vehicleId);
     }
+
+    const humanPositions = entities.all()
+      .filter(entity => entity?.alive && !entity.bot && entity.kind === "human")
+      .map(entity => transform(entity.id))
+      .filter(Boolean);
+
+    const due = [];
+    for (const [id, state] of states) {
+      if (!entities.get(id)?.alive || get("ragdoll").isActive(id)) {
+        release(id, now, "incapacitated");
+        continue;
+      }
+      if (now + 0.001 < Number(state.nextControlAt ?? 0)) continue;
+      let interval = BOT_VEHICLE_APPROACH_INTERVAL_MS;
+      if (state.phase !== "approach") {
+        const car = vehicles.vehicleForDriver(id);
+        const nearHuman = car && humanPositions.some(position => distance(car, position) <= BOT_VEHICLE_DETAILED_RADIUS);
+        interval = nearHuman ? BOT_VEHICLE_NEAR_DRIVE_INTERVAL_MS : BOT_VEHICLE_DRIVE_INTERVAL_MS;
+      }
+      const previousControlAt = Number(state.lastControlAt);
+      const controlDt = Number.isFinite(previousControlAt)
+        ? clamp((now - previousControlAt) / 1000, 1 / 120, 0.25)
+        : Math.max(1 / 120, Number(dt) || 0.05);
+      state.lastControlAt = now;
+      state.nextControlAt = nextControlDeadline(id, now, interval);
+      due.push({ id, state, controlDt });
+    }
+
+    const drivingDue = due.some(({ state }) => state.phase !== "approach");
+    if (drivingDue) samplePedestrianMotion(now);
     // Traffic is not only AI traffic. A human crawling along in front of a bot
     // must be followed like a real lead car instead of being mistaken for a wall.
-    const trafficCars = vehicles.snapshot();
-    for (const [id, state] of states) {
-      if (!entities.get(id)?.alive || get("ragdoll").isActive(id)) { release(id, now, "incapacitated"); continue; }
-      if (state.phase === "approach") approach(id, state, now); else drive(id, state, dt, now, trafficCars);
+    const trafficCars = drivingDue ? vehicles.snapshot() : [];
+    for (const { id, state, controlDt } of due) {
+      counters.controlUpdates++;
+      if (state.phase === "approach") approach(id, state, now);
+      else drive(id, state, controlDt, now, trafficCars, humanPositions);
     }
     const targetDrivers = driverLimit();
     if (now < nextScan || states.size >= targetDrivers) return;
