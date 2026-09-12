@@ -16,7 +16,7 @@ on:
       - src/plugins/battle-royale-ragdoll-integration/**
       - src/presets/battle-royale.js
       - scripts/check-space-parachute-input.mjs
-      - scripts/check-physical-space-client-pipeline.mjs
+      - scripts/check-physical-input-client-pipeline.mjs
       - package.json
       - .github/workflows/space-parachute-input.yml
   pull_request:
@@ -33,7 +33,7 @@ on:
       - src/plugins/battle-royale-ragdoll-integration/**
       - src/presets/battle-royale.js
       - scripts/check-space-parachute-input.mjs
-      - scripts/check-physical-space-client-pipeline.mjs
+      - scripts/check-physical-input-client-pipeline.mjs
       - package.json
       - .github/workflows/space-parachute-input.yml
   workflow_dispatch:
@@ -56,8 +56,8 @@ jobs:
           node --check client/plugins/input.js
           node --check client/plugins/parachute-input.js
           node --check scripts/check-space-parachute-input.mjs
-          node --check scripts/check-physical-space-client-pipeline.mjs
-      - name: Verify physical Space client pipeline
-        run: npm run check:physical-space
+          node --check scripts/check-physical-input-client-pipeline.mjs
+      - name: Verify physical keyboard client pipeline
+        run: npm run check:physical-input
       - name: Verify Space context behavior
         run: npm run check:space-parachute
