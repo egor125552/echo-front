@@ -5,6 +5,10 @@ export const manifest = {
 
 const PARACHUTE_ACTION_DEBOUNCE_MS = 350;
 
+export function mergeParachutePressed(sampled = {}, localPressed = false) {
+  return Boolean(sampled.parachutePressed || localPressed);
+}
+
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const network = ctx.services.get("network");
@@ -100,7 +104,10 @@ export async function setup(ctx) {
     const sampled = originalSample();
     const pressed = parachutePressed;
     parachutePressed = false;
-    return { ...sampled, parachutePressed: pressed };
+    return {
+      ...sampled,
+      parachutePressed: mergeParachutePressed(sampled, pressed),
+    };
   };
 
   ctx.events.on("game:snapshot", (snapshot) => {

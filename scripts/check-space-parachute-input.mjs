@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createEchoFrontGame } from '../src/server/game.js';
+import { mergeParachutePressed } from '../client/plugins/parachute-input.js';
 
 const PLAYER = '44444444-4444-4444-8444-444444444444';
 
@@ -25,6 +26,14 @@ test('Space has one keyboard owner and produces parachutePressed in the shared i
   assert.match(inputSource, /event\.code === "Space"\) parachutePressed = true/);
   assert.doesNotMatch(parachuteSource, /event\.code === "Space"/,
     'parachute-input must not register a second keyboard Space handler');
+});
+
+test('parachute input wrapper preserves physical Space and touch impulses', () => {
+  assert.equal(mergeParachutePressed({ parachutePressed: true }, false), true,
+    'physical Space from keyboard-input must survive the parachute wrapper');
+  assert.equal(mergeParachutePressed({ parachutePressed: false }, true), true,
+    'touch parachute action must still produce an impulse');
+  assert.equal(mergeParachutePressed({ parachutePressed: false }, false), false);
 });
 
 test('Space in freefall deploys exactly once', () => scenario((game, services) => {
