@@ -1,5 +1,7 @@
 # Echo Front
 
+[![VibeTalent](https://www.vibetalent.work/api/badge/egor125552)](https://www.vibetalent.work/profile/egor125552)
+
 Русское название: **Эхо фронта**.
 
 Аудиошутер с модульной архитектурой. Базовые переиспользуемые звуки лежат в `assets/audio/core/`.
