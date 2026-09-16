@@ -92,7 +92,7 @@ export async function setup(ctx) {
       void lowHealth.playWoundedCue();
     }
     const text = injuryMessage(packet.event, p);
-    if (text) speech.say(text, { interrupt: true });
+    if (text && !network.tutorial) speech.say(text, { interrupt: true });
     if (packet.event === "injury:stim-started") void play("stim-start.mp3", "injury-stim");
     if (packet.event === "injury:stim-cancelled") audio.stopChannel("injury-stim");
     if (packet.event === "injury:stim-completed") void play("stim-complete.mp3", "injury-stim");

@@ -51,6 +51,7 @@ export class MatchRoom extends DurableObject {
     super(ctx, env);
     this.game = null;
     this.mode = null;
+    this.tutorial = false;
     this.gameLoopTimer = null;
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
@@ -67,7 +68,10 @@ export class MatchRoom extends DurableObject {
           try { return socket.deserializeAttachment()?.mode; } catch { return null; }
         }).find(Boolean),
       );
-      await this.ensureGame(mode);
+      const tutorial = sockets.some((socket) => {
+        try { return socket.deserializeAttachment()?.tutorial === true; } catch { return false; }
+      });
+      await this.ensureGame(mode, { tutorial });
       for (const ws of sockets) {
         if (ws.readyState === 3) continue;
         const attachment = ws.deserializeAttachment();
@@ -139,14 +143,19 @@ export class MatchRoom extends DurableObject {
     }, { headers: { "Cache-Control": "no-store" } });
   }
 
-  async ensureGame(mode = "tdm") {
+  async ensureGame(mode = "tdm", { tutorial = false } = {}) {
     const normalized = normalizeGameMode(mode);
+    const training = Boolean(tutorial);
     if (this.game && this.mode !== normalized) {
       throw new Error(`Match room mode mismatch: ${this.mode} vs ${normalized}`);
     }
+    if (this.game && this.tutorial !== training) {
+      throw new Error(`Match room tutorial mismatch: ${this.tutorial} vs ${training}`);
+    }
     if (!this.game) {
       this.mode = normalized;
-      this.game = await createEchoFrontGame({ mode: normalized });
+      this.tutorial = training;
+      this.game = await createEchoFrontGame({ mode: normalized, tutorial: training });
       this.lastStepAt = Date.now();
       this.lastSnapshotAt = 0;
       this.diagnosticsStats = freshDiagnosticsStats();
@@ -260,6 +269,7 @@ export class MatchRoom extends DurableObject {
       diagnosticsEnabled: true,
       roomActive: true,
       mode: this.mode,
+      tutorial: this.tutorial,
       sockets: activeSocketCount(this.ctx.getWebSockets()),
       disconnectedHumans: this.disconnectedHumans.size,
       loopRunning: Boolean(this.gameLoopTimer),
@@ -282,13 +292,14 @@ export class MatchRoom extends DurableObject {
     }
 
     const mode = normalizeGameMode(requestUrl.searchParams.get("mode"));
+    const tutorial = requestUrl.searchParams.get("tutorial") === "1";
     let phase = "delete-alarm";
     let playerId = null;
     let server = null;
     try {
       await this.ctx.storage.deleteAlarm();
       phase = "ensure-game";
-      await this.ensureGame(mode);
+      await this.ensureGame(mode, { tutorial });
       this.hotReconnectUntil = 0;
       this.lastStepAt = Date.now();
       phase = "cleanup-disconnected-humans";
@@ -303,7 +314,7 @@ export class MatchRoom extends DurableObject {
       const client = pair[0];
       server = pair[1];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ playerId, mode });
+      server.serializeAttachment({ playerId, mode, tutorial });
       this.disconnectedHumans.delete(playerId);
 
       phase = "connect-human";
@@ -318,6 +329,7 @@ export class MatchRoom extends DurableObject {
         playerId,
         team: joined.team,
         mode,
+        tutorial,
         resumed: Boolean(joined.resumed),
         snapshot: initialSnapshot,
       }));
@@ -345,9 +357,10 @@ export class MatchRoom extends DurableObject {
     if (typeof message !== "string") return;
     const attachment = ws.deserializeAttachment();
     const mode = attachment?.mode ?? "tdm";
+    const tutorial = attachment?.tutorial === true;
     const playerId = attachment?.playerId ?? null;
     try {
-      await this.ensureGame(mode);
+      await this.ensureGame(mode, { tutorial });
       let data;
       try { data = JSON.parse(message); } catch { return; }
       if (!playerId) return;
@@ -421,6 +434,7 @@ export class MatchRoom extends DurableObject {
       this.game = null;
     }
     this.mode = null;
+    this.tutorial = false;
     this.disconnectedHumans.clear();
     this.hotReconnectUntil = 0;
     this.lastStepAt = Date.now();

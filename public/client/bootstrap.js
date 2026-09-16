@@ -193,12 +193,36 @@ try {
   throw error;
 }
 
+const tutorialButton = document.querySelector("#tutorial-button");
 const playButton = document.querySelector("#play-button");
 const battleRoyaleButton = document.querySelector("#battle-royale-button");
 const gamePanel = document.querySelector("#game-panel");
 const connection = document.querySelector("#connection-status");
 const modeValue = document.querySelector("#mode-value");
-const startButtons = [playButton, battleRoyaleButton].filter(Boolean);
+const firstRunRecommendation = document.querySelector("#first-run-recommendation");
+const startupStatus = document.querySelector("#startup-status");
+const startButtons = [tutorialButton, playButton, battleRoyaleButton].filter(Boolean);
+const FIRST_RUN_SEEN_KEY = "echo-front.first-run-seen-v1";
+
+function firstRunSeen() {
+  try { return localStorage.getItem(FIRST_RUN_SEEN_KEY) === "true"; }
+  catch { return false; }
+}
+
+function markFirstRunSeen() {
+  try { localStorage.setItem(FIRST_RUN_SEEN_KEY, "true"); } catch {}
+}
+
+function showFirstRunRecommendation() {
+  if (!firstRunRecommendation || firstRunSeen()) return;
+  const text = "Рекомендуется сначала пройти обучение. Оно по шагам объяснит движение, звуки, стрельбу, попадания, восстановление и основные правила режимов.";
+  firstRunRecommendation.hidden = false;
+  firstRunRecommendation.textContent = text;
+  tutorialButton?.setAttribute("aria-label", "Обучение. Рекомендуется новым игрокам");
+  markFirstRunSeen();
+}
+
+showFirstRunRecommendation();
 
 let diagnosisPromise = null;
 let lastNetworkFailure = null;
@@ -275,29 +299,72 @@ async function diagnoseServerFailure(mode, room, networkDetails = {}) {
   return diagnosisPromise;
 }
 
-async function start(mode) {
+async function start(mode, { tutorial = false } = {}) {
   setButtonsDisabled(true);
-  connection.textContent = mode === "battle-royale"
-    ? "Подключение к королевской битве"
-    : "Подключение к командному бою";
-  if (modeValue) modeValue.textContent = mode === "battle-royale" ? "Королевская битва" : "Командный бой";
+  document.documentElement.dataset.tutorial = tutorial ? "true" : "false";
+  const modeLabel = tutorial
+    ? "Обучение"
+    : mode === "battle-royale"
+      ? "Королевская битва"
+      : "Командный бой";
+  connection.textContent = "Подготовка";
+  if (modeValue) modeValue.textContent = modeLabel;
   gamePanel.hidden = false;
 
   try {
-    host.services.get("speech")?.prime?.("game-start");
+    const speech = host.services.get("speech");
+    speech?.prime?.("game-start");
     await host.services.get("audio").resume();
-    host.services.get("network").connect("public", { mode });
-    host.services.get("sound-pack").warmEssential().catch((error) => {
-      reportError("Не удалось заранее загрузить часть звуков", error, { phase: "audio-preload" });
-    });
+
+    const loadingText = "Загрузка звуков, пожалуйста подождите";
+    if (startupStatus) startupStatus.textContent = loadingText;
+    connection.textContent = loadingText;
+    speech?.say?.(loadingText, { interrupt: true });
+
+    await host.services.get("sound-pack").warmEssential();
+
+    const connectingText = tutorial
+      ? "Звуки загружены. Запускаю обучение"
+      : mode === "battle-royale"
+        ? "Звуки загружены. Подключение к королевской битве"
+        : "Звуки загружены. Подключение к командному бою";
+    if (startupStatus) startupStatus.textContent = connectingText;
+    connection.textContent = connectingText;
+
+    const network = host.services.get("network");
+    const room = tutorial ? `tutorial-${network.sessionId}` : "public";
+    host.events.emit("tutorial:requested", { enabled: tutorial });
+    network.connect(room, { mode, tutorial });
   } catch (error) {
-    reportError("Не удалось запустить игру", error, { mode, phase: "game-start" });
+    reportError("Не удалось запустить игру", error, { mode, tutorial, phase: "game-start" });
     setButtonsDisabled(false);
   }
 }
 
+tutorialButton?.addEventListener("click", () => start("tdm", { tutorial: true }));
 playButton?.addEventListener("click", () => start("tdm"));
 battleRoyaleButton?.addEventListener("click", () => start("battle-royale"));
+
+host.events.on("tutorial:team-section-complete", () => {
+  host.services.get("network")?.disconnect?.();
+  void start("battle-royale", { tutorial: true });
+});
+
+host.events.on("tutorial:battle-royale-section-complete", () => {
+  try { localStorage.setItem("echo-front.tutorial-completed-v1", "true"); } catch {}
+  host.services.get("network")?.disconnect?.();
+  document.documentElement.dataset.tutorial = "false";
+  setButtonsDisabled(false);
+  if (startupStatus) startupStatus.textContent = "Обучение завершено. Выберите режим игры";
+  if (connection) connection.textContent = "Обучение завершено";
+  if (modeValue) modeValue.textContent = "Меню";
+  const tutorialStatus = document.querySelector("#tutorial-status");
+  if (tutorialStatus) {
+    tutorialStatus.hidden = true;
+    tutorialStatus.textContent = "";
+  }
+  if (gamePanel) gamePanel.hidden = true;
+});
 
 host.events.on("network:server-error", ({ error, room, mode, endpoint } = {}) => {
   reportServerError(error ?? {}, {
@@ -352,7 +419,8 @@ host.events.on("network:reconnected", ({ resumed } = {}) => {
   }
 });
 
-host.events.on("network:welcome", () => {
+host.events.on("network:welcome", ({ tutorial = false } = {}) => {
   lastNetworkFailure = null;
   setButtonsDisabled(true);
+  if (startupStatus) startupStatus.textContent = tutorial ? "Обучение запущено" : "";
 });

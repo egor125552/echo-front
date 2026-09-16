@@ -20,6 +20,7 @@ const BOT_RAM_COOLDOWN_MS = 7_000;
 export const manifest = {
   id: "battle-royale-bot-vehicles",
   requires: ["battle-royale-vehicle-fleet", "match-api", "bot-combat", "bot-brain", "bot-perception", "battle-royale-navigation-lifecycle", "battle-royale-bot-parachute"],
+  optional: ["battle-royale-tutorial"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
 
@@ -29,6 +30,9 @@ export async function setup(ctx) {
   const movement = get("movement"), physics = get("physics"), map = get("map");
   const match = get("match-api"), weapons = get("weapons"), battle = get("battle-royale");
   const brain = get("bot-brain"), perception = get("bot-perception");
+  const tutorial = ctx.services.has("battle-royale-tutorial")
+    ? ctx.services.get("battle-royale-tutorial")
+    : null;
   const routes = createDriverRoutes(physics, get("navigation"), map);
   const ramRecovery = createRamRecovery({ routes, targetFor(id, vehicleId, car) {
     if (!entities.get(id)?.alive) return null;
@@ -956,6 +960,7 @@ export async function setup(ctx) {
   function tick(dt, now) {
     counters.ticks++;
     if (!battle.isActive()) return;
+    if (tutorial?.botsPassive?.()) return;
     for (const [vehicleId, until] of vehicleCooldowns) {
       if (until <= now) vehicleCooldowns.delete(vehicleId);
     }

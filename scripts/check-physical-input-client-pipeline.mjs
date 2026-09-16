@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { EventBus } from '../client/core/event-bus.js';
-import * as keyboardInput from '../client/plugins/input.js';
-import * as parachuteInput from '../client/plugins/parachute-input.js';
-import * as parkourInput from '../client/plugins/parkour-input.js';
-import * as crateInteraction from '../client/plugins/battle-royale-crate-interaction.js';
+import { EventBus } from '../public/client/core/event-bus.js';
+import * as keyboardInput from '../public/client/plugins/input.js';
+import * as parachuteInput from '../public/client/plugins/parachute-input.js';
+import * as parkourInput from '../public/client/plugins/parkour-input.js';
+import * as crateInteraction from '../public/client/plugins/battle-royale-crate-interaction.js';
 
 function createBrowserStub() {
   const listeners = new Map();

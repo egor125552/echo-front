@@ -72,7 +72,7 @@ export async function setup(ctx) {
   let terminalEventAt = -Infinity;
 
   function announce(text, { interrupt = true } = {}) {
-    if (!text) return;
+    if (!text || network.tutorial) return;
     if (live) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createEchoFrontGame } from '../src/server/game.js';
-import { mergeParachutePressed } from '../client/plugins/parachute-input.js';
+import { mergeParachutePressed } from '../public/client/plugins/parachute-input.js';
 
 const PLAYER = '44444444-4444-4444-8444-444444444444';
 
@@ -18,8 +18,8 @@ async function scenario(run) {
 
 test('Space has one keyboard owner and produces parachutePressed in the shared input layer', async () => {
   const [inputSource, parachuteSource] = await Promise.all([
-    readFile(new URL('../client/plugins/input.js', import.meta.url), 'utf8'),
-    readFile(new URL('../client/plugins/parachute-input.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/client/plugins/input.js', import.meta.url), 'utf8'),
+    readFile(new URL('../public/client/plugins/parachute-input.js', import.meta.url), 'utf8'),
   ]);
 
   assert.match(inputSource, /"Space"/);

@@ -19,6 +19,7 @@ import * as respawn from "../plugins/respawn/server.js";
 import * as botController from "../plugins/bot-controller/server.js";
 import * as botLoadouts from "../plugins/bot-loadouts/server.js";
 import * as botPerception from "../plugins/bot-perception/server.js";
+import * as tutorialSession from "../plugins/tutorial-session/server.js";
 import * as botCombat from "../plugins/bot-combat/server.js";
 import * as botFill from "../plugins/bot-fill/server.js";
 import * as matchApi from "../plugins/match-api/server.js";
@@ -26,14 +27,16 @@ import * as socialIntegration from "../plugins/social-match-integration/server.j
 import * as networkTuning from "../plugins/network-tuning/server.js";
 import * as projectileLifecycle from "../plugins/rapier-projectile-lifecycle/server.js";
 
-export const echoFrontPreset = [
+const baseBeforeTraining = [
   entities,
   physics,
   map,
   movement,
   teams,
   tdm,
-  openingRound,
+];
+
+const baseAfterTraining = [
   health,
   armor,
   spawnProtection,
@@ -48,10 +51,22 @@ export const echoFrontPreset = [
   botController,
   botLoadouts,
   botPerception,
+  tutorialSession,
   botCombat,
   botFill,
   matchApi,
   socialIntegration,
   networkTuning,
   projectileLifecycle,
+];
+
+export const echoFrontPreset = [
+  ...baseBeforeTraining,
+  ...baseAfterTraining,
+];
+
+export const echoFrontTutorialPreset = [
+  ...baseBeforeTraining,
+  openingRound,
+  ...baseAfterTraining,
 ];

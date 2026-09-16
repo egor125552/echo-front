@@ -21,6 +21,7 @@ export const manifest = {
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
     "map-test-arena",
   ],
+  optional: ["battle-royale-tutorial"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
 
@@ -186,6 +187,9 @@ export async function setup(ctx) {
   const grid = ctx.services.get("spatial-grid");
   const battleRoyale = ctx.services.get("battle-royale");
   const map = ctx.services.get("map");
+  const tutorial = ctx.services.has("battle-royale-tutorial")
+    ? ctx.services.get("battle-royale-tutorial")
+    : null;
 
   ctx.events.on("combat:damage", ({ targetId, attackerId, now = Date.now() }) => {
     if (!targetId || !attackerId) return;
@@ -536,6 +540,35 @@ export async function setup(ctx) {
   const api = {
     tick(_dt, now = Date.now()) {
       if (!battleRoyale.isActive()) return;
+      if (tutorial) {
+        for (const bot of bots.all()) {
+          const state = ctx.components.get(bot.id, "Bot");
+          const directive = tutorial.botDirective?.(bot.id) ?? { mode: "passive", targetId: null };
+          if (directive.mode === "break-armor" || directive.mode === "down-player") {
+            const target = entities.get(directive.targetId);
+            const transform = ctx.components.get(bot.id, "Transform");
+            const targetTransform = ctx.components.get(directive.targetId, "Transform");
+            if (bot.alive && target?.alive && transform && targetTransform) {
+              const steering = steeringTo(transform, targetTransform);
+              movement.setInput(bot.id, {
+                forward: 0,
+                strafe: 0,
+                turn: steering.turn,
+                sprint: false,
+                fireHeld: steering.aligned,
+              });
+              if (state) {
+                state.reactionUntil = 0;
+                state.nextThinkAt = now + 50;
+              }
+              continue;
+            }
+          }
+          movement.setInput(bot.id, {});
+          if (state) state.reactionUntil = 0;
+        }
+        return;
+      }
       grid.rebuild(now);
       for (const bot of bots.all()) {
         if (!bot.alive) continue;

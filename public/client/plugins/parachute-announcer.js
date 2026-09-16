@@ -23,7 +23,7 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("game:event", (packet) => {
-    if (mode !== "battle-royale") return;
+    if (mode !== "battle-royale" || network.tutorial) return;
     const payload = packet?.payload ?? {};
 
     if (packet.event === "battle-royale:started") {

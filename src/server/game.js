@@ -1,6 +1,6 @@
 import { PluginHost } from "../core/plugin-host.js";
-import { echoFrontPreset } from "../presets/echo-front.js";
-import { battleRoyalePreset } from "../presets/battle-royale.js";
+import { echoFrontPreset, echoFrontTutorialPreset } from "../presets/echo-front.js";
+import { battleRoyalePreset, battleRoyaleTutorialPreset } from "../presets/battle-royale.js";
 import { collectGameDiagnostics } from "./engine-diagnostics.js";
 import { createEngineConsole } from "./engine-console.js";
 
@@ -46,16 +46,20 @@ function shouldForwardEvent(eventName) {
   return FORWARDED_EVENTS.has(name)
     || name.startsWith("navigation:")
     || name.startsWith("injury:")
-    || name.startsWith("crate:");
+    || name.startsWith("crate:")
+    || name.startsWith("tutorial:");
 }
 
 export function normalizeGameMode(value) {
   return value === "battle-royale" || value === "br" ? "battle-royale" : "tdm";
 }
 
-export async function createEchoFrontGame({ mode = "tdm" } = {}) {
+export async function createEchoFrontGame({ mode = "tdm", tutorial = false } = {}) {
   const normalizedMode = normalizeGameMode(mode);
-  const preset = normalizedMode === "battle-royale" ? battleRoyalePreset : echoFrontPreset;
+  const training = Boolean(tutorial);
+  const preset = normalizedMode === "battle-royale"
+    ? (training ? battleRoyaleTutorialPreset : battleRoyalePreset)
+    : (training ? echoFrontTutorialPreset : echoFrontPreset);
   const host = await new PluginHost({ plugins: preset }).start();
   const events = [];
   host.events.on("*", (packet) => {
@@ -66,6 +70,7 @@ export async function createEchoFrontGame({ mode = "tdm" } = {}) {
 
   const game = {
     mode: normalizedMode,
+    tutorial: training,
     host,
     api: host.services.get("match-api"),
     drainEvents() {

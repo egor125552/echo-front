@@ -4,8 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - client/plugins/input.js
-      - client/plugins/parachute-input.js
       - public/client/plugins/input.js
       - public/client/plugins/parachute-input.js
       - src/plugins/battle-royale-jump/**
@@ -21,8 +19,6 @@ on:
       - .github/workflows/space-parachute-input.yml
   pull_request:
     paths:
-      - client/plugins/input.js
-      - client/plugins/parachute-input.js
       - public/client/plugins/input.js
       - public/client/plugins/parachute-input.js
       - src/plugins/battle-royale-jump/**
@@ -53,8 +49,8 @@ jobs:
         run: npm install
       - name: Check regression test syntax
         run: |
-          node --check client/plugins/input.js
-          node --check client/plugins/parachute-input.js
+          node --check public/client/plugins/input.js
+          node --check public/client/plugins/parachute-input.js
           node --check scripts/check-space-parachute-input.mjs
           node --check scripts/check-physical-input-client-pipeline.mjs
       - name: Verify physical keyboard client pipeline

@@ -7,7 +7,6 @@ on:
       - main
     paths:
       - src/**
-      - client/**
       - public/client/**
       - package.json
       - package-lock.json

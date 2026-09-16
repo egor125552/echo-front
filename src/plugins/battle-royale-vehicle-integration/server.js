@@ -9,6 +9,8 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
+const VEHICLE_NETWORK_INTEREST_RADIUS = 240;
+
 export async function setup(ctx) {
   const matchApi = ctx.services.get("match-api");
   const vehicles = ctx.services.get("vehicles");
@@ -22,8 +24,15 @@ export async function setup(ctx) {
   const originalSnapshotFor = matchApi.snapshotFor.bind(matchApi);
   const originalEventsForPlayer = matchApi.eventsForPlayer.bind(matchApi);
 
-  function decorateVehicles(listener = null) {
-    return vehicles.snapshot().map((vehicle) => {
+  function decorateVehicles(listener = null, observedEntityId = null) {
+    const source = listener && typeof vehicles.networkSnapshot === "function"
+      ? vehicles.networkSnapshot({
+        center: listener,
+        radius: VEHICLE_NETWORK_INTEREST_RADIUS,
+        observedEntityId,
+      })
+      : vehicles.snapshot();
+    return source.map((vehicle) => {
       const acousticZone = map.acousticZoneAt?.(vehicle) ?? "outdoor";
       const rawOcclusion = listener ? Number(map.acousticOcclusionBetween?.(listener, vehicle)) : 0;
       return {
@@ -69,7 +78,7 @@ export async function setup(ctx) {
     const listener = ctx.components.get(observedId, "Transform") ?? null;
     return {
       ...snapshot,
-      vehicles: decorateVehicles(listener),
+      vehicles: decorateVehicles(listener, observedId),
     };
   };
 

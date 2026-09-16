@@ -61,7 +61,7 @@ export async function setup(ctx) {
   let lastNitroCooling = false;
 
   function announce(text, interrupt = false) {
-    if (!text) return;
+    if (!text || network.tutorial) return;
     if (live) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });

@@ -118,7 +118,7 @@ export const manifest = {
   id: "bot-combat",
   version: "2.0.1",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "rapier-physics"],
-  optional: ["opening-round"],
+  optional: ["opening-round", "tutorial-session"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read",
@@ -132,6 +132,7 @@ export async function setup(ctx) {
   const weapons = ctx.services.get("weapons");
   const physics = ctx.services.get("physics");
   const opening = ctx.services.has("opening-round") ? ctx.services.get("opening-round") : null;
+  const tutorial = ctx.services.has("tutorial-session") ? ctx.services.get("tutorial-session") : null;
 
   ctx.services.provide("bot-combat", {
     tick(dt, now = Date.now()) {
@@ -143,8 +144,54 @@ export async function setup(ctx) {
         const inventory = ctx.components.get(bot.id, "Weapons");
         if (!transform || !botState) continue;
 
+        const tutorialDirective = tutorial?.botDirective?.(bot.id) ?? "normal";
+        if (tutorialDirective === "passive") {
+          movement.setInput(bot.id, {});
+          botState.reactionUntil = 0;
+          botState.tutorialDemoShotFired = false;
+          continue;
+        }
+
         const selected = inventory?.items?.[inventory.selected] ?? null;
         const weaponRange = Number(weapons.definitions[selected?.id]?.range) || 0;
+
+        if (tutorialDirective === "demonstrate-hit") {
+          const target = perception.nearestVisibleEnemy(
+            bot.id,
+            weaponRange || 28,
+            { humanPriority: 0.1 },
+          ) ?? perception.nearestEnemy(bot.id, weaponRange || 28, { humanPriority: 0.1 });
+          if (!target) {
+            movement.setInput(bot.id, {});
+            botState.reactionUntil = 0;
+            continue;
+          }
+
+          const dx = target.transform.x - transform.x;
+          const dz = target.transform.z - transform.z;
+          const desired = Math.atan2(dx, -dz);
+          const error = wrapAngle(desired - transform.angle);
+          const absoluteError = Math.abs(error);
+          movement.setInput(bot.id, {
+            forward: 0,
+            strafe: 0,
+            turn: Math.max(-1, Math.min(1, error * 3.2)),
+            sprint: false,
+            fireHeld: false,
+          });
+
+          if (absoluteError <= 0.018 && !botState.tutorialDemoShotFired) {
+            if (!botState.reactionUntil) {
+              botState.reactionUntil = now + 220;
+            } else if (now >= botState.reactionUntil && weapons.fire(bot.id, now)) {
+              botState.tutorialDemoShotFired = true;
+              botState.reactionUntil = 0;
+            }
+          } else if (absoluteError > 0.08 && !botState.tutorialDemoShotFired) {
+            botState.reactionUntil = 0;
+          }
+          continue;
+        }
         if (selected && selected.ammo <= 3 && selected.reserve > 0) {
           weapons.reload(bot.id, now);
         }

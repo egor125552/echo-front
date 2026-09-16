@@ -33,7 +33,8 @@ export async function handleEngineControlRequest(room, request) {
   }
 
   const mode = normalizeGameMode(ENGINE_COMMAND_REQUEST.mode);
-  await room.ensureGame(mode);
+  const tutorial = ENGINE_COMMAND_REQUEST.tutorial === true;
+  await room.ensureGame(mode, { tutorial });
   const response = await room.game.command({
     requestId,
     command: ENGINE_COMMAND_REQUEST.command,
@@ -44,6 +45,7 @@ export async function handleEngineControlRequest(room, request) {
     requestId,
     iteration,
     mode,
+    tutorial: ENGINE_COMMAND_REQUEST.tutorial === true,
     command: ENGINE_COMMAND_REQUEST.command,
     executedAt: Date.now(),
     response,

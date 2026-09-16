@@ -201,7 +201,7 @@ export async function setup(ctx) {
       restitution: tuning.restitution,
       linearDamping: tuning.linearDamping,
       angularDamping: tuning.angularDamping,
-      canSleep: false,
+      canSleep: true,
       ccd: true,
       metadata: {
         kind: "vehicle-chassis",
@@ -258,6 +258,7 @@ export async function setup(ctx) {
       type: spec.type,
       tuning,
       controller,
+      body: bodyEntry.body,
       wheelPositions,
       driverId: null,
       passengerIds: [],
@@ -369,6 +370,106 @@ export async function setup(ctx) {
     if (vehicleId === primaryId) return enrichPrimary(originalStateFor(primaryId));
     const entry = extras.get(vehicleId);
     return entry ? extraState(entry) : null;
+  }
+
+  function compactNetworkNitro(raw = {}) {
+    return {
+      active: Boolean(raw.active),
+      ready: Boolean(raw.ready),
+      cooldownSecondsRemaining: Math.max(0, Number(raw.cooldownSecondsRemaining) || 0),
+      cooldownSeconds: Math.max(0, Number(raw.cooldownSeconds) || 0),
+    };
+  }
+
+  function compactNetworkInput(raw = {}) {
+    return {
+      throttle: Number(raw.throttle) || 0,
+      handbrake: Boolean(raw.handbrake),
+    };
+  }
+
+  function compactPrimaryNetworkState(state) {
+    if (!state) return null;
+    return {
+      id: state.id,
+      kind: state.kind ?? "offroad",
+      accessibleName: state.accessibleName ?? "внедорожник",
+      audioProfile: state.audioProfile ?? "truck",
+      x: Number(state.x) || 0,
+      y: Number(state.y) || 0,
+      z: Number(state.z) || 0,
+      angle: Number(state.angle) || 0,
+      speedKph: Math.max(0, Number(state.speedKph) || (Number(state.speed) || 0) * 3.6),
+      forwardSpeed: Number(state.forwardSpeed) || 0,
+      driverId: state.driverId ?? null,
+      occupied: Boolean(state.occupied ?? state.driverId),
+      groundedWheels: Math.max(0, Number(state.groundedWheels) || 0),
+      input: compactNetworkInput(state.input),
+      nitro: compactNetworkNitro(state.nitro),
+    };
+  }
+
+  function networkExtraState(entry, body = bodyState(entry)) {
+    if (!body) return null;
+    const speed = Math.hypot(
+      Number(body.linvel?.x) || 0,
+      Number(body.linvel?.y) || 0,
+      Number(body.linvel?.z) || 0,
+    );
+    const forward = forwardVector(body.rotation);
+    const forwardSpeed = (Number(body.linvel?.x) || 0) * forward.x
+      + (Number(body.linvel?.y) || 0) * forward.y
+      + (Number(body.linvel?.z) || 0) * forward.z;
+    let groundedWheels = 0;
+    for (let i = 0; i < entry.wheelPositions.length; i += 1) {
+      if (entry.controller.wheelIsInContact(i)) groundedWheels += 1;
+    }
+    return {
+      id: entry.id,
+      kind: entry.tuning.kind,
+      accessibleName: entry.tuning.accessibleName,
+      audioProfile: entry.tuning.audioProfile,
+      x: Number(body.x) || 0,
+      y: Number(body.y) || 0,
+      z: Number(body.z) || 0,
+      angle: headingFromRotation(body.rotation),
+      speedKph: speed * 3.6,
+      forwardSpeed,
+      driverId: entry.driverId,
+      occupied: Boolean(entry.driverId),
+      groundedWheels,
+      input: compactNetworkInput(entry.input),
+      nitro: compactNetworkNitro(nitroState(entry)),
+    };
+  }
+
+  function networkSnapshot(options = {}) {
+    const center = options.center ?? null;
+    const radius = Math.max(0, Number(options.radius) || Infinity);
+    const observedEntityId = options.observedEntityId ?? null;
+    const withinInterest = (vehicle) => {
+      if (!vehicle) return false;
+      if (vehicle.driverId === observedEntityId) return true;
+      if (center && Number.isFinite(radius)) return distance3(center, vehicle) <= radius;
+      return true;
+    };
+
+    const result = [];
+    const primary = compactPrimaryNetworkState(enrichPrimary(originalStateFor(primaryId)));
+    if (withinInterest(primary)) result.push(primary);
+
+    for (const entry of extras.values()) {
+      const body = bodyState(entry);
+      if (!body) continue;
+      const alwaysInclude = entry.driverId === observedEntityId
+        || entry.passengerIds.includes(observedEntityId);
+      if (!alwaysInclude && center && Number.isFinite(radius) && distance3(center, body) > radius) {
+        continue;
+      }
+      const state = networkExtraState(entry, body);
+      if (state) result.push(state);
+    }
+    return result;
   }
 
   function snapshot() {
@@ -573,6 +674,7 @@ export async function setup(ctx) {
 
     armor?.cancelPlating?.(playerId, "vehicle-enter");
     entry.driverId = playerId;
+    entry.body?.wakeUp?.();
     extraDriverVehicle.set(playerId, entry.id);
     entry.input = { throttle: 0, steering: 0, handbrake: false, nitro: false };
     entry.handbrakeArmed = false;
@@ -793,6 +895,11 @@ export async function setup(ctx) {
     });
   }
 
+  function extraNeedsVehicleUpdate(entry) {
+    if (entry.driverId || entry.passengerIds.length > 0) return true;
+    return !(entry.body?.isSleeping?.() ?? false);
+  }
+
   function tickPhysics(dt, now = Date.now()) {
     const safeDt = clamp(dt, 0, 0.1);
     if (!(safeDt > 0)) return;
@@ -808,7 +915,9 @@ export async function setup(ctx) {
     // controllers inject wheel forces into that exact same step.
     const originalPhysicsStep = physics.step;
     physics.step = (subDt = PHYSICS_STEP) => {
+      const updatedEntries = [];
       for (const entry of extras.values()) {
+        if (!extraNeedsVehicleUpdate(entry)) continue;
         applyExtraWheelControls(entry);
         entry.controller.updateVehicle(
           subDt,
@@ -816,9 +925,10 @@ export async function setup(ctx) {
           undefined,
           collider => !physics.isCharacterCollider(collider),
         );
+        updatedEntries.push(entry);
       }
       const result = originalPhysicsStep(subDt);
-      for (const entry of extras.values()) finishExtraSubstep(entry);
+      for (const entry of updatedEntries) finishExtraSubstep(entry);
       return result;
     };
     try {
@@ -860,6 +970,8 @@ export async function setup(ctx) {
       supercars: supercars.length,
       offroad: offroad.length,
       occupied: fleet.filter((vehicle) => vehicle.occupied).length,
+      sleepingExtras: [...extras.values()].filter((entry) => entry.body?.isSleeping?.()).length,
+      activeExtraControllers: [...extras.values()].filter(extraNeedsVehicleUpdate).length,
       minimumSeparation: Number.isFinite(minimumSeparation) ? minimumSeparation : null,
       worldHalfSize: map.halfSize,
       vehicles: fleet,
@@ -972,6 +1084,7 @@ export async function setup(ctx) {
     stateFor,
     vehicleForDriver,
     snapshot,
+    networkSnapshot,
     summary,
     assertFleet,
     assertVehicle,

@@ -16,7 +16,7 @@ export async function setup(ctx) {
   let connected = Boolean(network.connected);
 
   function announce(text) {
-    if (!text) return;
+    if (!text || network.tutorial) return;
     if (live) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });

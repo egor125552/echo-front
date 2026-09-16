@@ -393,9 +393,20 @@ async function createRapierPhysics() {
     const shape = new RAPIER.Capsule(halfHeight, CHARACTER_RADIUS);
     if (!downed) {
       let blocked = false;
-      world.intersectionsWithShape(center, { x: 0, y: 0, z: 0, w: 1 }, shape,
-        () => { blocked = true; return false; },
-        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, entry.collider);
+      world.intersectionsWithShape(
+        center,
+        { x: 0, y: 0, z: 0, w: 1 },
+        shape,
+        (collider) => {
+          const kind = colliderMetadata.get(collider.handle)?.kind ?? null;
+          if (CHARACTER_SUPPORT_KINDS.has(kind) || kind === "projectile") return true;
+          blocked = true;
+          return false;
+        },
+        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+        undefined,
+        entry.collider,
+      );
       if (blocked) return false;
     }
     entry.collider.setShape(shape);

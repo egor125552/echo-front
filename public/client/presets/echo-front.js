@@ -37,9 +37,11 @@ import * as lowHealthAudio from "../plugins/low-health-audio.js";
 import * as injuryFeedback from "../plugins/injury-feedback.js";
 import * as hud from "../plugins/game-hud.js";
 import * as announcer from "../plugins/announcer.js";
+import * as tutorialGuide from "../plugins/tutorial-guide.js";
 import * as lootAnnouncer from "../plugins/battle-royale-loot-announcer.js";
 import * as parachuteAnnouncer from "../plugins/parachute-announcer.js";
 import * as vehicleAnnouncer from "../plugins/battle-royale-vehicle-announcer.js";
+import * as developerSettingsUi from "../plugins/developer-settings-ui.js";
 
 export const echoFrontClientPreset = [
   input,
@@ -81,7 +83,9 @@ export const echoFrontClientPreset = [
   injuryFeedback,
   hud,
   announcer,
+  tutorialGuide,
   lootAnnouncer,
   parachuteAnnouncer,
   vehicleAnnouncer,
+  developerSettingsUi,
 ];

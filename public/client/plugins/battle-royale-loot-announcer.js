@@ -9,7 +9,7 @@ export async function setup(ctx) {
   const live = document.querySelector("#announcer");
 
   function announce(text) {
-    if (!text) return;
+    if (!text || network.tutorial) return;
     if (live) {
       live.textContent = "";
       requestAnimationFrame(() => { live.textContent = text; });

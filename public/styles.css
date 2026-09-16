@@ -16,40 +16,54 @@ body {
 }
 
 main {
-  max-width: 52rem;
+  width: min(100% - 1.5rem, 60rem);
   margin: 0 auto;
-  padding: 3rem 1.25rem 5rem;
+  padding: 2rem 0 4rem;
 }
 
 header,
 section,
 details {
-  background: rgba(12, 16, 22, 0.88);
+  background: rgba(12, 16, 22, 0.9);
   border: 1px solid #313a46;
   border-radius: 1rem;
-  padding: 1.25rem;
+  padding: 1.15rem;
   margin-bottom: 1rem;
+}
+
+.main-menu {
+  padding: 1.4rem;
 }
 
 .eyebrow {
   margin: 0 0 0.25rem;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.09em;
   opacity: 0.72;
 }
 
 h1 {
-  margin-top: 0;
-  font-size: clamp(2.3rem, 8vw, 4.8rem);
-  line-height: 0.95;
+  margin: 0;
+  font-size: clamp(2.4rem, 8vw, 4.7rem);
+  line-height: 0.96;
+}
+
+h2,
+h3 {
+  line-height: 1.15;
+}
+
+.menu-description {
+  margin: 0.8rem 0 0;
+  max-width: 42rem;
 }
 
 button {
   display: block;
   width: 100%;
-  margin-top: 1rem;
-  padding: 1rem 1.1rem;
+  margin-top: 0.8rem;
+  padding: 0.95rem 1rem;
   border: 1px solid #76859a;
   border-radius: 0.75rem;
   background: #f4f7fb;
@@ -67,7 +81,8 @@ button:disabled {
 button:focus-visible,
 summary:focus-visible,
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid currentColor;
   outline-offset: 4px;
 }
@@ -77,15 +92,68 @@ button[aria-pressed="true"] {
   color: #061018;
 }
 
+summary {
+  cursor: pointer;
+  font-weight: 760;
+}
+
+.mode-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin-top: 1rem;
+}
+
+.mode-actions button {
+  margin-top: 0;
+  min-height: 3.25rem;
+}
+
+.primary-action {
+  border-width: 2px;
+}
+
+.first-run-recommendation,
+.tutorial-status {
+  margin: 1rem 0 0;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid #76859a;
+  border-radius: 0.75rem;
+  font-weight: 650;
+}
+
+#startup-status:not(:empty),
+.connection-status {
+  margin: 1rem 0 0;
+  font-weight: 700;
+}
+
+.game-panel {
+  padding: 1.2rem;
+}
+
+.match-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.match-heading h2,
+.match-heading p {
+  margin-top: 0;
+}
+
 .settings-grid {
   display: grid;
-  gap: 1rem;
+  gap: 0.9rem;
   margin-top: 1rem;
 }
 
 .setting-row {
   display: grid;
-  gap: 0.6rem;
+  gap: 0.55rem;
   font-weight: 650;
 }
 
@@ -110,44 +178,90 @@ button[aria-pressed="true"] {
 
 .hud {
   display: grid;
+  gap: 0.65rem;
+  margin: 1rem 0;
+}
+
+.hud-primary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.hud-secondary {
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.75rem;
-  margin: 1.25rem 0;
 }
 
 .hud div {
+  min-width: 0;
   border: 1px solid #313a46;
-  border-radius: 0.75rem;
-  padding: 0.85rem;
+  border-radius: 0.7rem;
+  padding: 0.75rem;
 }
 
 .hud dt {
-  font-size: 0.8rem;
-  opacity: 0.7;
+  font-size: 0.78rem;
+  opacity: 0.72;
 }
 
 .hud dd {
-  margin: 0.25rem 0 0;
-  font-size: 1.3rem;
-  font-weight: 700;
+  margin: 0.2rem 0 0;
+  font-size: 1.14rem;
+  font-weight: 720;
+  overflow-wrap: anywhere;
+}
+
+.inline-details {
+  margin: 0.75rem 0 0;
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.inline-details .hud {
+  margin-bottom: 0;
+}
+
+.help-content h2 {
+  font-size: 1rem;
+  margin: 1.1rem 0 0.3rem;
+}
+
+.help-content h2:first-child {
+  margin-top: 0;
+}
+
+.help-content p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.technical-stack > details {
+  margin: 0.8rem 0 0;
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .touch-controls {
-  margin-top: 1.5rem;
+  margin-top: 1.25rem;
   padding-top: 1rem;
   border-top: 1px solid #313a46;
+}
+
+.touch-controls h3 {
+  margin-top: 0;
+}
+
+.touch-help {
+  margin-bottom: 0;
 }
 
 .touch-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.65rem;
-  margin-top: 1rem;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
 }
 
 .touch-grid button,
 .touch-actions button {
-  min-height: 3.25rem;
+  min-height: 3.15rem;
   margin-top: 0;
   touch-action: none;
   user-select: none;
@@ -181,19 +295,34 @@ button[aria-pressed="true"] {
 
 .touch-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.65rem;
-  margin-top: 1rem;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+  margin-top: 0.75rem;
 }
 
-@media (max-width: 34rem) {
-  main {
-    padding: 1.25rem 0.75rem 3rem;
-  }
+dialog {
+  max-width: min(92vw, 44rem);
+  border: 1px solid #76859a;
+  border-radius: 1rem;
+  background: #111820;
+  color: inherit;
+}
 
-  .touch-actions {
-    grid-template-columns: 1fr;
-  }
+dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72);
+}
+
+dialog section {
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+
+textarea {
+  width: 100%;
+  margin-top: 0.5rem;
+  resize: vertical;
 }
 
 .sr-only {
@@ -206,4 +335,32 @@ button[aria-pressed="true"] {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .touch-controls {
+    display: none;
+  }
+}
+
+@media (max-width: 44rem) {
+  main {
+    width: min(100% - 1rem, 60rem);
+    padding-top: 0.75rem;
+  }
+
+  .mode-actions,
+  .hud-primary {
+    grid-template-columns: 1fr;
+  }
+
+  .touch-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 30rem) {
+  .touch-actions {
+    grid-template-columns: 1fr;
+  }
 }

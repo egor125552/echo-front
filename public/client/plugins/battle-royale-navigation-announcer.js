@@ -15,7 +15,7 @@ export async function setup(ctx) {
   let lastMessage = "";
 
   function announce(text, { interrupt = true, repeat = false } = {}) {
-    if (!text || (!repeat && text === lastMessage)) return;
+    if (!text || network.tutorial || (!repeat && text === lastMessage)) return;
     lastMessage = text;
     if (live) {
       live.textContent = "";

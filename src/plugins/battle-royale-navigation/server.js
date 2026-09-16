@@ -678,6 +678,7 @@ export async function setup(ctx) {
         targetId: target.id,
         targetName: target.name,
         targetKind: target.kind,
+        targetLoot: target.metadata?.loot ?? null,
         distance: target.distance,
         distanceMeters: roundedDistance(target.distance),
         outsideSafeZone: Boolean(target.outsideSafeZone),
@@ -750,6 +751,7 @@ export async function setup(ctx) {
       targetId: target.id,
       targetName: target.name,
       targetKind: target.kind,
+      targetLoot: target.metadata?.loot ?? null,
       replaced: replacing,
       distance: route.distance,
       distanceMeters: roundedDistance(route.distance),
@@ -843,6 +845,7 @@ export async function setup(ctx) {
         targetId: target.id,
         targetName: target.name,
         targetKind: target.kind,
+        targetLoot: target.metadata?.loot ?? null,
         vehicleSpeed,
         now,
       });
@@ -901,6 +904,7 @@ export async function setup(ctx) {
         id: selected.id,
         name: selected.name,
         kind: selected.kind,
+        loot: selected.metadata?.loot ?? null,
         distance: selected.distance,
         outsideSafeZone: Boolean(selected.outsideSafeZone),
       } : null,
@@ -909,6 +913,7 @@ export async function setup(ctx) {
         id: active.id,
         name: active.name,
         kind: active.kind,
+        loot: active.metadata?.loot ?? null,
         distance: transform ? distance3(transform, active.position) : active.distance,
         outsideSafeZone: Boolean(active.outsideSafeZone),
       } : null,
@@ -1001,6 +1006,24 @@ export async function setup(ctx) {
       },
     });
   }
+
+  registerProvider("crates", () => (
+    (map.crates ?? [])
+      .filter((crate) => !crate.opened)
+      .map((crate, index) => ({
+        id: `crate:${crate.id}`,
+        name: crate.loot === "armor" ? "Ящик с бронёй" : "Ящик с автоматом",
+        kind: "crate",
+        order: 15 + index * 0.01,
+        arriveDistance: 1.6,
+        position: { x: crate.x, y: crate.y ?? 0, z: crate.z },
+        metadata: {
+          loot: crate.loot ?? null,
+          crateId: crate.id,
+          verticalTolerance: 1.1,
+        },
+      }))
+  ));
 
   registerProvider("vehicles", (playerId) => {
     const counts = new Map();

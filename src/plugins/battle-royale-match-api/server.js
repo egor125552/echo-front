@@ -8,7 +8,7 @@ export const manifest = {
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat", "battle-royale-vehicle-fleet",
   ],
-  optional: ["armor", "aim-steering", "health-regeneration"],
+  optional: ["armor", "aim-steering", "health-regeneration", "battle-royale-tutorial"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read", "events.on", "events.emit",
@@ -37,6 +37,9 @@ export async function setup(ctx) {
   const aimSteering = ctx.services.has("aim-steering") ? ctx.services.get("aim-steering") : null;
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
+    : null;
+  const tutorial = ctx.services.has("battle-royale-tutorial")
+    ? ctx.services.get("battle-royale-tutorial")
     : null;
   let humanSerial = 0;
   const expiredHumanSessions = new Set();
@@ -131,6 +134,7 @@ export async function setup(ctx) {
       armorReserve: 0,
       weapons: ["pistol"],
     });
+    tutorial?.start?.(playerId);
     battleRoyale.arm(Date.now());
     return { playerId, team, resumed: false, mode: "battle-royale" };
   }
@@ -217,6 +221,7 @@ export async function setup(ctx) {
   function handleInput(playerId, input = {}, now = Date.now()) {
     const entity = entities.get(playerId);
     if (!entity?.alive) return;
+    tutorial?.handleInput?.(playerId, input, now);
 
     if (!battleRoyale.canAct(now)) {
       movement.setInput(playerId, {});
@@ -354,11 +359,13 @@ export async function setup(ctx) {
       const radius = entity.alive ? ENTITY_INTEREST_RADIUS : 30;
       if (distance2(listenerTransform, transform) <= radius) visible.push(entitySnapshot(entity));
     }
+    const tutorialState = tutorial?.describe?.(playerId) ?? null;
     return {
       now,
       mode: "battle-royale",
       map: mapSnapshot(listenerTransform),
       match: battleRoyale.status(now),
+      ...(tutorialState ? { tutorial: tutorialState } : {}),
       playerPlacement: battleRoyale.placementOf(playerId),
       spectator: spectatorTarget ? {
         active: true,

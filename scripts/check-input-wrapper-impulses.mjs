@@ -3,27 +3,27 @@ import { readFile } from 'node:fs/promises';
 
 const cases = [
   {
-    file: 'client/plugins/parachute-input.js',
+    file: 'public/client/plugins/parachute-input.js',
     pattern: /parachutePressed:\s*mergeParachutePressed\(sampled, pressed\)/,
     message: 'parachute wrapper must preserve keyboard-input parachutePressed',
   },
   {
-    file: 'client/plugins/parkour-input.js',
+    file: 'public/client/plugins/parkour-input.js',
     pattern: /posePressed:\s*Boolean\(sampled\.posePressed \|\| pressed\)/,
     message: 'parkour wrapper must preserve an existing posePressed impulse',
   },
   {
-    file: 'client/plugins/battle-royale-navigation.js',
+    file: 'public/client/plugins/battle-royale-navigation.js',
     pattern: /navigationNextPressed:\s*Boolean\(sampled\.navigationNextPressed \|\| next\)[\s\S]*navigationTogglePressed:\s*Boolean\(sampled\.navigationTogglePressed \|\| toggle\)/,
     message: 'navigation wrapper must preserve existing navigation impulses',
   },
   {
-    file: 'client/plugins/battle-royale-navigation-face.js',
+    file: 'public/client/plugins/battle-royale-navigation-face.js',
     pattern: /navigationFacePressed:\s*Boolean\(sampled\.navigationFacePressed \|\| face\)/,
     message: 'navigation face wrapper must preserve an existing face impulse',
   },
   {
-    file: 'client/plugins/accessible-menus.js',
+    file: 'public/client/plugins/accessible-menus.js',
     pattern: /navigationTogglePressed:\s*Boolean\(base\.navigationTogglePressed \|\| navigation\.activate\)/,
     message: 'accessible menu wrapper must preserve an existing navigation toggle impulse',
   },

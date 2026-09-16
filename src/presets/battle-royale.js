@@ -46,8 +46,11 @@ import * as warehouseTraffic from "../plugins/battle-royale-bot-warehouse-traffi
 import * as warehouseCombatFlow from "../plugins/battle-royale-bot-warehouse-combat-flow/server.js";
 import * as botObserver from "../plugins/battle-royale-observer/server.js";
 import * as botFill from "../plugins/battle-royale-bot-fill/server.js";
+import * as tutorialBotFill from "../plugins/battle-royale-tutorial-bot-fill/server.js";
+import * as battleRoyaleTutorial from "../plugins/battle-royale-tutorial/server.js";
 import * as vehicle from "../plugins/battle-royale-vehicle/server.js";
 import * as vehicleFleet from "../plugins/battle-royale-vehicle-fleet/server.js";
+import * as tutorialVehicleFleet from "../plugins/battle-royale-tutorial-vehicle-fleet/server.js";
 import * as objectAffordances from "../plugins/battle-royale-object-affordances/server.js";
 import * as ragdoll from "../plugins/battle-royale-ragdoll/server.js";
 import * as ragdollTuning from "../plugins/battle-royale-ragdoll-tuning/server.js";
@@ -81,6 +84,7 @@ import * as projectileLifecycle from "../plugins/rapier-projectile-lifecycle/ser
 import * as injury from "../plugins/battle-royale-injury/server.js";
 import * as injuryIntegration from "../plugins/battle-royale-injury/integration.js";
 import * as botVehicles from "../plugins/battle-royale-bot-vehicles/server.js";
+import * as developerSettings from "../plugins/developer-settings/server.js";
 
 export const battleRoyalePreset = [
   entities,
@@ -166,4 +170,18 @@ export const battleRoyalePreset = [
   injury,
   injuryIntegration,
   botVehicles,
+  developerSettings,
+];
+
+const tutorialBase = battleRoyalePreset.map((plugin) => {
+  if (plugin === botFill) return tutorialBotFill;
+  if (plugin === vehicleFleet) return tutorialVehicleFleet;
+  return plugin;
+});
+const tutorialCombatIndex = tutorialBase.indexOf(botCombat);
+
+export const battleRoyaleTutorialPreset = [
+  ...tutorialBase.slice(0, tutorialCombatIndex),
+  battleRoyaleTutorial,
+  ...tutorialBase.slice(tutorialCombatIndex),
 ];

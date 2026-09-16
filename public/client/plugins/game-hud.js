@@ -37,7 +37,13 @@ export async function setup(ctx) {
     const isBr = snapshot.mode === "battle-royale" || snapshot.match?.mode === "battle-royale";
     const observedId = snapshot?.spectator?.active ? snapshot.spectator.targetId : network.playerId;
     const observed = snapshot?.entities?.find((entity) => entity.id === observedId) ?? self;
-    if (mode) mode.textContent = isBr ? "Королевская битва" : "Командный бой";
+    if (mode) {
+      mode.textContent = network.tutorial
+        ? "Обучение"
+        : isBr
+          ? "Королевская битва"
+          : "Командный бой";
+    }
     team.textContent = isBr ? "каждый сам за себя" : String(self.team || "-");
     score.textContent = isBr
       ? "без командного счёта"

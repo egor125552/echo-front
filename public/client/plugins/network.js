@@ -58,6 +58,7 @@ export async function setup(ctx) {
   let playerId = sessionId;
   let desiredRoom = null;
   let desiredMode = "tdm";
+  let desiredTutorial = false;
   let reconnectTimer = null;
   let reconnectAttempt = 0;
 
@@ -128,8 +129,9 @@ export async function setup(ctx) {
 
     const room = desiredRoom;
     const mode = desiredMode;
+    const tutorial = desiredTutorial;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}`;
+    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}&tutorial=${tutorial ? "1" : "0"}`;
     let ws;
     try {
       ws = new WebSocket(url);
@@ -153,6 +155,7 @@ export async function setup(ctx) {
       ctx.events.emit("network:connected", {
         room,
         mode,
+        tutorial,
         reconnecting: reconnectAttempt > 0,
       });
     });
@@ -232,15 +235,17 @@ export async function setup(ctx) {
     });
   }
 
-  function connect(room = "public", { mode = "tdm" } = {}) {
+  function connect(room = "public", { mode = "tdm", tutorial = false } = {}) {
     desiredRoom = room;
     desiredMode = normalizeMode(mode);
+    desiredTutorial = Boolean(tutorial);
     clearReconnectTimer();
     openSocket();
   }
 
   function disconnect() {
     desiredRoom = null;
+    desiredTutorial = false;
     reconnectAttempt = 0;
     clearReconnectTimer();
     const ws = socket;
@@ -257,6 +262,7 @@ export async function setup(ctx) {
     get sessionId() { return sessionId; },
     get room() { return desiredRoom; },
     get mode() { return desiredMode; },
+    get tutorial() { return desiredTutorial; },
     get connected() { return socket?.readyState === WebSocket.OPEN; },
     get reconnecting() { return Boolean(desiredRoom && !this.connected); },
   });

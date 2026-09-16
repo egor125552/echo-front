@@ -67,6 +67,7 @@ export async function setup(ctx) {
     lastSelf = null;
     lastZone = null;
     lastZoneWarningAt = 0;
+    if (network.tutorial) return;
     if (mode === "battle-royale") {
       announce(
         resumed
@@ -76,16 +77,11 @@ export async function setup(ctx) {
       );
       return;
     }
-    announce(
-      `Вы в команде ${team}. Первый раунд учебный. ` +
-      "Стрелка вверх — вперёд, вниз — назад, влево — движение влево, вправо — движение вправо. Стрелки можно удерживать и сочетать. " +
-      "X — огонь, X можно удерживать. R — перезарядка. B — поставить одну бронепластину. Shift — бег. Удерживайте Z и нажимайте стрелки влево или вправо, чтобы сменить оружие. " +
-      "На сенсорном экране доступны отдельные кнопки движения, стопа, огня, бега, перезарядки, бронепластины и смены оружия.",
-      { interrupt: true },
-    );
+    announce(`Вы в команде ${team}. Командный бой начался.`, { interrupt: true });
   });
 
   ctx.events.on("game:snapshot", (snapshot) => {
+    if (network.tutorial) return;
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
     if (!self) return;
     lastSelf = self;
@@ -127,6 +123,7 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("game:event", (packet) => {
+    if (network.tutorial) return;
     const payload = packet.payload ?? {};
 
     if (packet.event === "movement:blocked" && payload.recipientId === network.playerId) {
@@ -257,11 +254,14 @@ export async function setup(ctx) {
     }
 
     if (packet.event === "match:ended") {
-      const unlock = Number(payload.roundNumber) === 1 ? " Автомат открыт. Учебный режим завершён." : "";
+      if (network.tutorial) return;
+      const unlock = Number(payload.roundNumber) === 1 ? " Автомат открыт." : "";
       if (payload.winner === 0) announce(`Раунд завершён вничью.${unlock} Новый раунд через пять секунд`, { interrupt: true });
       else if (payload.winner === team) announce(`Победа.${unlock} Новый раунд через пять секунд`, { interrupt: true });
       else announce(`Поражение.${unlock} Новый раунд через пять секунд`, { interrupt: true });
     }
-    if (packet.event === "match:started") announce(`Раунд ${payload.roundNumber ?? ""}. В бой`, { interrupt: true });
+    if (packet.event === "match:started" && !network.tutorial) {
+      announce(`Раунд ${payload.roundNumber ?? ""}. В бой`, { interrupt: true });
+    }
   });
 }

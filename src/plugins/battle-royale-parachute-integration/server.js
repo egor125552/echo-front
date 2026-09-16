@@ -5,7 +5,7 @@ export const manifest = {
     "match-api", "battle-royale-parachute", "battle-royale", "movement",
     "rapier-physics", "entities", "battle-royale-vehicle",
   ],
-  optional: ["health-regeneration"],
+  optional: ["health-regeneration", "armor", "weapons", "battle-royale-tutorial"],
   capabilities: [
     "services.consume",
     "components.read", "components.write",
@@ -43,6 +43,11 @@ export async function setup(ctx) {
   const vehicles = ctx.services.get("vehicles");
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
+    : null;
+  const armor = ctx.services.has("armor") ? ctx.services.get("armor") : null;
+  const weapons = ctx.services.has("weapons") ? ctx.services.get("weapons") : null;
+  const tutorial = ctx.services.has("battle-royale-tutorial")
+    ? ctx.services.get("battle-royale-tutorial")
     : null;
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
@@ -227,7 +232,9 @@ export async function setup(ctx) {
   }
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
-    if (input.parachutePressed) parachute.toggle(playerId, now);
+    if (input.parachutePressed && !tutorial?.blocksParachuteInput?.(playerId)) {
+      parachute.toggle(playerId, now);
+    }
     return originalHandleInput(playerId, input, now);
   };
 
@@ -245,6 +252,8 @@ export async function setup(ctx) {
       // of waiting for the last parachute to touch down.
       vehicles.tickPhysics(dt, now);
       movement.tick(dt, now);
+      armor?.tick?.(now);
+      weapons?.tickAutomatic?.(now);
     } else {
       result = originalStep(dt, now);
     }

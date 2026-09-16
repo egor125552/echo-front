@@ -7,7 +7,7 @@ export const manifest = {
   ],
   optional: [
     "armor", "weapon-progression", "opening-round", "aim-steering",
-    "health-regeneration",
+    "health-regeneration", "tutorial-session",
   ],
   capabilities: [
     "services.consume", "services.provide",
@@ -30,6 +30,9 @@ export async function setup(ctx) {
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
     : null;
+  const tutorial = ctx.services.has("tutorial-session")
+    ? ctx.services.get("tutorial-session")
+    : null;
 
   botFill.ensure();
 
@@ -47,6 +50,7 @@ export async function setup(ctx) {
         throw new Error(`Session id already belongs to a non-human entity: ${playerId}`);
       }
       movement.setInput(playerId, {});
+      tutorial?.start?.(playerId);
       return {
         playerId,
         team: teams.teamOf(playerId),
@@ -72,6 +76,7 @@ export async function setup(ctx) {
     });
     botFill.ensure();
     opening?.arrangeForHuman(playerId);
+    tutorial?.start?.(playerId);
     return { playerId, team, resumed: false };
   }
 
@@ -102,6 +107,7 @@ export async function setup(ctx) {
   function handleInput(playerId, input = {}, now = Date.now()) {
     const entity = entities.get(playerId);
     if (!entity?.alive) return;
+    tutorial?.handleInput?.(playerId, input, now);
     const ended = tdm.status(now).ended;
 
     if (!ended && input.platePressed && armorService?.startPlating(playerId, now)) {
@@ -134,6 +140,9 @@ export async function setup(ctx) {
     if (!tdm.status(now).ended) {
       botCombat.tick(dt, now);
       movement.tick(dt, now);
+      for (const entity of entities.all()) {
+        if (!entity.bot) tutorial?.tick?.(entity.id, now);
+      }
       weapons.tickAutomatic(now);
       healthRegeneration?.tick(dt, now);
     }
@@ -181,6 +190,12 @@ export async function setup(ctx) {
     };
   }
 
+  function snapshotFor(playerId, now = Date.now()) {
+    const base = snapshot(now);
+    const tutorialState = tutorial?.describe?.(playerId) ?? null;
+    return tutorialState ? { ...base, tutorial: tutorialState } : base;
+  }
+
   ctx.services.provide("match-api", {
     connectHuman,
     suspendHuman,
@@ -188,5 +203,6 @@ export async function setup(ctx) {
     handleInput,
     step,
     snapshot,
+    snapshotFor,
   });
 }

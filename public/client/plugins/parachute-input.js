@@ -55,7 +55,7 @@ export async function setup(ctx) {
   }
 
   function announce(text) {
-    if (!text) return;
+    if (!text || network.tutorial) return;
     // When browser TTS is enabled, the shared speech service owns retries and
     // fallback. Doing a second local watchdog here can produce duplicate speech.
     if (speech.enabled) {
