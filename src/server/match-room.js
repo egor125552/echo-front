@@ -9,6 +9,7 @@ import {
   reconnectExpired,
 } from "./room-lifecycle.js";
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
+import { summarizePerformanceSamples } from "./performance-samples.js";
 
 const HOT_RECONNECT_KEEPALIVE_MS = 8000;
 const LAST_RUNTIME_ERROR_KEY = "last-runtime-error-v1";
@@ -58,6 +59,7 @@ export class MatchRoom extends DurableObject {
     this.disconnectedHumans = new Map();
     this.hotReconnectUntil = 0;
     this.diagnosticsStats = freshDiagnosticsStats();
+    this.inputSamples = [];
     this.lastRuntimeError = null;
 
     ctx.blockConcurrencyWhile(async () => {
@@ -159,6 +161,7 @@ export class MatchRoom extends DurableObject {
       this.lastStepAt = Date.now();
       this.lastSnapshotAt = 0;
       this.diagnosticsStats = freshDiagnosticsStats();
+      this.inputSamples = [];
     }
     return this.game;
   }
@@ -207,16 +210,38 @@ export class MatchRoom extends DurableObject {
       droppedMs: result.droppedMs,
       steps: result.steps,
     };
-    stats.tickSamples.push({
+    const sample = {
       at: now,
       wallMs: Number(wallMs.toFixed(3)),
+      gapMs: 0,
       simulatedMs: result.simulatedMs,
       droppedMs: result.droppedMs,
       steps: result.steps,
       sockets: activeSocketCount(this.ctx.getWebSockets()),
-    });
-    const max = Math.max(10, ENGINE_DIAGNOSTICS_CONTROL.maxTickSamples || 120);
+      eventsSent: 0,
+      eventCharacters: 0,
+      snapshotsSent: 0,
+      snapshotCharacters: 0,
+    };
+    stats.tickSamples.push(sample);
+    const max = Math.max(60, ENGINE_DIAGNOSTICS_CONTROL.maxTickSamples || 120);
     if (stats.tickSamples.length > max) stats.tickSamples.splice(0, stats.tickSamples.length - max);
+    return sample;
+  }
+
+  performanceReport(now = Date.now()) {
+    const tick = summarizePerformanceSamples(this.diagnosticsStats.tickSamples, now);
+    const inputs = this.inputSamples.filter((sample) => sample.at >= now - tick.windowMs);
+    const entities = this.game?.host?.services?.get("entities")?.all?.() ?? [];
+    return {
+      serverNow: now,
+      mode: this.mode,
+      players: entities.filter((entity) => !entity.bot).length,
+      bots: entities.filter((entity) => entity.bot).length,
+      sockets: activeSocketCount(this.ctx.getWebSockets()),
+      ...tick,
+      inputCount: inputs.length,
+    };
   }
 
   runGameLoopTick() {
@@ -233,10 +258,12 @@ export class MatchRoom extends DurableObject {
     this.hotReconnectUntil = 0;
     const startedAt = monotonicNow();
     try {
+      const previousStepAt = this.lastStepAt;
       this.cleanupDisconnectedHumans(now);
-      const result = advanceSimulation(this.game, this.lastStepAt, now);
+      const result = advanceSimulation(this.game, previousStepAt, now);
       this.lastStepAt = result.lastStepAt;
-      this.recordTickDiagnostics(now, startedAt, result);
+      const sample = this.recordTickDiagnostics(now, startedAt, result);
+      sample.gapMs = Math.max(0, now - previousStepAt);
       if (result.droppedMs > 0) {
         console.warn(JSON.stringify({
           event: "echo-front-simulation-catchup-capped",
@@ -244,8 +271,8 @@ export class MatchRoom extends DurableObject {
           simulatedMs: result.simulatedMs,
         }));
       }
-      this.broadcastEvents();
-      this.broadcastSnapshot();
+      this.broadcastEvents(sample);
+      this.broadcastSnapshot(false, sample);
     } catch (error) {
       this.reportRuntimeError(error, { phase: "game-loop", mode: this.mode });
     }
@@ -365,7 +392,15 @@ export class MatchRoom extends DurableObject {
       try { data = JSON.parse(message); } catch { return; }
       if (!playerId) return;
       const now = Date.now();
-      if (data.type === "input") this.game.api.handleInput(playerId, data.input ?? {}, now);
+      if (data.type === "input") {
+        this.game.api.handleInput(playerId, data.input ?? {}, now);
+        this.inputSamples.push({ at: now });
+        if (this.inputSamples.length > 240) this.inputSamples.splice(0, this.inputSamples.length - 240);
+      }
+      if (data.type === "perf-probe" && Number.isSafeInteger(data.id)
+        && data.id >= 0 && data.id <= 1_000_000_000) {
+        ws.send(JSON.stringify({ type: "perf-pong", id: data.id, server: this.performanceReport(now) }));
+      }
       if (tutorial && data.type === "tutorial:speech-complete") {
         this.game.api.tutorialAcknowledge?.(playerId, data.phase, now);
       }
@@ -443,12 +478,13 @@ export class MatchRoom extends DurableObject {
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
     this.diagnosticsStats = freshDiagnosticsStats();
+    this.inputSamples = [];
     this.lastRuntimeError = null;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
   }
 
-  broadcastEvents() {
+  broadcastEvents(performanceSample = null) {
     if (!this.game) return;
     const packets = this.game.drainEvents();
     if (!packets.length) return;
@@ -461,7 +497,12 @@ export class MatchRoom extends DurableObject {
           ? this.game.api.eventsForPlayer(playerId, packets)
           : packets;
         if (!selected.length) continue;
-        socket.send(JSON.stringify({ type: "events", events: selected }));
+        const message = JSON.stringify({ type: "events", events: selected });
+        socket.send(message);
+        if (performanceSample) {
+          performanceSample.eventsSent += selected.length;
+          performanceSample.eventCharacters += message.length;
+        }
       } catch (error) {
         let playerId = null;
         try { playerId = socket.deserializeAttachment()?.playerId ?? null; } catch {}
@@ -474,7 +515,7 @@ export class MatchRoom extends DurableObject {
     }
   }
 
-  broadcastSnapshot(force = false) {
+  broadcastSnapshot(force = false, performanceSample = null) {
     if (!this.game) return;
     const now = Date.now();
     const interval = Number(this.game.api.snapshotIntervalMs) || 100;
@@ -491,7 +532,13 @@ export class MatchRoom extends DurableObject {
         return;
       }
       for (const socket of this.ctx.getWebSockets()) {
-        try { socket.send(message); } catch (error) {
+        try {
+          socket.send(message);
+          if (performanceSample) {
+            performanceSample.snapshotsSent += 1;
+            performanceSample.snapshotCharacters += message.length;
+          }
+        } catch (error) {
           let playerId = null;
           try { playerId = socket.deserializeAttachment()?.playerId ?? null; } catch {}
           this.reportRuntimeError(error, {
@@ -507,10 +554,15 @@ export class MatchRoom extends DurableObject {
     for (const socket of this.ctx.getWebSockets()) {
       try {
         const playerId = socket.deserializeAttachment()?.playerId;
-        socket.send(JSON.stringify({
+        const message = JSON.stringify({
           type: "snapshot",
           snapshot: this.game.api.snapshotFor(playerId, now),
-        }));
+        });
+        socket.send(message);
+        if (performanceSample) {
+          performanceSample.snapshotsSent += 1;
+          performanceSample.snapshotCharacters += message.length;
+        }
       } catch (error) {
         let playerId = null;
         try { playerId = socket.deserializeAttachment()?.playerId ?? null; } catch {}

@@ -117,11 +117,12 @@ function header(epochMs) {
     s: "[s,t,serverNow,round,remaining,score1,score2,ended,winner,targetScore,changes,removed] raw authoritative snapshot delta",
     c: `change=[entityIndex,bitmask,values...] bits: ${ENTITY_FIELDS.join(",")}`,
     e: "[e,t,event,payload] authoritative game event",
-    m: "[m,t,name,data] journal/network/navigation/speech marker",
+    m: "[m,t,name,data] journal/network/navigation/speech/performance marker",
   }];
 }
 
 export async function setup(ctx) {
+  const network = ctx.services.get("network");
   const enabledInput = document.querySelector("#journal-enabled");
   const downloadButton = document.querySelector("#journal-download");
   const clearButton = document.querySelector("#journal-clear");
@@ -138,6 +139,10 @@ export async function setup(ctx) {
   let nextEntityIndex = 1;
   let sawRawSnapshot = false;
   let lastGuidanceSignature = null;
+  let performanceRequestId = 0;
+  let pendingPerformance = null;
+  let lastPerformanceTimerAt = performance.now();
+  let journalSnapshotCost = { count: 0, totalMs: 0, maxMs: 0 };
 
   function stamp() {
     return Math.max(0, Math.round(performance.now() - startedAtPerf));
@@ -160,6 +165,8 @@ export async function setup(ctx) {
     nextEntityIndex = 1;
     sawRawSnapshot = false;
     lastGuidanceSignature = null;
+    pendingPerformance = null;
+    journalSnapshotCost = { count: 0, totalMs: 0, maxMs: 0 };
     updateUi();
   }
 
@@ -224,6 +231,8 @@ export async function setup(ctx) {
   }
 
   function recordSnapshot(snapshot = {}) {
+    if (!enabled) return;
+    const startedAt = performance.now();
     const timeMs = stamp();
     const changes = [];
     const currentIds = new Set();
@@ -264,6 +273,10 @@ export async function setup(ctx) {
       changes,
       removed,
     ]);
+    const durationMs = performance.now() - startedAt;
+    journalSnapshotCost.count += 1;
+    journalSnapshotCost.totalMs += durationMs;
+    journalSnapshotCost.maxMs = Math.max(journalSnapshotCost.maxMs, durationMs);
   }
 
   function compactSpeechState(state = {}) {
@@ -333,6 +346,49 @@ export async function setup(ctx) {
   });
 
   clearButton?.addEventListener("click", resetJournal);
+
+  // Only when journal recording is enabled: one small WebSocket probe per two
+  // seconds, with no extra world snapshots and no per-tick journal entries.
+  setInterval(() => {
+    const now = performance.now();
+    const timerDelayMs = Math.max(0, now - lastPerformanceTimerAt - 2000);
+    lastPerformanceTimerAt = now;
+    if (!enabled || !network.connected) {
+      pendingPerformance = null;
+      return;
+    }
+    if (pendingPerformance) {
+      if (now - pendingPerformance.sentAt < 6000) return;
+      append(["m", stamp(), "performance-timeout", {
+        requestId: pendingPerformance.id,
+        elapsedMs: round(now - pendingPerformance.sentAt, 1),
+      }]);
+      pendingPerformance = null;
+    }
+    performanceRequestId = (performanceRequestId + 1) % 1_000_000_000;
+    const id = performanceRequestId;
+    pendingPerformance = { id, sentAt: now, timerDelayMs };
+    if (!network.send("perf-probe", { id })) pendingPerformance = null;
+  }, 2000);
+
+  ctx.events.on("network:perf-pong", ({ id, server, client, receivedAt } = {}) => {
+    if (!enabled || !pendingPerformance || id !== pendingPerformance.id) return;
+    const { sentAt, timerDelayMs } = pendingPerformance;
+    pendingPerformance = null;
+    const count = journalSnapshotCost.count;
+    append(["m", stamp(), "performance", {
+      roundTripMs: round(receivedAt - sentAt, 1),
+      browserTimerDelayMs: round(timerDelayMs, 1),
+      server,
+      client,
+      journal: {
+        snapshotCount: count,
+        avgSnapshotWriteMs: round(count ? journalSnapshotCost.totalMs / count : 0, 1),
+        maxSnapshotWriteMs: round(journalSnapshotCost.maxMs, 1),
+      },
+    }]);
+    journalSnapshotCost = { count: 0, totalMs: 0, maxMs: 0 };
+  });
 
   ctx.events.on("input:key", ({ code, down }) => {
     const key = KEY_IDS[code];

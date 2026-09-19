@@ -61,6 +61,25 @@ export async function setup(ctx) {
   let desiredTutorial = false;
   let reconnectTimer = null;
   let reconnectAttempt = 0;
+  let frameStats = {
+    snapshots: 0, maxSnapshotGapMs: 0, lastSnapshotAt: 0,
+    maxParseMs: 0, maxDispatchMs: 0, receivedCharacters: 0,
+  };
+
+  function takeFrameStats() {
+    const { lastSnapshotAt, ...result } = frameStats;
+    frameStats = {
+      snapshots: 0, maxSnapshotGapMs: 0, lastSnapshotAt,
+      maxParseMs: 0, maxDispatchMs: 0, receivedCharacters: 0,
+    };
+    return {
+      ...result,
+      maxSnapshotGapMs: Math.round(result.maxSnapshotGapMs * 10) / 10,
+      maxParseMs: Math.round(result.maxParseMs * 10) / 10,
+      maxDispatchMs: Math.round(result.maxDispatchMs * 10) / 10,
+      outgoingBufferedBytes: socket?.bufferedAmount ?? 0,
+    };
+  }
 
   function send(type, payload = {}) {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
@@ -150,6 +169,10 @@ export async function setup(ctx) {
 
     ws.addEventListener("open", () => {
       if (socket !== ws) return;
+      frameStats = {
+        snapshots: 0, maxSnapshotGapMs: 0, lastSnapshotAt: 0,
+        maxParseMs: 0, maxDispatchMs: 0, receivedCharacters: 0,
+      };
       input.enable();
       sendInput({ reason: "network:open" });
       ctx.events.emit("network:connected", {
@@ -162,6 +185,7 @@ export async function setup(ctx) {
 
     ws.addEventListener("message", (event) => {
       if (socket !== ws) return;
+      const arrivedAt = performance.now();
       let data;
       try {
         data = JSON.parse(event.data);
@@ -174,6 +198,26 @@ export async function setup(ctx) {
           message: String(error?.message ?? "Invalid server message"),
         });
         return;
+      }
+      const parsedAt = performance.now();
+      if (data.type === "perf-pong") {
+        ctx.events.emit("network:perf-pong", {
+          id: data.id, server: data.server ?? null,
+          client: takeFrameStats(),
+          receivedAt: performance.now(),
+        });
+        return;
+      }
+      frameStats.maxParseMs = Math.max(frameStats.maxParseMs, parsedAt - arrivedAt);
+      frameStats.receivedCharacters += event.data.length;
+      if (data.type === "welcome" || data.type === "snapshot") {
+        if (frameStats.lastSnapshotAt > 0) {
+          frameStats.maxSnapshotGapMs = Math.max(
+            frameStats.maxSnapshotGapMs, arrivedAt - frameStats.lastSnapshotAt,
+          );
+        }
+        frameStats.lastSnapshotAt = arrivedAt;
+        frameStats.snapshots += 1;
       }
       if (data.type === "welcome") {
         const wasReconnect = reconnectAttempt > 0 || data.resumed === true;
@@ -203,6 +247,7 @@ export async function setup(ctx) {
           error: data.error ?? null,
         });
       }
+      frameStats.maxDispatchMs = Math.max(frameStats.maxDispatchMs, performance.now() - parsedAt);
     });
 
     ws.addEventListener("close", (event) => {
