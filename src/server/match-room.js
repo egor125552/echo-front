@@ -366,6 +366,9 @@ export class MatchRoom extends DurableObject {
       if (!playerId) return;
       const now = Date.now();
       if (data.type === "input") this.game.api.handleInput(playerId, data.input ?? {}, now);
+      if (tutorial && data.type === "tutorial:speech-complete") {
+        this.game.api.tutorialAcknowledge?.(playerId, data.phase, now);
+      }
       this.startGameLoop();
       this.broadcastEvents();
     } catch (error) {

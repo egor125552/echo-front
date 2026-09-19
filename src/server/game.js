@@ -61,6 +61,9 @@ export async function createEchoFrontGame({ mode = "tdm", tutorial = false } = {
     ? (training ? battleRoyaleTutorialPreset : battleRoyalePreset)
     : (training ? echoFrontTutorialPreset : echoFrontPreset);
   const host = await new PluginHost({ plugins: preset }).start();
+  const tutorialService = training
+    ? host.services.get(normalizedMode === "battle-royale" ? "battle-royale-tutorial" : "tutorial-session")
+    : null;
   const events = [];
   host.events.on("*", (packet) => {
     if (!shouldForwardEvent(packet.event)) return;
@@ -97,6 +100,10 @@ export async function createEchoFrontGame({ mode = "tdm", tutorial = false } = {
       .slice();
   };
   game.api.enginePendingEventCount = () => events.length;
+  // The room authenticates the player from the WebSocket attachment.
+  game.api.tutorialAcknowledge = (playerId, phase, now = Date.now()) => (
+    tutorialService?.acknowledgeSpeech?.(playerId, phase, now) ?? false
+  );
 
   const engineConsole = createEngineConsole(game);
   game.command = (request) => engineConsole.execute(request);

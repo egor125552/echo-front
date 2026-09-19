@@ -131,12 +131,8 @@ export async function setup(ctx) {
     const transform = ctx.components.get(entityId, "Transform");
     if (!transform) return;
     if (advance(entityId, "automatic-parachute", now)) {
-      parachute.launch(entityId, {
-        altitude: 90,
-        x: transform.x,
-        z: transform.z,
-        angle: transform.angle,
-      }, (Number(now) || Date.now()) + 1);
+      // The player hears the entire safety instruction before relaunching.
+      state.automaticParachutePending = true;
     }
   });
 
@@ -295,6 +291,20 @@ export async function setup(ctx) {
         rifleCollected: state.rifleCollected,
         armorCollected: state.armorCollected,
       };
+    },
+    acknowledgeSpeech(playerId, phase, now = Date.now()) {
+      const state = ensure(playerId);
+      if (phase !== "automatic-parachute" || state?.phase !== phase
+        || !state.automaticParachutePending) return false;
+      const transform = ctx.components.get(playerId, "Transform");
+      if (!transform || !entities.get(playerId)?.alive) return false;
+      state.automaticParachutePending = false;
+      return Boolean(parachute.launch(playerId, {
+        altitude: 90,
+        x: transform.x,
+        z: transform.z,
+        angle: transform.angle,
+      }, now));
     },
     blocksParachuteInput(playerId) {
       return ensure(playerId)?.phase === "automatic-parachute";
