@@ -112,8 +112,8 @@ export async function setup(ctx) {
 
   function startAutomaticIfNeeded() {
     stopAutomatic();
-    if (selfState.weapon !== "rifle") return;
-    automaticTimer = setInterval(() => { void playOwnShot(); }, 100);
+    if (selfState.weapon !== "rifle" && selfState.weapon !== "pistol") return;
+    automaticTimer = setInterval(() => { void playOwnShot(); }, selfState.weapon === "rifle" ? 100 : 200);
   }
 
   async function playFeedback(key, url) {

@@ -28,9 +28,32 @@ function rotateDirection(direction, radians) {
   return { x: Math.sin(heading), z: -Math.cos(heading) };
 }
 
+function stableHash(value) {
+  let hash = 2166136261;
+  for (const char of String(value)) {
+    hash = Math.imul(hash ^ char.charCodeAt(0), 16777619);
+  }
+  return hash >>> 0;
+}
+
+// Repeatable per-bot variation: no global random calls or perfect machine-gun taps.
+export function botFireRhythm(botId, weaponId, cycle = 1) {
+  const seed = stableHash(`${botId}:${weaponId}:${cycle}`);
+  if (weaponId === "rifle") return {
+    shotMs: 100,
+    burstMs: 450 + (seed % 430),
+    pauseMs: 160 + ((seed >>> 8) % 270),
+  };
+  return {
+    shotMs: 105 + (seed % 95),
+    burstMs: 440 + ((seed >>> 8) % 410),
+    pauseMs: 145 + ((seed >>> 16) % 290),
+  };
+}
+
 export const BOT_FIRE_CONE_RADIANS = 0.09;
 export const BOT_AIM_RESET_RADIANS = 0.16;
-export const BOT_REACTION_BASE_MS = 420;
+export const BOT_REACTION_BASE_MS = 285;
 export const BOT_OBSTACLE_PROBE_DISTANCE = 1.45;
 export const BOT_STUCK_SAMPLE_MS = 300;
 export const BOT_STUCK_DISTANCE = 0.055;
@@ -196,6 +219,14 @@ export async function setup(ctx) {
           weapons.reload(bot.id, now);
         }
 
+        function clearFireTarget() {
+          botState.reactionTargetId = null;
+          botState.reactionUntil = 0;
+          botState.burstUntil = 0;
+          botState.nextBurstAt = 0;
+          botState.nextShotAt = 0;
+        }
+
         const visibleTarget = perception.nearestVisibleEnemy(
           bot.id,
           weaponRange || 28,
@@ -223,7 +254,7 @@ export async function setup(ctx) {
             now,
           );
           movement.setInput(bot.id, roamingInput);
-          botState.reactionUntil = 0;
+          clearFireTarget();
           continue;
         }
 
@@ -258,12 +289,16 @@ export async function setup(ctx) {
             now,
           );
           movement.setInput(bot.id, huntingInput);
-          botState.reactionUntil = 0;
+          clearFireTarget();
           continue;
         }
 
         const target = visibleTarget;
-        const wobbleAmount = training?.aimWobble ?? 0.03;
+        if (botState.reactionTargetId !== target.entityId) {
+          clearFireTarget();
+          botState.reactionTargetId = target.entityId;
+        }
+        const wobbleAmount = training?.aimWobble ?? 0.025;
         const aimWobble = Math.sin(now / (270 + seed * 3) + seed) * wobbleAmount;
         const desired = desiredWithoutWobble + aimWobble;
         const error = wrapAngle(desired - transform.angle);
@@ -323,7 +358,19 @@ export async function setup(ctx) {
           if (botState.reactionUntil === 0) {
             botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 35 : 28);
           }
-          if (now >= botState.reactionUntil) weapons.fire(bot.id, now);
+          if (now >= botState.reactionUntil && now >= (botState.nextShotAt ?? 0)) {
+            if (now >= (botState.burstUntil ?? 0) && now >= (botState.nextBurstAt ?? 0)) {
+              botState.burstCycle = (botState.burstCycle ?? 0) + 1;
+              const rhythm = botFireRhythm(bot.id, selected?.id, botState.burstCycle);
+              botState.burstUntil = now + rhythm.burstMs;
+              botState.nextBurstAt = botState.burstUntil + rhythm.pauseMs;
+            }
+            if (now < botState.burstUntil) {
+              const rhythm = botFireRhythm(bot.id, selected?.id, botState.burstCycle);
+              weapons.fire(bot.id, now, { pressed: selected?.id === "pistol" });
+              botState.nextShotAt = now + rhythm.shotMs;
+            }
+          }
         } else if (absoluteError >= aimReset || target.distance > weaponRange) {
           botState.reactionUntil = 0;
         }

@@ -2,13 +2,13 @@ export const BOT_VISIBLE_MEMORY_MS = 10_000;
 export const BOT_DAMAGE_MEMORY_MS = 12_000;
 export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
 export const BOT_INVESTIGATION_REACHED_DISTANCE = 3.2;
-export const BOT_REACTION_MIN_MS = 650;
-export const BOT_REACTION_SPREAD_MS = 450;
+export const BOT_REACTION_MIN_MS = 460;
+export const BOT_REACTION_SPREAD_MS = 330;
 export const BOT_RETURN_FIRE_REACTION_MS = 220;
-export const BOT_BURST_MIN_MS = 260;
-export const BOT_BURST_SPREAD_MS = 220;
-export const BOT_BURST_PAUSE_MIN_MS = 420;
-export const BOT_BURST_PAUSE_SPREAD_MS = 480;
+export const BOT_BURST_MIN_MS = 390;
+export const BOT_BURST_SPREAD_MS = 330;
+export const BOT_BURST_PAUSE_MIN_MS = 220;
+export const BOT_BURST_PAUSE_SPREAD_MS = 370;
 export const BOT_STAIR_ENTRY_OFFSET = 1.15;
 export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 export const BOT_GROUND_RAMP_ESCAPE_Y = 0.45;
@@ -118,6 +118,7 @@ function reactionReady(botId, state, targetId, now) {
     state.burstUntil = 0;
     state.nextBurstAt = 0;
     state.burstCycle = 0;
+    state.nextShotAt = 0;
     return false;
   }
   return now >= (state.reactionUntil ?? 0);
@@ -183,6 +184,7 @@ export async function setup(ctx) {
   const interest = ctx.services.get("bot-interest");
   const brain = ctx.services.get("bot-brain");
   const movement = ctx.services.get("movement");
+  const weapons = ctx.services.get("weapons");
   const entities = ctx.services.get("entities");
   const grid = ctx.services.get("spatial-grid");
   const battleRoyale = ctx.services.get("battle-royale");
@@ -190,6 +192,20 @@ export async function setup(ctx) {
   const tutorial = ctx.services.has("battle-royale-tutorial")
     ? ctx.services.get("battle-royale-tutorial")
     : null;
+
+  function fireInBurst(botId, state, allowed, now) {
+    if (!allowed) return false;
+    const inventory = ctx.components.get(botId, "Weapons");
+    const selected = inventory?.items?.[inventory.selected];
+    if (selected?.id !== "pistol") return true;
+    if (now >= (state.nextShotAt ?? 0)) {
+      const variation = stableSeed(botId + ":" + state.burstCycle + ":pistol-tap");
+      weapons.fire(botId, now, { pressed: true });
+      state.nextShotAt = now + 125 + (variation % 95);
+    }
+    // A pistol bot sends individual shots instead of a held-auto input.
+    return false;
+  }
 
   ctx.events.on("combat:damage", ({ targetId, attackerId, now = Date.now() }) => {
     if (!targetId || !attackerId) return;
@@ -324,7 +340,7 @@ export async function setup(ctx) {
     }
     const aimed = steering.aligned && visible.distance <= 28;
     const reacted = reactionReady(bot.id, state, visible.entityId, now);
-    const fireHeld = reacted && aimed && burstAllowsFire(bot.id, state, now);
+    const fireHeld = fireInBurst(bot.id, state, reacted && aimed && burstAllowsFire(bot.id, state, now), now);
     setNavigatedInput(bot, transform, state, {
       forward,
       strafe,
@@ -344,8 +360,9 @@ export async function setup(ctx) {
       rememberTarget(state, attacker.entityId, attacker.transform, now, BOT_VISIBLE_MEMORY_MS);
       const steering = steeringTo(transform, attacker.transform);
       const reacted = reactionReady(bot.id, state, attacker.entityId, now);
-      const fireHeld = reacted && steering.aligned && attacker.distance <= 28
-        && burstAllowsFire(bot.id, state, now);
+      const fireHeld = fireInBurst(bot.id, state,
+        reacted && steering.aligned && attacker.distance <= 28
+          && burstAllowsFire(bot.id, state, now), now);
       setNavigatedInput(bot, transform, state, {
         forward: -0.72,
         strafe: state.strafeDirection * 0.48,

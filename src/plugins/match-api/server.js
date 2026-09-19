@@ -95,13 +95,8 @@ export async function setup(ctx) {
   }
 
   function hasInterruptingAction(input) {
-    return Boolean(
-      Math.abs(Number(input.forward) || 0) > 0 ||
-      Math.abs(Number(input.strafe) || 0) > 0 ||
-      Math.abs(Number(input.turn) || 0) > 0 ||
-      input.sprint || input.firePressed || input.fireHeld ||
-      input.reload || input.selectDelta
-    );
+    return Boolean(input.firePressed || input.fireHeld || input.reload || input.selectDelta
+      || input.interactPressed || input.stimulantPressed);
   }
 
   function handleInput(playerId, input = {}, now = Date.now()) {
@@ -110,17 +105,15 @@ export async function setup(ctx) {
     tutorial?.handleInput?.(playerId, input, now);
     const ended = tdm.status(now).ended;
 
-    if (!ended && input.platePressed && armorService?.startPlating(playerId, now)) {
-      movement.setInput(playerId, {});
-      return;
+    if (!ended && input.platePressed && armorService?.startFullPlating(playerId, now)) {
+      // Keep movement active while the armor sequence starts.
     }
 
     if (armorService?.isPlating(playerId)) {
       if (hasInterruptingAction(input)) {
         armorService.cancelPlating(playerId, "action");
       } else {
-        movement.setInput(playerId, {});
-        return;
+        // Movement is allowed; only shooting and other actions interrupt armor.
       }
     }
 
@@ -129,7 +122,7 @@ export async function setup(ctx) {
       : (aimSteering?.adjustInput(playerId, input, now) ?? input);
     movement.setInput(playerId, movementInput);
     if (ended) return;
-    if (input.firePressed) weapons.fire(playerId, now);
+    if (input.firePressed) weapons.fire(playerId, now, { pressed: true });
     if (input.reload) weapons.reload(playerId, now);
     if (input.selectDelta) weapons.select(playerId, input.selectDelta);
   }

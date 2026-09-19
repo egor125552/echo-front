@@ -248,9 +248,10 @@ export async function setup(ctx) {
     }
   });
 
-  ctx.events.on("armor:plating-completed", ({ entityId, now } = {}) => {
+  ctx.events.on("armor:plating-completed", ({ entityId, now, armor, maximum, reservePlates } = {}) => {
     const state = ensure(entityId);
-    if (state?.phase === "apply-armor") {
+    // Let the entire one-press sequence finish before the demo bot attacks.
+    if (state?.phase === "apply-armor" && (armor >= maximum || reservePlates <= 0)) {
       if (advance(entityId, "injury-demo", now)) prepareDemoBot(entityId);
     }
   });

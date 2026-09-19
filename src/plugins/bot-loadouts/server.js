@@ -10,16 +10,7 @@ const HEALTH_BY_SLOT = [90, 105, 120, 135];
 const ARMOR_BY_SLOT = [0, 35, 0, 65];
 
 export async function setup(ctx) {
-  const entities = ctx.services.get("entities");
-
-  function rifleBotExists() {
-    for (const entity of entities.all()) {
-      if (!entity.bot) continue;
-      const inventory = ctx.components.get(entity.id, "Weapons");
-      if (inventory?.items?.some((item) => item.id === "rifle")) return true;
-    }
-    return false;
-  }
+  ctx.services.get("entities");
 
   ctx.services.provide("bot-loadouts", {
     create(serial, team) {
@@ -27,7 +18,9 @@ export async function setup(ctx) {
       const health = HEALTH_BY_SLOT[index];
       const armorValue = ctx.hasPlugin("armor") ? ARMOR_BY_SLOT[index] : 0;
       const armored = armorValue > 0;
-      const getsRifle = !rifleBotExists();
+      // Two rifle slots survive the normal initial bot-to-human replacement.
+      // Keep a quick pistol specialist as well, instead of making clones.
+      const getsRifle = serial % 4 !== 0;
 
       return {
         id: `bot-${serial}`,

@@ -32,6 +32,7 @@ export function plateCountForArmor(value, plateValue = ARMOR_PLATE_VALUE) {
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const plating = new Map();
+  const autoPlating = new Set();
 
   ctx.components.register("Armor");
 
@@ -65,6 +66,7 @@ export async function setup(ctx) {
     const active = plating.get(entityId);
     if (!active) return false;
     plating.delete(entityId);
+    autoPlating.delete(entityId);
     ctx.events.emit("armor:plating-cancelled", {
       entityId,
       reason,
@@ -98,6 +100,13 @@ export async function setup(ctx) {
     return true;
   }
 
+  function startFullPlating(entityId, now = Date.now()) {
+    if (plating.has(entityId)) return true;
+    if (!startPlating(entityId, now)) return false;
+    autoPlating.add(entityId);
+    return true;
+  }
+
   function grantPlates(entityId, count = 1) {
     const entity = entities.get(entityId);
     const armor = armorState(entityId);
@@ -127,7 +136,10 @@ export async function setup(ctx) {
 
       const entity = entities.get(entityId);
       const armor = armorState(entityId);
-      if (!entity?.alive || !armor || armor.current >= armor.maximum || armor.reserve <= 0) continue;
+      if (!entity?.alive || !armor || armor.current >= armor.maximum || armor.reserve <= 0) {
+        autoPlating.delete(entityId);
+        continue;
+      }
 
       armor.reserve -= 1;
       armor.current = clampArmor(armor.current + armor.plateValue, armor.maximum);
@@ -142,6 +154,9 @@ export async function setup(ctx) {
         reservePlates: state.reservePlates,
         reserveCapacity: state.reserveCapacity,
       });
+      if (autoPlating.has(entityId) && !startPlating(entityId, now)) {
+        autoPlating.delete(entityId);
+      }
     }
   }
 
@@ -211,6 +226,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("armor", {
     startPlating,
+    startFullPlating,
     cancelPlating,
     tick,
     describe,

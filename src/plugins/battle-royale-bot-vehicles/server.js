@@ -80,7 +80,7 @@ export async function setup(ctx) {
     return originalInput(id, (vehicles.isDriving(id) || vehicles.isPassenger?.(id)) ? {} : input);
   };
   const fire = weapons.fire.bind(weapons);
-  weapons.fire = (id, now) => (vehicles.isDriving(id) || vehicles.isPassenger?.(id)) ? false : fire(id, now);
+  weapons.fire = (id, now, options) => (vehicles.isDriving(id) || vehicles.isPassenger?.(id)) ? false : fire(id, now, options);
 
   function release(id, now, reason) {
     const state = states.get(id);
@@ -150,6 +150,15 @@ export async function setup(ctx) {
 
   function approach(id, state, now) {
     const car = vehicles.stateFor(state.vehicleId), p = transform(id);
+    // A visible enemy takes priority over a car that has not been entered yet.
+    // This also prevents a nearby unarmed-looking bot from ignoring a player.
+    const inventory = ctx.components.get(id, "Weapons");
+    const selected = inventory?.items?.[inventory.selected];
+    const range = Number(weapons.definitions[selected?.id]?.range) || 28;
+    if (perception.nearestVisibleEnemy?.(id, range, { now })) {
+      release(id, now, "combat");
+      return;
+    }
     const elapsed = now - state.startedAt;
     const baseTimeout = state.approachTimeoutMs ?? 22_000;
     const currentDistance = p && car ? distance(p, car) : Infinity;

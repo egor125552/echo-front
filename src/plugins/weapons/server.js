@@ -124,7 +124,7 @@ export async function setup(ctx) {
     return added;
   }
 
-  function fire(entityId, now = Date.now()) {
+  function fire(entityId, now = Date.now(), { pressed = false } = {}) {
     const entity = entities.get(entityId);
     if (!entity?.alive) return false;
     const transform = ctx.components.get(entityId, "Transform");
@@ -135,12 +135,21 @@ export async function setup(ctx) {
     const definition = DEFINITIONS[weapon.id];
     finishReload(weapon, definition, now);
 
+    if (weapon.ammo <= 0 && weapon.reserve > 0 && !weapon.reloadUntil) {
+      weapon.reloadUntil = now + definition.reloadMs;
+    }
     if (weapon.reloadUntil > now || weapon.ammo <= 0) return false;
     const minimumDelay = 60000 / definition.rpm;
-    if (now - weapon.lastFireAt < minimumDelay) return false;
+    // Physical taps of the pistol bypass the hold-repeat cadence, not the magazine.
+    if ((!pressed || definition.automatic) && now - weapon.lastFireAt < minimumDelay) return false;
+    // A held input can arrive in the same server tick as its initial press.
+    if (now === weapon.lastFireAt) return false;
 
     weapon.lastFireAt = now;
     weapon.ammo -= 1;
+    if (weapon.ammo === 0 && weapon.reserve > 0) {
+      weapon.reloadUntil = now + definition.reloadMs;
+    }
 
     const baseDirection = {
       x: Math.sin(transform.angle),
@@ -239,6 +248,9 @@ export async function setup(ctx) {
         const weapon = inventory.items[inventory.selected];
         const definition = DEFINITIONS[weapon.id];
         finishReload(weapon, definition, now);
+        if (weapon.ammo <= 0 && weapon.reserve > 0 && !weapon.reloadUntil) {
+          weapon.reloadUntil = now + definition.reloadMs;
+        }
         if (input.fireHeld && (definition.automatic || definition.holdRepeat)) fire(entityId, now);
       }
     },

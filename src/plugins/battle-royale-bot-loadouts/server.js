@@ -13,7 +13,7 @@ export async function setup(ctx) {
 
   ctx.services.provide("bot-loadouts", {
     create(serial, team) {
-      const rifle = serial % 4 === 0;
+      const rifle = serial % 3 === 0;
       const armorCurrent = ARMOR_LEVELS[serial % ARMOR_LEVELS.length];
       return {
         id: `br-bot-${serial}`,

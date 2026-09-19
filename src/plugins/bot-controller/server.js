@@ -20,6 +20,7 @@ export async function setup(ctx) {
     botState.burstUntil = 0;
     botState.nextBurstAt = 0;
     botState.burstCycle = 0;
+    botState.nextShotAt = 0;
     botState.tacticUntil = 0;
     botState.avoidUntil = 0;
     botState.navSampleAt = 0;
@@ -42,6 +43,7 @@ export async function setup(ctx) {
       burstUntil: 0,
       nextBurstAt: 0,
       burstCycle: 0,
+      nextShotAt: 0,
       wanderTurn: (seed % 2 ? 1 : -1) * (0.22 + (seed % 4) * 0.06),
       strafeDirection: seed % 2 ? 1 : -1,
       tacticUntil: 0,
