@@ -1064,17 +1064,25 @@ export async function setup(ctx) {
             exclude: state.destination, salt: `parked:${other.id}`,
           });
           if (alternate && distance(car, alternate) > 60) {
-            state.destination = alternate;
-            state.route = routes.plan(car, state.destination);
-            state.lastProgressAt = now;
-            state.lastPosition = { ...car };
-            state.recoveries = 0;
-            state.parkedAvoidVehicleId = other.id;
-            state.parkedAvoidUntil = now + 5000;
-            counters.parkedAvoids++;
-            counters.deadlockResolutions++;
-            counters.waypointAdvances++;
-            return;
+            const nextRoute = routes.plan(car, alternate);
+            const firstLeg = nextRoute.points?.[0];
+            // A new destination is not a physical escape. Do not reset the
+            // stationary/progress clocks if the very first leg is blocked by
+            // the same parked chassis or a wall. Let normal safe reverse and
+            // eventually dismount take over instead of endlessly replanning.
+            const openFirstLeg = firstLeg
+              && distance(car, firstLeg) >= 4
+              && routes.clearPath(car, firstLeg, 3);
+            if (openFirstLeg) {
+              state.destination = alternate;
+              state.route = nextRoute;
+              state.parkedAvoidVehicleId = other.id;
+              state.parkedAvoidUntil = now + 5000;
+              counters.parkedAvoids++;
+              counters.deadlockResolutions++;
+              counters.waypointAdvances++;
+              return;
+            }
           }
         }
         const otherAiDriver = Boolean(other.driverId && states.has(other.driverId));
