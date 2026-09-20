@@ -125,6 +125,16 @@ export class EngineLab {
     this.events = [];
     this.watchedEvents = [];
     this.playerEvents = [];
+    this.warehouseVehicleEvents = [];
+    // This internal AI event is intentionally not forwarded to human clients.
+    // Observe it on the real engine bus so the reason for a parked car is not
+    // lost behind the generic vehicle:exited / bot-dismount notification.
+    if (mode === "battle-royale") {
+      this.warehouseReleaseOff = this.game.host.events.on(
+        "bot-vehicle:released",
+        payload => this.recordWarehouseVehicleEvent("bot-vehicle:released", payload),
+      );
+    }
     this.nextPlayerEventIndex = 0;
     this.setupHistory = [];
     this.watch = [...new Set(watch.map(String))].slice(0, 12);
@@ -137,6 +147,30 @@ export class EngineLab {
     this.lastHumanDriverWarningAt = new Map();
     this.lastStallAt = new Map();
     this.lastObservationClock = null;
+  }
+
+  recordWarehouseVehicleEvent(event, payload = {}) {
+    const host = this.game.host;
+    const driverId = payload.entityId ?? payload.driverId;
+    const entity = driverId && host.services.get("entities").get(driverId);
+    if (!entity?.bot) return;
+    const tr = host.components.get(driverId, "Transform");
+    const car = payload.vehicleId && host.services.get("vehicles").stateFor?.(payload.vehicleId);
+    const x = Number(tr?.x ?? car?.x);
+    const z = Number(tr?.z ?? car?.z);
+    if (!Number.isFinite(x) || !Number.isFinite(z)
+      || Math.hypot(x - 60, z) > 180) return;
+    const recorded = {
+      simulatedMs: Math.round(this.simulatedMs),
+      gameTime: elapsedText(this.simulatedMs),
+      event, driverId, vehicleId: payload.vehicleId ?? null,
+      reason: payload.reason ?? null, x, z,
+      distanceFromWarehouseMeters: Math.round(Math.hypot(x - 60, z)),
+      driverAlive: entity.alive,
+    };
+    this.warehouseVehicleEvents.push(recorded);
+    if (this.warehouseVehicleEvents.length > 600)
+      this.warehouseVehicleEvents.shift();
   }
 
   status() {
@@ -388,6 +422,8 @@ export class EngineLab {
     }
     for (const packet of this.game.drainEvents()) {
       const payload = packet.payload ?? {};
+      if (packet.event === "vehicle:entered" || packet.event === "vehicle:exited")
+        this.recordWarehouseVehicleEvent(packet.event, payload);
       const relatedIds = [
         payload.entityId, payload.playerId, payload.targetId, payload.attackerId,
         payload.driverId, payload.recipientId, payload.killerId,
@@ -568,6 +604,56 @@ export async function handleEngineLabRequest(room, request) {
     if (!lab) throw new Error("Scenario not created");
     let result;
     switch (action) {
+      case "scenario.warehouse-traffic": {
+        if (lab.phase !== "running" || lab.mode !== "battle-royale")
+          throw new Error("Requires a running battle royale");
+        const host = lab.game.host;
+        const vehicles = host.services.get("vehicles");
+        const fleet = vehicles.snapshot();
+        const botSummary = host.services.get("bot-vehicles").summary();
+        const compactBotSummary = {
+          fleetSize: botSummary.fleetSize,
+          driving: botSummary.driving,
+          active: botSummary.active,
+          targetDrivers: botSummary.targetDrivers,
+          liveBots: botSummary.liveBots,
+          approaching: botSummary.approaching,
+          releaseReasons: botSummary.releaseReasons,
+          recentFailures: botSummary.recentFailures?.slice(-12) ?? [],
+          recentCrashes: botSummary.recentCrashes?.slice(-12) ?? [],
+        };
+        const close = fleet.filter(car => Math.hypot(car.x - 60, car.z) <= 180);
+        const detailed = close.map(car => ({
+          id: car.id, x: Math.round(car.x), z: Math.round(car.z),
+          distanceFromWarehouseMeters: Math.round(Math.hypot(car.x - 60, car.z)),
+          occupied: Boolean(car.occupied), driverId: car.driverId ?? null,
+          speed: Math.round((car.speed ?? 0) * 10) / 10,
+        }));
+        const events = lab.warehouseVehicleEvents.filter(e =>
+          e.simulatedMs >= Math.max(0, Number(body.sinceSimulatedMs) || 0));
+        const reasons = {};
+        for (const event of events) {
+          if (event.event !== "bot-vehicle:released") continue;
+          reasons[event.reason] = (reasons[event.reason] ?? 0) + 1;
+        }
+        result = {
+          ...lab.status(), warehouse: { x: 60, z: 0, radius: 180 },
+          vehicles: detailed, parked: detailed.filter(car=>!car.occupied).length,
+          driven: detailed.filter(car=>car.occupied).length,
+          botVehicleSummary: compactBotSummary,
+          events, releaseReasonsNearWarehouse: reasons,
+          nearbyBotsOnFoot: host.services.get("entities").all().filter(entity=>{
+            if(!entity.bot || !entity.alive) return false;
+            const t=host.components.get(entity.id,"Transform");
+            return t && Math.hypot(t.x-60,t.z)<=180
+              && !vehicles.isDriving(entity.id) && !vehicles.isPassenger?.(entity.id);
+          }).map(entity=>{
+            const t=host.components.get(entity.id,"Transform");
+            return {id:entity.id,x:Math.round(t.x),z:Math.round(t.z)};
+          }),
+        };
+        break;
+      }
       case "scenario.player-events": {
         if (lab.phase !== "running" && lab.phase !== "finished") {
           throw new Error("Player events require a started scenario");
