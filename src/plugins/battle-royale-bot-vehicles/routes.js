@@ -33,6 +33,32 @@ export function createDriverRoutes(physics, navigation, map) {
     return hit ? Number(hit.time_of_impact ?? hit.timeOfImpact ?? 0) : Infinity;
   }
 
+  // Diagnostic-only cast for Engine Lab: identify which real Rapier collider
+  // blocks the current heading. Keep ordinary path/physics behavior unchanged.
+  function forwardBlocker(vehicle, maximum = 20) {
+    const angle = vehicle.angle;
+    const yaw = -angle - Math.PI / 2;
+    const hit = world.castShape(
+      { x: vehicle.x, y: Math.max(.8, vehicle.y), z: vehicle.z },
+      { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) },
+      { x: Math.sin(angle), y: 0, z: -Math.cos(angle) },
+      shape, .1, maximum, false,
+      RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, undefined, undefined,
+      physics.dynamicBody(vehicle.id),
+      collider => collider.isEnabled() && !physics.isCharacterCollider(collider),
+    );
+    if (!hit) return null;
+    const info = physics.colliderInfo?.(hit.collider) ?? null;
+    const object = info?.worldObject ?? null;
+    return {
+      distance: Number(hit.time_of_impact ?? hit.timeOfImpact ?? 0),
+      kind: object?.kind ?? null,
+      vehicleId: object?.vehicleId ?? null,
+      bodyId: object?.bodyId ?? null,
+      entityId: info?.entityId ?? null,
+    };
+  }
+
   function visible(vehicle, target) {
     const from = { x: vehicle.x, y: vehicle.y + .85, z: vehicle.z };
     const delta = { x: target.x - from.x, y: (target.y ?? 0) + .6 - from.y, z: target.z - from.z };
@@ -112,6 +138,6 @@ export function createDriverRoutes(physics, navigation, map) {
     return { point, nextPoint: route.points[route.index + 1], remaining };
   }
 
-  return { clearDistance, visible, parkingGoal, plan, waypoint,
+  return { clearDistance, forwardBlocker, visible, parkingGoal, plan, waypoint,
     clearPath(vehicle, point, margin = 3) { return clearDistance(vehicle, headingTo(vehicle, point), distance(vehicle, point) + margin) > distance(vehicle, point); } };
 }

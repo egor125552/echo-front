@@ -190,6 +190,7 @@ export async function setup(ctx) {
       forward: state.input?.forward ?? null,
       handbrake: state.input?.sprint ?? null,
       obstacleDistance: state.lastObstacleDistance ?? null,
+      frontBlocker: car ? routes.forwardBlocker(car, 20) : null,
       physicalStillForMs: state.stationaryAt == null
         ? null : Math.max(0, now - state.stationaryAt),
       rearClearanceMeters: rear == null ? null
@@ -201,6 +202,7 @@ export async function setup(ctx) {
       traffic: state.traffic ? { ...state.traffic } : null,
       pedestrian: state.lastPedestrian ? { ...state.lastPedestrian } : null,
       collisionRisk: state.lastCollisionRisk ? { ...state.lastCollisionRisk } : null,
+      lastYield: state.lastYield ? { ...state.lastYield } : null,
     };
     state.phase = "brake"; state.phaseAt = now; state.reason = reason;
   }
@@ -978,6 +980,18 @@ export async function setup(ctx) {
     const yieldingCollision = Boolean(collisionRisk) || (state.collisionYieldUntil ?? 0) > now;
     const yieldingPedestrian = Boolean(pedestrian && pedestrian.distance < 20)
       || (state.emergencyPedestrianUntil ?? 0) > now;
+    // Record why the real controller chose to hold. A free forward Rapier
+    // cast alongside obstacleDistance=0 means a traffic hold, not a wall.
+    state.lastYield = {
+      queuedBehindTraffic, yieldingAtCrossing, yieldingHeadOn,
+      yieldingCollision, yieldingPedestrian,
+      traffic: traffic ? { ...traffic } : null,
+      collisionRisk: collisionRisk ? { ...collisionRisk } : null,
+      parkedLeadVehicleId: parkedLead ? leadVehicle.id : null,
+      crossingHoldUntil: state.crossingYieldUntil ?? null,
+      collisionHoldUntil: state.collisionYieldUntil ?? null,
+      pedestrianHoldUntil: state.emergencyPedestrianUntil ?? null,
+    };
     if (queuedBehindTraffic || yieldingAtCrossing || yieldingHeadOn || yieldingCollision || yieldingPedestrian) {
       if (!state.trafficWaitAt) {
         state.trafficWaitAt = now; counters.trafficYields++;
