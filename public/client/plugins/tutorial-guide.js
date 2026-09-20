@@ -171,7 +171,7 @@ export async function setup(ctx) {
       && ["select-navigation", "select-crate", "select-second-crate"].includes(lastPhase)
     ) {
       const distance = Math.max(0, Math.round(Number(payload.distanceMeters ?? payload.distance) || 0));
-      present(`Выбрано: ${payload.targetName || "цель"}. ${distance} метров. Нажми Enter, чтобы построить маршрут.`);
+      present(`Выбрано: ${payload.targetName || "цель"}. ${distance} метров. На клавиатуре нажми Enter, на сенсорном экране нажми Маршрут.`);
       return;
     }
 

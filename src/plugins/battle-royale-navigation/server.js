@@ -583,12 +583,43 @@ export async function setup(ctx) {
     return { anchors, detours, rapierBlockedSegments };
   }
 
+  // A recently opened loot crate still has a real rigid body. A route that
+  // starts beside it must not point straight through that body.
+  function nearbyCrateBypass(from, toward) {
+    if (Math.abs(from.y - toward.y) > 1.2) return [];
+    for (const crate of map.crates ?? []) {
+      if (Math.abs(from.y - finite(crate.y)) > 1.2) continue;
+      const x = finite(crate.x), z = finite(crate.z);
+      const halfX = Math.max(.65, finite(crate.hx, .72));
+      const halfZ = Math.max(.5, finite(crate.hz, .52));
+      const dx = toward.x - from.x;
+      const crosses = Math.abs(dx) > 2.5
+        && Math.sign(from.x - x) === -Math.sign(dx)
+        && Math.abs(from.x - x) < halfX + 2
+        && Math.abs(from.z - z) < halfZ + 1.25
+        && Math.sign(toward.x - x) === Math.sign(dx);
+      if (!crosses) continue;
+      const side = from.z >= z ? 1 : -1;
+      const bypassZ = z + side * (halfZ + 2);
+      const nearX = x - Math.sign(dx) * (halfX + 1.6);
+      const farX = x + Math.sign(dx) * (halfX + 1.6);
+      return [
+        {x:nearX,y:from.y,z:bypassZ,kind:"crate-bypass",mandatory:true},
+        {x:farX,y:from.y,z:bypassZ,kind:"crate-bypass",mandatory:true},
+      ];
+    }
+    return [];
+  }
+
   function buildAnchors(from, target, options = {}) {
     const start = point(from);
     const required = options.mode === "vehicle"
       ? []
       : (groundNavigation.requiredWaypoints?.(start, target.position) ?? []).map(waypoint);
-    const goals = [...required, waypoint(target.position)];
+    const goals = [
+      ...(options.mode === "vehicle" ? [] : nearbyCrateBypass(start, required[0] ?? target.position)),
+      ...required, waypoint(target.position),
+    ];
     const anchors = [];
     let cursor = start;
     let detours = 0;
