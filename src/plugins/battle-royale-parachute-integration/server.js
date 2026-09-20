@@ -3,7 +3,7 @@ export const manifest = {
   version: "1.4.2",
   requires: [
     "match-api", "battle-royale-parachute", "battle-royale", "movement",
-    "rapier-physics", "entities", "battle-royale-vehicle",
+    "rapier-physics", "entities", "battle-royale-vehicle", "bot-combat",
   ],
   optional: ["health-regeneration", "armor", "weapons", "battle-royale-tutorial"],
   capabilities: [
@@ -41,6 +41,7 @@ export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const entities = ctx.services.get("entities");
   const vehicles = ctx.services.get("vehicles");
+  const botCombat = ctx.services.get("bot-combat");
   const healthRegeneration = ctx.services.has("health-regeneration")
     ? ctx.services.get("health-regeneration")
     : null;
@@ -251,6 +252,11 @@ export async function setup(ctx) {
       // step. It also means an early-landed player can drive immediately instead
       // of waiting for the last parachute to touch down.
       vehicles.tickPhysics(dt, now);
+      // During the shared parachute deployment the normal match step is
+      // intentionally bypassed, but landed bots must still think and fight.
+      // The bot-parachute wrapper temporarily marks airborne bots as human
+      // while this runs, so only grounded bots receive on-foot AI commands.
+      botCombat.tick(dt, now);
       movement.tick(dt, now);
       armor?.tick?.(now);
       weapons?.tickAutomatic?.(now);
