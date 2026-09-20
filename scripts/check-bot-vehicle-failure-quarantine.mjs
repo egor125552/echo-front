@@ -54,6 +54,20 @@ test('a physically trapped car is not assigned again until it moves or quarantin
     assert.equal(ai.assign('quarantine-driver-2',id,{x:-300,y:0,z:0},now),false,
       'The second bot entered the same trapped car just after the short cooldown');
     assert(ai.summary().stationaryVehicleFailures.some(v=>v.vehicleId===id));
+
+    // The quarantine is BOT assignment policy, not a ban on a real player
+    // entering an otherwise intact abandoned vehicle.
+    const quarantinedCar=vehicles.stateFor(id);
+    s.get('movement').teleport('quarantine-human-1', {
+      x:quarantinedCar.x, y:quarantinedCar.y, z:quarantinedCar.z+1.5,
+    });
+    assert(vehicles.enter('quarantine-human-1',now,id),
+      'A human must remain able to enter a car quarantined for bots');
+    assert.equal(vehicles.driverId(id),'quarantine-human-1');
+    assert(vehicles.exit('quarantine-human-1',now+50,'test'));
+    assert(ai.summary().stationaryVehicleFailures.some(v=>v.vehicleId===id),
+      'Human entry alone must not invalidate the physical failure position');
+
     now = failure.until - 1;
     assert.equal(ai.assign('quarantine-driver-2',id,{x:-300,y:0,z:0},now),false,
       'The same trapped car must stay unavailable up to the quarantine deadline');
