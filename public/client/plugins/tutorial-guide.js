@@ -104,6 +104,13 @@ export async function setup(ctx) {
     lastPhase = phase;
 
     if (tutorial.mode === "battle-royale") {
+      if (tutorial.routeLost && ["select-navigation", "select-crate", "select-second-crate"].includes(phase)) {
+        const next = phase === "select-second-crate"
+          ? secondCrateMessage(tutorial)
+          : BATTLE_ROYALE_MESSAGES[phase];
+        present(`Предыдущая цель больше недоступна. Выбери другую. ${next}`);
+        return;
+      }
       if (phase === "select-second-crate") {
         present(secondCrateMessage(tutorial));
         return;

@@ -48,6 +48,8 @@ export async function setup(ctx) {
         changedAt: Date.now(),
         routeTargetKind: null,
         routeTargetLoot: null,
+        routeTargetId: null,
+        routeLost: false,
         rifleCollected: false,
         armorCollected: false,
         neededLoot: null,
@@ -82,10 +84,46 @@ export async function setup(ctx) {
     return true;
   }
 
-  function rememberRoute(state, targetKind, targetLoot) {
+  function rememberRoute(state, targetKind, targetLoot, targetId = null) {
     state.routeTargetKind = targetKind ?? null;
     state.routeTargetLoot = targetLoot ?? null;
+    state.routeTargetId = targetId ?? null;
+    state.routeLost = false;
   }
+
+  function recoverUnavailableRoute(playerId, state, now = Date.now()) {
+    const fallback = ({
+      "follow-navigation": "select-navigation",
+      "follow-crate": "select-crate",
+      "interact-first-crate": "select-crate",
+      "follow-second-crate": "select-second-crate",
+      "interact-second-crate": "select-second-crate",
+    })[state?.phase];
+    if (!fallback) return false;
+    // Recovering an invalid route is intentionally allowed to move backward.
+    // Normal tutorial progression still uses the monotonic advance() helper.
+    state.phase = fallback;
+    state.changedAt = Number(now) || Date.now();
+    state.routeTargetKind = null;
+    state.routeTargetLoot = null;
+    state.routeTargetId = null;
+    state.routeLost = true;
+    return true;
+  }
+
+  ctx.events.on("navigation:unavailable", ({ entityId, reason, now } = {}) => {
+    const state = ensure(entityId);
+    if (reason === "target-unavailable" && state) recoverUnavailableRoute(entityId, state, now);
+  });
+
+  ctx.events.on("loot:opened", ({ entityId, crateId, now } = {}) => {
+    if (!crateId) return;
+    for (const [playerId, state] of states) {
+      if (entityId !== playerId && state.routeTargetId === `crate:${crateId}`) {
+        recoverUnavailableRoute(playerId, state, now);
+      }
+    }
+  });
 
   function missingLoot(state) {
     if (!state.rifleCollected) return "rifle";
@@ -140,11 +178,12 @@ export async function setup(ctx) {
     entityId,
     targetKind,
     targetLoot,
+    targetId,
     now,
   } = {}) => {
     const state = ensure(entityId);
     if (!state) return;
-    rememberRoute(state, targetKind, targetLoot);
+    rememberRoute(state, targetKind, targetLoot, targetId);
 
     if (state.phase === "select-navigation") {
       advance(entityId, "follow-navigation", now);
@@ -296,6 +335,7 @@ export async function setup(ctx) {
         changedAt: state.changedAt,
         complete: state.phase === "complete",
         neededLoot: state.neededLoot,
+        routeLost: state.routeLost,
         rifleCollected: state.rifleCollected,
         armorCollected: state.armorCollected,
       };
