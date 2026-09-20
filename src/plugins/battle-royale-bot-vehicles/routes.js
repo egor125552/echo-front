@@ -74,9 +74,16 @@ export function createDriverRoutes(physics, navigation, map) {
     const b = buildingBounds().find(bounds => goal.x >= bounds.minX && goal.x <= bounds.maxX
       && goal.z >= bounds.minZ && goal.z <= bounds.maxZ);
     if (!b) return { ...goal, y: 0 };
+    // Leave room for the full chassis, not just the navigation point. The
+    // original 9 m parking standoff sent car centres to within 5 m of the
+    // warehouse wall after steering/route bias and caused repeated 1–2 m
+    // forward collider hits and abandoned cars around its entrance.
+    const standoff = b.id === "warehouse" ? 15 : 11;
     return [
-      { x: b.minX - 9, z: (b.minZ + b.maxZ) / 2 }, { x: b.maxX + 9, z: (b.minZ + b.maxZ) / 2 },
-      { x: (b.minX + b.maxX) / 2, z: b.minZ - 9 }, { x: (b.minX + b.maxX) / 2, z: b.maxZ + 9 },
+      { x: b.minX - standoff, z: (b.minZ + b.maxZ) / 2 },
+      { x: b.maxX + standoff, z: (b.minZ + b.maxZ) / 2 },
+      { x: (b.minX + b.maxX) / 2, z: b.minZ - standoff },
+      { x: (b.minX + b.maxX) / 2, z: b.maxZ + standoff },
     ].sort((a, b) => distance(from, a) - distance(from, b))[0];
   }
 
@@ -99,7 +106,7 @@ export function createDriverRoutes(physics, navigation, map) {
 
   function plan(vehicle, destination) {
     const goal = parkingGoal(vehicle, destination);
-    const buildingClearance = Math.max(5.5, Number(navigation.constants?.vehicleDetourClearance) || 7);
+    const buildingClearance = Math.max(11, Number(navigation.constants?.vehicleDetourClearance) || 7);
     // If a replan happens while the car is already inside a building's safety
     // margin, first move straight out through the nearest face. Otherwise a
     // diagonal detour can still scrape the wall before reaching a safe corner.
