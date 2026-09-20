@@ -36,6 +36,7 @@ const FORWARDED_EVENTS = new Set([
   "vehicle:exited",
   "vehicle:impact",
   "vehicle:driver-lost",
+  "vehicle:despawned",
   "world:door",
   "loot:opened",
   "loot:picked",

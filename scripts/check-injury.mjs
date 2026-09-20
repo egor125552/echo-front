@@ -84,6 +84,25 @@ test('the starting stim fully heals a standing player and cannot be used again w
   assert.equal(snap().stimulantUse, null);
 }));
 
+test('standing stimulant heals while walking and sprinting but still cancels on firing', () => scenario(({ s, game, snap, step, now }) => {
+  s.get('health').applyDamage(PLAYER, 100, { now: now() });
+  game.api.handleInput(PLAYER, { stimulantPressed: true, forward: 1, sprint: true }, now());
+  assert(snap().stimulantUse);
+  const before = snap();
+  step(25, { forward: 1, sprint: true, turn: .35 });
+  assert(snap().stimulantUse, 'Running must not cancel ordinary healing');
+  assert(Math.hypot(snap().x - before.x, snap().z - before.z) > 2,
+    'Player must actually keep running while healing');
+  step(15, { forward: 1, sprint: true });
+  assert.equal(snap().health, 200); assert.equal(snap().stimulants, 0);
+  s.get('stimulants').grant(PLAYER, 1);
+  s.get('health').applyDamage(PLAYER, 40, { now: now() });
+  game.api.handleInput(PLAYER, { stimulantPressed: true, forward: 1 }, now());
+  assert(snap().stimulantUse);
+  step(1, { forward: 1, firePressed: true });
+  assert.equal(snap().stimulantUse, null);
+}));
+
 test('standing humans regenerate after five seconds, while downed humans still cannot passively heal', () => scenario(({ s, snap, step, down, now }) => {
   assert.equal(s.has('health-regeneration'), true, 'BR must load passive regeneration for standing humans');
   s.get('health').applyDamage(PLAYER, 100, { now: now() });

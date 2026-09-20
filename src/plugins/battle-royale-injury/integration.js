@@ -6,9 +6,17 @@ export const manifest = {
   capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
 
-const interrupting = input => Boolean(input.forward || input.strafe || input.turn || input.sprint
-  || input.fireHeld || input.firePressed || input.reload || input.interactPressed
-  || input.platePressed || input.parachutePressed || input.jumpPressed || input.posePressed);
+// Walking, turning and sprinting do not interrupt ordinary healing.
+ // Reviving while downed still requires staying put.
+const interrupting = (input, downed = false) => Boolean(
+  (downed && (input.forward || input.strafe || input.turn || input.sprint))
+  || input.fireHeld || input.firePressed
+  || input.reload || input.interactPressed || input.platePressed
+  || input.parachutePressed || input.jumpPressed || input.posePressed);
+const walkingInput = input => ({
+  forward: input.forward, strafe: input.strafe, turn: input.turn,
+  sprint: input.sprint,
+});
 
 export async function setup(ctx) {
   const match = ctx.services.get("match-api");
@@ -22,10 +30,16 @@ export async function setup(ctx) {
   const handle = match.handleInput.bind(match);
   match.handleInput = (id, input = {}, now = Date.now()) => {
     if (!battleRoyale.canAct(now)) { movement.setInput(id, {}); return; }
-    if (input.stimulantPressed && meds.start(id, now)) { handle(id, {}, now); return; }
+    if (input.stimulantPressed && meds.start(id, now)) {
+      handle(id, injury.isDowned(id) ? {} : walkingInput(input), now);
+      return;
+    }
     if (meds.isUsing(id)) {
-      if (interrupting(input)) meds.cancel(id);
-      else { handle(id, {}, now); return; }
+      if (interrupting(input, injury.isDowned(id))) meds.cancel(id);
+      else {
+        handle(id, injury.isDowned(id) ? {} : walkingInput(input), now);
+        return;
+      }
     }
     if (injury.isDowned(id)) {
       // Bypass jump, parachute, weapon and vehicle input handlers while crawling.

@@ -1384,6 +1384,15 @@ export async function setup(ctx) {
         ? states.get(driverId).route.points.map(point => ({ ...point })) : null,
     });
   });
+  ctx.events.on("vehicle:despawned", ({ vehicleId }) => {
+    if (!vehicleId) return;
+    reservations.delete(vehicleId);
+    vehicleCooldowns.delete(vehicleId);
+    stationaryVehicleFailures.delete(vehicleId);
+    for (const [entityId, state] of states) {
+      if (state.vehicleId === vehicleId) release(entityId, Date.now(), "vehicle-despawned");
+    }
+  });
   ctx.events.on("vehicle:exited", ({ entityId, vehicleId, reason, now }) => {
     if (reason !== "crash-eject" || !entities.get(entityId)?.bot || !vehicleId) return;
     const eventNow = Number(now) || Date.now();

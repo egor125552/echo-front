@@ -1,6 +1,14 @@
 export const FLEET_VEHICLE_COUNT = 76;
 export const FLEET_SUPERCAR_COUNT = 25;
 export const FLEET_OFFROAD_COUNT = 51;
+// Recycle genuinely abandoned cars only after parking congestion develops.
+export const ABANDONED_VEHICLE_MIN_EMPTY = 30;
+export const ABANDONED_VEHICLE_MIN_FLEET = 40;
+export const ABANDONED_VEHICLE_LOCAL_EMPTY = 4;
+export const ABANDONED_VEHICLE_LOCAL_RADIUS = 75;
+export const ABANDONED_VEHICLE_UNUSED_MS = 60_000;
+export const ABANDONED_VEHICLE_CHECK_MS = 5_000;
+
 
 const ENTER_DISTANCE = 3.4;
 const BOT_ENTER_DISTANCE = 6.5;
@@ -171,6 +179,9 @@ export async function setup(ctx) {
   const originalSummary = vehicles.summary.bind(vehicles);
 
   const extras = new Map();
+  const despawnCounts = {supercar:0,offroad:0};
+  let firstFleetTickAt = null;
+  let nextAbandonedCheckAt = 0;
   const extraDriverVehicle = new Map();
   const extraPassengerVehicle = new Map();
   const PASSENGER_CAPACITY = 3;
@@ -261,6 +272,8 @@ export async function setup(ctx) {
       body: bodyEntry.body,
       wheelPositions,
       driverId: null,
+      lastVacatedAt: null,
+      hasBeenDriven: false,
       passengerIds: [],
       input: { throttle: 0, steering: 0, handbrake: false, nitro: false },
       handbrakeArmed: true,
@@ -674,6 +687,8 @@ export async function setup(ctx) {
 
     armor?.cancelPlating?.(playerId, "vehicle-enter");
     entry.driverId = playerId;
+    entry.hasBeenDriven = true;
+    entry.lastVacatedAt = null;
     entry.body?.wakeUp?.();
     extraDriverVehicle.set(playerId, entry.id);
     entry.input = { throttle: 0, steering: 0, handbrake: false, nitro: false };
@@ -720,6 +735,7 @@ export async function setup(ctx) {
     }
     stopExtraNitro(entry, now, playerId);
     entry.driverId = null;
+    entry.lastVacatedAt = now;
     extraDriverVehicle.delete(playerId);
     entry.input = { throttle: 0, steering: 0, handbrake: true, nitro: false };
     entry.handbrakeArmed = true;
@@ -906,6 +922,49 @@ export async function setup(ctx) {
     return !(entry.body?.isSleeping?.() ?? false);
   }
 
+  function cleanAbandonedVehicles(now) {
+    if (firstFleetTickAt === null) firstFleetTickAt = now;
+    if (now < nextAbandonedCheckAt) return;
+    nextAbandonedCheckAt = now + ABANDONED_VEHICLE_CHECK_MS;
+    const fleet = [...extras.values()].map(entry => ({ entry, body: bodyState(entry) }))
+      .filter(item => item.body);
+    if (fleet.length + 1 <= ABANDONED_VEHICLE_MIN_FLEET) return;
+    const empty = fleet.filter(({ entry }) => !entry.driverId && entry.passengerIds.length === 0);
+    if (empty.length < ABANDONED_VEHICLE_MIN_EMPTY) return;
+    const people = entities.all().filter(entity => entity.alive)
+      .map(entity => ({
+        bot: Boolean(entity.bot),
+        riding: isDriving(entity.id) || isPassenger(entity.id),
+        position: ctx.components.get(entity.id, "Transform"),
+      })).filter(person => person.position);
+    // Removing a chassis after the physics step can clear a pile-up, even
+    // when another AI driver is waiting in traffic. Protect nearby humans
+    // and bots actually approaching on foot, not remote/occupied drivers.
+    for (const { entry, body } of empty) {
+      const unusedSince = entry.lastVacatedAt ?? firstFleetTickAt;
+      if (now - unusedSince < ABANDONED_VEHICLE_UNUSED_MS
+        || Math.hypot(body.linvel.x, body.linvel.z) > .7
+        || people.some(person => !person.riding
+          && distance3(person.position, body) < (person.bot ? 8 : 18))) continue;
+      const nearbyEmpty = empty.filter(other =>
+        distance3(other.body, body) < ABANDONED_VEHICLE_LOCAL_RADIUS).length;
+      // A remote unused spawn is not clutter. Only recycle a local pile-up,
+      // or a car that was already driven and has been unused for a minute.
+      if (nearbyEmpty < ABANDONED_VEHICLE_LOCAL_EMPTY && !entry.hasBeenDriven) continue;
+      if (entry.driverId || entry.passengerIds.length) continue;
+      // The Rapier vehicle controller must go before its rigid body.
+      physics.world.removeVehicleController(entry.controller);
+      physics.removeDynamicBody(entry.id);
+      extras.delete(entry.id);
+      despawnCounts[entry.tuning.kind] += 1;
+      ctx.events.emit("vehicle:despawned", {
+        vehicleId: entry.id, vehicleKind: entry.tuning.kind,
+        reason: "abandoned", now, x: body.x, y: body.y, z: body.z,
+      });
+      break;
+    }
+  }
+
   function tickPhysics(dt, now = Date.now()) {
     const safeDt = clamp(dt, 0, 0.1);
     if (!(safeDt > 0)) return;
@@ -954,6 +1013,7 @@ export async function setup(ctx) {
       syncExtraDriver(entry);
       syncExtraPassengers(entry);
     }
+    cleanAbandonedVehicles(now);
   }
 
   function driverId(vehicleId = primaryId) {
@@ -987,9 +1047,12 @@ export async function setup(ctx) {
 
   function assertFleet(expected = {}) {
     const state = summary();
-    const minTotal = Number(expected.minTotal ?? FLEET_VEHICLE_COUNT);
-    const minSupercars = Number(expected.minSupercars ?? FLEET_SUPERCAR_COUNT);
-    const minOffroad = Number(expected.minOffroad ?? FLEET_OFFROAD_COUNT);
+    const minTotal = Number(expected.minTotal
+      ?? FLEET_VEHICLE_COUNT - despawnCounts.supercar - despawnCounts.offroad);
+    const minSupercars = Number(expected.minSupercars
+      ?? FLEET_SUPERCAR_COUNT - despawnCounts.supercar);
+    const minOffroad = Number(expected.minOffroad
+      ?? FLEET_OFFROAD_COUNT - despawnCounts.offroad);
     if (state.total < minTotal) throw new Error(`Expected at least ${minTotal} vehicles, got ${state.total}`);
     if (state.supercars < minSupercars) {
       throw new Error(`Expected at least ${minSupercars} supercars, got ${state.supercars}`);
@@ -1038,6 +1101,7 @@ export async function setup(ctx) {
     }
     stopExtraNitro(entry, eventNow, entityId);
     entry.driverId = null;
+    entry.lastVacatedAt = eventNow;
     extraDriverVehicle.delete(entityId);
     entry.input = { throttle: 0, steering: 0, handbrake: true, nitro: false };
     entry.handbrakeArmed = true;
@@ -1064,6 +1128,7 @@ export async function setup(ctx) {
     }
     stopExtraNitro(entry, eventNow, entityId);
     entry.driverId = null;
+    entry.lastVacatedAt = eventNow;
     extraDriverVehicle.delete(entityId);
     entry.input = { throttle: 0, steering: 0, handbrake: true, nitro: false };
     entry.handbrakeArmed = true;

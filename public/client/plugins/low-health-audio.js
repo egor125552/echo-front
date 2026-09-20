@@ -6,6 +6,7 @@ export const HEARTBEAT_RETRY_MS = 1500;
 export const REVERB_START_RATIO = 0.65;
 export const REVERB_FULL_RATIO = 0.15;
 export const MAX_REVERB_MIX = 0.78;
+export const MAX_STUN_INTENSITY = 0.8; // 20% less maximum reverb and filtering depth.
 export const MUFFLE_MIN_HZ = 80;
 export const MUFFLE_MAX_HZ = 18000;
 export const MUFFLE_CURVE_POWER = 3.5;
@@ -38,6 +39,14 @@ export function muffleCutoffForIntensity(intensity) {
   return MUFFLE_MIN_HZ + openSound * (MUFFLE_MAX_HZ - MUFFLE_MIN_HZ);
 }
 
+// The cutoff curve is intentionally nonlinear: scaling intensity alone
+// would change the deepest filter from 80 Hz to only ~144 Hz, which remains
+// nearly inaudible. Open 20% of the *cutoff range* at maximum injury instead.
+export function softenedMuffleCutoffForIntensity(intensity) {
+  const raw = muffleCutoffForIntensity(intensity);
+  return raw + (MUFFLE_MAX_HZ - raw) * (1 - MAX_STUN_INTENSITY) * clamp01(intensity);
+}
+
 export function heartbeatGainForRatio(ratio) {
   const normalized = clamp01(
     (HEARTBEAT_STOP_RATIO - clamp01(ratio))
@@ -49,7 +58,8 @@ export function heartbeatGainForRatio(ratio) {
 
 export function downedRecoveryAudioState(self, now) {
   const use = self?.stimulantUse;
-  const full = { progress: 0, intensity: 1, cutoff: MUFFLE_MIN_HZ };
+  const full = { progress: 0, intensity: MAX_STUN_INTENSITY,
+    cutoff: softenedMuffleCutoffForIntensity(1) };
   if (!self?.downed || !use?.downed) return full;
   const startedAt = Number(use.startedAt);
   const completesAt = Number(use.completesAt);
@@ -58,9 +68,11 @@ export function downedRecoveryAudioState(self, now) {
   const normalMaximum = Math.max(1, Number(self.normalHealthMax) || 200);
   const revivedHealth = Math.min(normalMaximum, 100);
   const recoveredIntensity = lowHealthIntensity(revivedHealth, normalMaximum);
-  const targetCutoff = muffleCutoffForIntensity(recoveredIntensity);
-  const intensity = 1 + (recoveredIntensity - 1) * progress;
-  const cutoff = MUFFLE_MIN_HZ * Math.pow(targetCutoff / MUFFLE_MIN_HZ, progress);
+  const targetCutoff = softenedMuffleCutoffForIntensity(recoveredIntensity);
+  const startingCutoff = softenedMuffleCutoffForIntensity(1);
+  const intensity = MAX_STUN_INTENSITY
+    + (recoveredIntensity * MAX_STUN_INTENSITY - MAX_STUN_INTENSITY) * progress;
+  const cutoff = startingCutoff * Math.pow(targetCutoff / startingCutoff, progress);
   return { progress, intensity, cutoff };
 }
 
@@ -124,8 +136,9 @@ export async function setup(ctx) {
 
   function applyIntensity(intensity) {
     const next = clamp01(intensity);
-    audio.setReverbMix(next * MAX_REVERB_MIX);
-    audio.setMuffleCutoff(muffleCutoffForIntensity(next));
+    const softened = next * MAX_STUN_INTENSITY;
+    audio.setReverbMix(softened * MAX_REVERB_MIX);
+    audio.setMuffleCutoff(softenedMuffleCutoffForIntensity(next));
   }
 
   function resetEffects() {
