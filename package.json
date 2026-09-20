@@ -11,7 +11,8 @@
     "check:space-parachute": "node scripts/check-space-parachute-input.mjs",
     "test": "npm run check:input-wrappers && npm run check:physical-input && npm run check:space-parachute",
     "check:input-wrappers": "node scripts/check-input-wrapper-impulses.mjs",
-    "check:physical-input": "node --test scripts/check-physical-input-client-pipeline.mjs"
+    "check:physical-input": "node --test scripts/check-physical-input-client-pipeline.mjs",
+    "check:br-bot-dismount": "node --test scripts/check-br-dismount-foot-ai-replay.mjs scripts/check-br-grounded-bot-during-deployment.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d": "0.19.3",
