@@ -893,8 +893,8 @@ export async function setup(ctx) {
       ? distance2(state.lastTargetPosition, target.position)
       : Infinity;
     const exhausted = state.checkpointIndex >= state.checkpoints.length;
-    const staleMovingTarget = target.kind === "vehicle"
-      && targetMoved >= NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE;
+    const staleMovingTarget = (target.kind === "vehicle" || target.kind === "crate")
+      && targetMoved >= (target.kind === "crate" ? 1.5 : NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE);
     const staleRoute = now - state.lastRouteAt >= NAVIGATION_ROUTE_REPLAN_MS
       && state.checkpointIndex > 0;
     const modeChanged = state.routeMeta?.mode !== routeModeFor(playerId);

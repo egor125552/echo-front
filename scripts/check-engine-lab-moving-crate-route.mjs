@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {createEchoFrontGame} from '../src/server/game.js';
+import {EngineLab} from '../src/server/engine-lab.js';
+const playerId='moving-crate-route-player';
+const game=await createEchoFrontGame({mode:'battle-royale'});
+const lab=new EngineLab(game,{mode:'battle-royale',room:'moving-crate-route',watch:[playerId]});
+try{
+ const prepared=await lab.prepare([{command:'service.call',args:{service:'match-api',method:'connectHuman',arguments:[playerId]}}]);
+ assert(prepared.results.every(item=>item.ok));
+ const services=game.host.services;
+ Object.assign(game.host.components.get(playerId,'Parachute'),{phase:'landed',airborne:false});
+ services.get('movement').teleport(playerId,{x:87,y:0,z:3});
+ const navigation=services.get('navigation');
+ const id='crate:crate-ground-armor';
+ const crate=services.get('map').crates.find(entry=>entry.id==='crate-ground-armor');
+ assert(crate?.bodyId);
+ navigation.selectTarget(playerId,id);
+ navigation.toggle(playerId);
+ lab.start();
+ const original=navigation.stateFor(playerId);
+ assert(original.active);
+ const first=original.checkpoints.at(-1);
+ services.get('physics').setDynamicBodyTranslation(crate.bodyId,{x:crate.x+10,y:crate.y+.36,z:crate.z+10});
+ services.get('crate-physics').syncAll();
+ await lab.advance({steps:2,sampleEvery:1});
+ const next=navigation.stateFor(playerId);
+ const last=next.checkpoints.at(-1);
+ const destination=navigation.availableTargets(playerId).find(target=>target.id===id).position;
+ const remaining=Math.hypot(last.x-destination.x,last.z-destination.z);
+ console.log('MOVING_CRATE_ROUTE',JSON.stringify({from:first,to:last,target:destination,remaining,active:next.active,anomalies:lab.report().anomalies.slice(0,2)}));
+ assert(remaining<2,'route must update its last checkpoint when crate moves');
+ lab.finish();
+}finally{await game.host.stop()}
