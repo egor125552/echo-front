@@ -407,7 +407,12 @@ export async function setup(ctx) {
       const ahead = dx * forwardX + dz * forwardZ;
       if (ahead <= 2.5) continue;
       const headingGap = Math.abs(angleDelta(other.angle - car.angle));
-      const headOn = headingGap > 2.35;
+      // A driverless parked vehicle has no oncoming intent, regardless of
+      // which way its chassis points. Treat it as a static following obstacle
+      // so the existing parked-car avoidance can handle it. Keep genuine
+      // occupied/moving head-on traffic under the normal yield rules.
+      const headOn = headingGap > 2.35
+        && other.occupied && (Number(other.speed) || 0) >= 1.5;
       if (ahead > (headOn ? 100 : 32)) continue;
       const lateral = Math.abs(dx * rightX + dz * rightZ);
       if (lateral > (headOn ? 6.5 : 4.8)) continue;
