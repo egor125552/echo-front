@@ -30,7 +30,7 @@ export async function setup(ctx) {
   const handle = match.handleInput.bind(match);
   match.handleInput = (id, input = {}, now = Date.now()) => {
     if (!battleRoyale.canAct(now)) { movement.setInput(id, {}); return; }
-    if (input.stimulantPressed && meds.start(id, now)) {
+    if (input.stimulantPressed && !interrupting(input, injury.isDowned(id)) && meds.start(id, now)) {
       handle(id, injury.isDowned(id) ? {} : walkingInput(input), now);
       return;
     }

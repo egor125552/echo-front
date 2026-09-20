@@ -103,6 +103,16 @@ test('standing stimulant heals while walking and sprinting but still cancels on 
   assert.equal(snap().stimulantUse, null);
 }));
 
+test('simultaneous firing and stimulant input cannot silently swallow a shot', () => scenario(({ s, game, snap, now }) => {
+  s.get('health').applyDamage(PLAYER, 100, { now: now() });
+  const ammo = snap().ammo;
+  game.api.handleInput(PLAYER, { stimulantPressed: true, firePressed: true, fireHeld: true }, now());
+  assert.equal(snap().stimulantUse, null, 'a shot must take priority over starting the stimulant');
+  game.api.step(.05, now() + 50);
+  assert(snap().ammo < ammo, 'firing must not be silently discarded');
+  assert.equal(snap().stimulants, 1, 'stimulant must not be consumed');
+}));
+
 test('standing humans regenerate after five seconds, while downed humans still cannot passively heal', () => scenario(({ s, snap, step, down, now }) => {
   assert.equal(s.has('health-regeneration'), true, 'BR must load passive regeneration for standing humans');
   s.get('health').applyDamage(PLAYER, 100, { now: now() });
