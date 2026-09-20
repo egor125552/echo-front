@@ -157,6 +157,14 @@ export async function setup(ctx) {
     if (!active) return;
     const payload = packet?.payload ?? {};
 
+    if (packet?.event === "injury:stim-cancelled"
+      && payload.entityId === network.playerId && lastPhase === "use-stimulant") {
+      present(payload.reason === "no-room-to-stand"
+        ? "Здесь недостаточно места, чтобы встать. Стимулятор сохранён. Отползи на свободное место и используй его снова."
+        : "Подъём прерван. Стимулятор сохранён. Остановись и попробуй снова.");
+      return;
+    }
+
     if (
       packet?.event === "navigation:selected"
       && payload.entityId === network.playerId

@@ -50,6 +50,33 @@ for(const order of ['rifle','armor','rifle-preselected']) {
   assert(inventory().items.some(item=>item.id==='rifle'));
   if(order!=='rifle-preselected') game.api.handleInput(id,{selectDelta:1},now);
   assert.equal(state().phase,'armor-break','real rifle selection must start the armor tutorial');
+  if(order==='rifle') {
+    for(let tick=0;tick<120 && state().phase==='armor-break';tick++) await lab.advance({steps:20,sampleEvery:20});
+    assert.equal(state().phase,'apply-armor','tutorial bot must break armor');
+    game.api.handleInput(id,{platePressed:true},Date.now());
+    for(let tick=0;tick<140 && state().phase==='apply-armor';tick++) await lab.advance({steps:20,sampleEvery:20});
+    assert.equal(state().phase,'injury-demo','armor plates must advance tutorial');
+    for(let tick=0;tick<160 && state().phase==='injury-demo';tick++) await lab.advance({steps:20,sampleEvery:20});
+    const downed=game.api.snapshotFor(id).entities.find(e=>e.id===id);
+    assert.equal(state().phase,'use-stimulant','bot must down player');
+    assert(downed.downed && downed.alive,'player must be alive but downed');
+    const stimulusEvents=[];
+    game.host.events.on('*',packet=>{if(packet.event.startsWith('injury:'))stimulusEvents.push({event:packet.event,payload:packet.payload})});
+    game.api.handleInput(id,{stimulantPressed:true},Date.now());
+    for(let tick=0;tick<10 && state().phase==='use-stimulant';tick++) await lab.advance({steps:20,sampleEvery:20});
+    const recovered=game.api.snapshotFor(id).entities.find(e=>e.id===id);
+    assert.equal(state().phase,'use-stimulant','blocked standing must keep tutorial in revival stage');
+    assert(stimulusEvents.some(row=>row.event==='injury:stim-cancelled'&&row.payload.reason==='no-room-to-stand'));
+    assert.equal(recovered.stimulants,downed.stimulants,'blocked revival must not consume stimulant');
+    services.get('movement').teleport(id,{x:110,y:0,z:40});
+    game.api.handleInput(id,{stimulantPressed:true},Date.now());
+    for(let tick=0;tick<10 && state().phase==='use-stimulant';tick++) await lab.advance({steps:20,sampleEvery:20});
+    assert.equal(state().phase,'complete','real stimulant on clear ground must finish the tutorial');
+    const standing=game.api.snapshotFor(id).entities.find(e=>e.id===id);
+    assert(standing.alive&&!standing.downed);
+    assert.equal(standing.stimulants,downed.stimulants-1);
+    console.log('TUTORIAL_RECOVERY_OBSERVED',JSON.stringify({phase:state().phase,health:standing.health,downed:standing.downed,stim:standing.stimulants,gameTime:lab.status().gameTime}));
+  }
   const report=lab.finish();
   console.log('ENGINE_LAB_TUTORIAL_LOOT_OK',JSON.stringify({order,phase:state().phase,seconds:report.simulatedMs/1000}));
  }finally{await game.host.stop()}
