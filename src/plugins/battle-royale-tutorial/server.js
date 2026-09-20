@@ -50,6 +50,7 @@ export async function setup(ctx) {
         routeTargetLoot: null,
         routeTargetId: null,
         routeLost: false,
+        routeCancelled: false,
         rifleCollected: false,
         armorCollected: false,
         neededLoot: null,
@@ -89,9 +90,10 @@ export async function setup(ctx) {
     state.routeTargetLoot = targetLoot ?? null;
     state.routeTargetId = targetId ?? null;
     state.routeLost = false;
+    state.routeCancelled = false;
   }
 
-  function recoverUnavailableRoute(playerId, state, now = Date.now()) {
+  function recoverUnavailableRoute(playerId, state, now = Date.now(), { cancelled = false } = {}) {
     const fallback = ({
       "follow-navigation": "select-navigation",
       "follow-crate": "select-crate",
@@ -107,9 +109,16 @@ export async function setup(ctx) {
     state.routeTargetKind = null;
     state.routeTargetLoot = null;
     state.routeTargetId = null;
-    state.routeLost = true;
+    state.routeLost = !cancelled;
+    state.routeCancelled = cancelled;
     return true;
   }
+
+  ctx.events.on("navigation:stopped", ({ entityId, reason, now } = {}) => {
+    if (reason !== "toggle") return;
+    const state = ensure(entityId);
+    if (state) recoverUnavailableRoute(entityId, state, now, { cancelled: true });
+  });
 
   ctx.events.on("navigation:unavailable", ({ entityId, reason, now } = {}) => {
     const state = ensure(entityId);
@@ -336,6 +345,7 @@ export async function setup(ctx) {
         complete: state.phase === "complete",
         neededLoot: state.neededLoot,
         routeLost: state.routeLost,
+        routeCancelled: state.routeCancelled,
         rifleCollected: state.rifleCollected,
         armorCollected: state.armorCollected,
       };

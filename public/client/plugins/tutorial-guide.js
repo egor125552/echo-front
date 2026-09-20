@@ -104,6 +104,13 @@ export async function setup(ctx) {
     lastPhase = phase;
 
     if (tutorial.mode === "battle-royale") {
+      if (tutorial.routeCancelled && ["select-navigation", "select-crate", "select-second-crate"].includes(phase)) {
+        const next = phase === "select-second-crate"
+          ? secondCrateMessage(tutorial)
+          : BATTLE_ROYALE_MESSAGES[phase];
+        present(`Маршрут отключён. Выбери цель и построй маршрут снова. ${next}`);
+        return;
+      }
       if (tutorial.routeLost && ["select-navigation", "select-crate", "select-second-crate"].includes(phase)) {
         const next = phase === "select-second-crate"
           ? secondCrateMessage(tutorial)

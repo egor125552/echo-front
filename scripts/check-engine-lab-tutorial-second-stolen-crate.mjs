@@ -42,6 +42,13 @@ try {
  navigation.selectTarget(playerId,'crate:crate-upper-armor',now+17);
  navigation.toggle(playerId,now+18);
  assert.equal(phase(),'follow-second-crate','available replacement must resume second-crate stage');
+ game.api.handleInput(playerId,{navigationTogglePressed:true},now+19);
+ assert.equal(phase(),'select-second-crate','cancelling second route must return to the second crate selection');
+ assert.equal(tutorial.describe(playerId).neededLoot,'armor');
+ assert.equal(tutorial.describe(playerId).rifleCollected,true);
+ navigation.selectTarget(playerId,'crate:crate-upper-armor',now+20);
+ game.api.handleInput(playerId,{navigationTogglePressed:true},now+21);
+ assert.equal(phase(),'follow-second-crate','restarting second route must retain previous loot');
  console.log('ENGINE_LAB_SECOND_STOLEN_CRATE_OK',JSON.stringify({phase:phase(),neededLoot:tutorial.describe(playerId).neededLoot,rifleCollected:tutorial.describe(playerId).rifleCollected}));
  lab.finish();
 }finally{await game.host.stop()}

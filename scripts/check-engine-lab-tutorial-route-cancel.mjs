@@ -1,0 +1,42 @@
+import assert from 'node:assert/strict';
+import {createEchoFrontGame} from '../src/server/game.js';
+import {EngineLab} from '../src/server/engine-lab.js';
+const playerId='stolen-crate-trainee';
+const game=await createEchoFrontGame({mode:'battle-royale',tutorial:true});
+const lab=new EngineLab(game,{mode:'battle-royale',room:'stolen-crate-tutorial',watch:[playerId]});
+try {
+ const prepared=await lab.prepare([{command:'service.call',args:{service:'match-api',method:'connectHuman',arguments:[playerId]}}]);
+ assert(prepared.results.every(row=>row.ok));
+ const s=game.host.services,events=game.host.events,tutorial=s.get('battle-royale-tutorial');
+ const phase=()=>tutorial.describe(playerId).phase;
+ const now=Date.now(),parachute=s.get('parachute');
+ parachute.launch(playerId,{altitude:80},now);
+ parachute.deploy(playerId,now+1);
+ tutorial.handleInput(playerId,{strafe:1},now+2);
+ events.emit('parachute:landed',{entityId:playerId,now:now+3});
+ for(let i=0;i<6;i++)events.emit('sound:spatial',{entityId:playerId,gait:'run',now:now+4+i});
+ events.emit('parachute:deployed',{entityId:playerId,automatic:true,now:now+10});
+ events.emit('parachute:landed',{entityId:playerId,now:now+11});
+ assert.equal(phase(),'select-navigation');
+ lab.start();
+ // A genuine warehouse navigation followed by real selection of a ground crate.
+ const navigation=s.get('navigation');
+ navigation.selectTarget(playerId,'warehouse',now+12);
+ navigation.toggle(playerId,now+13);
+ events.emit('navigation:reached',{entityId:playerId,targetKind:'building',now:now+14});
+ assert.equal(phase(),'select-crate');
+ navigation.selectTarget(playerId,'crate:crate-ground-armor',now+15);
+ navigation.toggle(playerId,now+16);
+ assert.equal(phase(),'follow-crate');
+ game.api.handleInput(playerId,{navigationTogglePressed:true},now+17);
+ assert.equal(navigation.stateFor(playerId).active,false);
+ assert.equal(phase(),'select-crate','cancelling a crate route should return the tutorial to target selection');
+ assert.equal(tutorial.describe(playerId).routeCancelled,true);
+ assert.equal(tutorial.describe(playerId).routeLost,false);
+ navigation.selectTarget(playerId,'crate:crate-ground-rifle',now+18);
+ game.api.handleInput(playerId,{navigationTogglePressed:true},now+19);
+ assert.equal(phase(),'follow-crate','restarting route should resume the tutorial');
+ assert.equal(tutorial.describe(playerId).routeCancelled,false);
+ const result=lab.finish();
+ console.log('ENGINE_LAB_TUTORIAL_ROUTE_CANCEL_OK',JSON.stringify({phase:phase(),anomalies:result.anomalies.length}));
+}finally{await game.host.stop()}

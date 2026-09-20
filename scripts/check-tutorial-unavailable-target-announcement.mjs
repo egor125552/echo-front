@@ -16,5 +16,9 @@ try {
    assert.match(spoken.at(-1),/Предыдущая цель больше недоступна/);
    assert.match(spoken.at(-1),/Выбери другую/);
  }
+ handlers.get('game:snapshot')({tutorial:{enabled:true,mode:'battle-royale',phase:'follow-crate'}});
+ handlers.get('game:snapshot')({tutorial:{enabled:true,mode:'battle-royale',phase:'select-crate',routeCancelled:true}});
+ assert.match(spoken.at(-1),/Маршрут отключён/);
+ assert.doesNotMatch(spoken.at(-1),/цель больше недоступна/);
  console.log('TUTORIAL_UNAVAILABLE_TARGET_ANNOUNCEMENT_OK');
 }finally{globalThis.document=previousDocument}
