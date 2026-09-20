@@ -526,6 +526,35 @@ export async function setup(ctx) {
       && previousDecision.target
       && distance3(transform, previousDecision.target) <= BOT_INVESTIGATION_REACHED_DISTANCE;
 
+    // At the final 35 m circle, three cautious bots can evade each other
+    // indefinitely at 40-70 m: no one enters the 28 m firing range and
+    // everyone stays safely inside the zone. Preserve all ordinary BR AI
+    // until only the last few contestants remain. Once the circle is final,
+    // close the distance to a real living enemy, then use ordinary aiming,
+    // burst timing, cover and damage rather than manufacturing eliminations.
+    const matchState = battleRoyale.status(now);
+    const finalShowdown = matchState.phase === "active"
+      && matchState.alive > 1 && matchState.alive <= 3
+      && matchState.zone.radius <= 35.01;
+    if (finalShowdown && (!zoneTarget || zoneTarget.distance <= matchState.zone.radius)) {
+      if (visibleEnemies.length) {
+        const nearest = visibleEnemies[0];
+        if (executeEngage(bot, transform, state, {
+          goal: "engage", targetEntityId: nearest.entityId,
+          desiredRange: 7, tactic: "press",
+        }, visibleEnemies, now)) return;
+      } else {
+        const nearest = perception.nearestEnemy?.(bot.id, 140, { humanPriority: 1 });
+        if (nearest?.transform) {
+          // This is an actual opponent's position, not a fake bot spawn,
+          // damage command or forced teleportation.
+          if (moveTowardPosition(bot, transform, state, nearest.transform, now, {
+            sprint: true, thinkDelay: 135, stopDistance: 8,
+          })) return;
+        }
+      }
+    }
+
     const decision = brain.decide(bot.id, {
       visibleEnemies,
       memory,
