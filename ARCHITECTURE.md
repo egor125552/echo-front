@@ -1,6 +1,6 @@
 # Echo Front architecture
 
-Echo Front is a preset, not a monolithic game class. The microkernel only provides plugin lifecycle, events, services, components, scheduling boundaries, and platform adapters. Gameplay lives under `src/plugins/` and browser behavior lives under `client/plugins/`.
+Echo Front is a preset, not a monolithic game class. The microkernel only provides plugin lifecycle, events, services, components, scheduling boundaries, and platform adapters. Gameplay lives under `src/plugins/` and browser behavior lives under `public/client/plugins/`.
 
 ## Rules
 

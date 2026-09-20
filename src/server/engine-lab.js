@@ -293,6 +293,14 @@ export class EngineLab {
         crossingYieldUntil: bot.crossingYieldUntil ?? null,
         parkedAvoidUntil: bot.parkedAvoidUntil ?? null,
         reason: bot.reason ?? null,
+        lastObstacleDistance: finite(bot.lastObstacleDistance),
+        lastCollisionRisk: bot.lastCollisionRisk ?? null,
+        lastPedestrian: bot.lastPedestrian ?? null,
+        stationaryAt: bot.stationaryAt ?? null,
+        stationaryPosition: position(bot.stationaryPosition),
+        trafficStallAt: bot.trafficStallAt ?? null,
+        trafficStallPosition: position(bot.trafficStallPosition),
+        parkedAvoidVehicleId: bot.parkedAvoidVehicleId ?? null,
       } : null,
     };
   }
@@ -448,6 +456,12 @@ export class EngineLab {
           crossingYieldUntil: decision.crossingYieldUntil,
           recoveries: decision.recoveries,
           routePoint: decision.routePoint,
+          lastObstacleDistance: decision.lastObstacleDistance,
+          lastCollisionRisk: decision.lastCollisionRisk,
+          lastPedestrian: decision.lastPedestrian,
+          stationaryAt: decision.stationaryAt,
+          trafficStallAt: decision.trafficStallAt,
+          parkedAvoidVehicleId: decision.parkedAvoidVehicleId,
           reason: Math.abs(Number(vehicle.input?.forward ?? decision.input?.forward) || 0) < .1
             ? "Vehicle stationary with neutral throttle despite a distant goal; inspect yield, obstacle and recovery state"
             : "Vehicle stationary despite nonzero throttle toward a distant goal",
