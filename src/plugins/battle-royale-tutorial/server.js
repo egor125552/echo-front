@@ -197,6 +197,14 @@ export async function setup(ctx) {
     }
   });
 
+  function acceptAlreadySelectedRifle(playerId, now) {
+    const inventory = ctx.components.get(playerId, "Weapons");
+    if (inventory?.items?.[inventory.selected]?.id !== "rifle") return false;
+    if (!advance(playerId, "armor-break", now)) return false;
+    prepareDemoBot(playerId);
+    return true;
+  }
+
   ctx.events.on("loot:picked", ({
     entityId,
     loot,
@@ -213,7 +221,7 @@ export async function setup(ctx) {
 
     if (state.phase === "interact-first-crate") {
       if (state.rifleCollected && state.armorCollected) {
-        advance(entityId, "select-rifle", now);
+        if (advance(entityId, "select-rifle", now)) acceptAlreadySelectedRifle(entityId, now);
       } else {
         advance(entityId, "select-second-crate", now);
       }
@@ -222,7 +230,7 @@ export async function setup(ctx) {
 
     if (state.phase === "interact-second-crate") {
       if (state.rifleCollected && state.armorCollected) {
-        advance(entityId, "select-rifle", now);
+        if (advance(entityId, "select-rifle", now)) acceptAlreadySelectedRifle(entityId, now);
       } else {
         advance(entityId, "select-second-crate", now);
       }
