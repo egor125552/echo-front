@@ -172,6 +172,18 @@ export class EngineLab {
       hadEnteredVehicle: typeof payload.hadEnteredVehicle === "boolean"
         ? payload.hadEnteredVehicle : null,
       lastDrivingPhase: payload.lastDrivingPhase ?? null,
+      stopTelemetry: payload.stopTelemetry ?? null,
+      lastControl: payload.lastControl ?? null,
+      lastTraffic: payload.lastTraffic ?? null,
+      lastCollisionRisk: payload.lastCollisionRisk ?? null,
+      lastObstacleDistance: payload.lastObstacleDistance ?? null,
+      recoveries: payload.recoveries ?? null,
+      stationaryRecoveryAttempts: payload.stationaryRecoveryAttempts ?? null,
+      physicalStationaryForMs: payload.physicalStationaryForMs ?? null,
+      rearClearanceMeters: payload.rearClearanceMeters ?? null,
+      lastProgressAt: payload.lastProgressAt ?? null,
+      trafficWaitAt: payload.trafficWaitAt ?? null,
+      nearestParkedVehicles: payload.nearestParkedVehicles ?? [],
       driverAlive: entity.alive,
     };
     this.warehouseVehicleEvents.push(recorded);

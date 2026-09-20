@@ -102,6 +102,7 @@ export async function setup(ctx) {
         } : null });
       if (recentFailures.length > 24) recentFailures.splice(0, recentFailures.length - 24);
     }
+    const releasedCar = vehicles.stateFor(state.vehicleId);
     reservations.delete(state.vehicleId);
     states.delete(id);
     counters.releaseReasons[reason] = (counters.releaseReasons[reason] ?? 0) + 1;
@@ -116,6 +117,33 @@ export async function setup(ctx) {
       // of cancelled approaches misleadingly looks like abandoned vehicles.
       hadEnteredVehicle: state.phase !== "approach",
       lastDrivingPhase: state.phase,
+      stopTelemetry: state.stopTelemetry ?? null,
+      // Snapshot the actual final driving conditions before the state is gone.
+      // Only enriched internal AI events receive this detail, not every
+      // ordinary client network packet.
+      lastControl: state.input ? {
+        forward: Number(state.input.forward) || 0,
+        strafe: Number(state.input.strafe) || 0,
+        handbrake: Boolean(state.input.sprint),
+      } : null,
+      lastTraffic: state.traffic ? { ...state.traffic } : null,
+      lastCollisionRisk: state.lastCollisionRisk ? { ...state.lastCollisionRisk } : null,
+      lastObstacleDistance: Number.isFinite(state.lastObstacleDistance)
+        ? state.lastObstacleDistance : null,
+      recoveries: state.recoveries ?? 0,
+      stationaryRecoveryAttempts: state.stationaryRecoveryAttempts ?? 0,
+      stationaryAt: state.stationaryAt ?? null,
+      physicalStationaryForMs: state.stationaryAt == null ? null
+        : Math.max(0, now - state.stationaryAt),
+      rearClearanceMeters: releasedCar ? routes.clearDistance(releasedCar, releasedCar.angle + Math.PI, 9) : null,
+      lastProgressAt: state.lastProgressAt ?? null,
+      trafficWaitAt: state.trafficWaitAt ?? null,
+      nearestParkedVehicles: (releasedCar
+        ? vehicles.snapshot().filter(other =>
+            other.id !== state.vehicleId && !other.occupied && other.speed < 1.5
+            && distance(other, releasedCar) < 14
+          ).map(other=>({id:other.id,x:other.x,z:other.z})).slice(0,8)
+        : []),
     });
   }
 
@@ -152,6 +180,26 @@ export async function setup(ctx) {
   }
 
   function stop(state, now, reason = "arrived") {
+    // Capture the real control state that caused stopping before the brake
+    // phase replaces the throttle and clears the physical-stall clock.
+    const car = vehicles.stateFor(state.vehicleId);
+    const rear = car ? routes.clearDistance(car, car.angle + Math.PI, 9) : null;
+    state.stopTelemetry = {
+      reason, at: now, phaseBeforeBrake: state.phase,
+      forward: state.input?.forward ?? null,
+      handbrake: state.input?.sprint ?? null,
+      obstacleDistance: state.lastObstacleDistance ?? null,
+      physicalStillForMs: state.stationaryAt == null
+        ? null : Math.max(0, now - state.stationaryAt),
+      rearClearanceMeters: rear == null ? null
+        : Number.isFinite(rear) ? rear : "clear",
+      recoveries: state.recoveries ?? 0,
+      stationaryRecoveryAttempts: state.stationaryRecoveryAttempts ?? 0,
+      stationaryRecoveryBlockedBy: state.stationaryRecoveryBlockedBy ?? null,
+      traffic: state.traffic ? { ...state.traffic } : null,
+      pedestrian: state.lastPedestrian ? { ...state.lastPedestrian } : null,
+      collisionRisk: state.lastCollisionRisk ? { ...state.lastCollisionRisk } : null,
+    };
     state.phase = "brake"; state.phaseAt = now; state.reason = reason;
   }
 
@@ -576,7 +624,27 @@ export async function setup(ctx) {
     return best;
   }
 
+  function personInReverseCorridor(id, car) {
+    const backX = -Math.sin(car.angle), backZ = Math.cos(car.angle);
+    return entities.all().some(entity => {
+      if (!entity.alive || entity.id === id || vehicles.isDriving(entity.id)
+        || vehicles.isPassenger?.(entity.id)) return false;
+      const p = transform(entity.id);
+      if (!p || Math.abs((p.y ?? 0) - (car.y ?? 0)) > 3.5) return false;
+      const dx = p.x - car.x, dz = p.z - car.z;
+      const rear = dx * backX + dz * backZ;
+      return rear > -2 && rear < 10
+        && Math.abs(dx * backZ - dz * backX) < 5;
+    });
+  }
+
   function recover(id, state, car, now) {
+    // A pedestrian can enter the rear corridor AFTER reverse begins.
+    if (personInReverseCorridor(id, car)) {
+      state.phase = "travel"; state.phaseAt = now;
+      vehicles.setInput(id, brakeInput(car));
+      return;
+    }
     if (now - state.phaseAt > 2100 || routes.clearDistance(car, car.angle + Math.PI, 8) < 2) {
       state.phase = "travel"; state.phaseAt = now; state.lastProgressAt = now;
       state.lastPosition = { ...car }; state.previousSteering = 0;
@@ -601,14 +669,44 @@ export async function setup(ctx) {
       if (!state.stationaryPosition || distance(car, state.stationaryPosition) > 3) {
         state.stationaryPosition = { x: car.x, z: car.z };
         state.stationaryAt = now;
-      } else if (now - (state.stationaryAt ?? now) >= 15_000) {
-        stop(state, now, "stuck");
-        vehicles.setInput(id, brakeInput(car));
-        return;
+      } else {
+        const stillFor = now - (state.stationaryAt ?? now);
+        if (state.phase !== "reverse" && stillFor >= 5_000
+          && (state.nextStationaryRecoveryAt ?? 0) <= now
+          && (state.stationaryRecoveryAttempts ?? 0) < 2) {
+          const rearClear = routes.clearDistance(car, car.angle + Math.PI, 9);
+          // The Rapier sweep excludes character colliders.
+          const personBehind = personInReverseCorridor(id, car);
+          if (rearClear > 7 && !personBehind) {
+            const left = routes.clearDistance(car, car.angle - .6, 20);
+            const right = routes.clearDistance(car, car.angle + .6, 20);
+            state.phase = "reverse"; state.phaseAt = now;
+            state.recoverTurn = left > right ? .8 : -.8;
+            state.stationaryRecoveryAttempts = (state.stationaryRecoveryAttempts ?? 0) + 1;
+            state.nextStationaryRecoveryAt = now + 5_000;
+            state.recoveries++; counters.recoveries++;
+            state.lastStationaryRecoveryAt = now;
+            vehicles.setInput(id, {
+              forward: -.65, strafe: state.recoverTurn,
+              sprint: false, fireHeld: false,
+            });
+            return;
+          }
+          state.stationaryRecoveryBlockedBy =
+            rearClear <= 7 ? "rear-obstacle" : "person-behind";
+        }
+        if (stillFor >= 15_000) {
+          stop(state, now, "stuck");
+          vehicles.setInput(id, brakeInput(car));
+          return;
+        }
       }
-    } else {
+    } else if (state.phase !== "reverse") {
       state.stationaryPosition = null;
       state.stationaryAt = null;
+      state.stationaryRecoveryAttempts = 0;
+      state.nextStationaryRecoveryAt = null;
+      state.stationaryRecoveryBlockedBy = null;
     }
     const rotation = car.rotation;
     const up = rotation ? 1 - 2 * (rotation.x ** 2 + rotation.z ** 2) : 1;
