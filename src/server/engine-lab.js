@@ -119,11 +119,14 @@ export class EngineLab {
     this.vehicleArrivals = new Map();
     this.anomalies = [];
     this.events = [];
+    this.watchedEvents = [];
     this.setupHistory = [];
     this.watch = [...new Set(watch.map(String))].slice(0, 12);
     this.objectives = objectives.map(validObjective);
     this.initialVehiclePositions = new Map();
     this.lastVehicleSamples = new Map();
+    this.lastPedestrianSamples = new Map();
+    this.lastPedestrianWarningAt = new Map();
     this.lastStallAt = new Map();
     this.lastObservationClock = null;
   }
@@ -189,6 +192,8 @@ export class EngineLab {
     return {
       entityId, bot: Boolean(entity.bot), alive: Boolean(entity.alive),
       position: position(t), vehicleId: car?.id ?? bot?.vehicleId ?? null,
+      movementInput: !car ? (host.components.get(entityId, "Input") ?? null) : null,
+      airborne: Boolean(host.components.get(entityId, "Parachute")?.airborne),
       vehicle: car ? {
         position: position(car), speed: finite(car.speed),
         forwardSpeed: finite(car.forwardSpeed), angle: finite(car.angle),
@@ -264,6 +269,36 @@ export class EngineLab {
     this.samples.push(row);
     if (this.samples.length > MAX_SAMPLES) this.samples.shift();
     for (const observation of entities) {
+      const { entityId, position: here, movementInput: input } = observation;
+      const wantsToMove = Math.hypot(Number(input?.forward) || 0,
+        Number(input?.strafe) || 0) >= .4;
+      if (!observation.alive || observation.vehicle || observation.airborne
+        || !here || !wantsToMove) {
+        this.lastPedestrianSamples.delete(entityId);
+        continue;
+      }
+      const previous = this.lastPedestrianSamples.get(entityId);
+      if (!previous || (horizontal(previous.position, here) ?? Infinity) >= .5) {
+        this.lastPedestrianSamples.set(entityId, {
+          since: this.simulatedMs, position: here,
+        });
+        continue;
+      }
+      if (this.simulatedMs - previous.since >= 3000
+        && this.simulatedMs - (this.lastPedestrianWarningAt.get(entityId) ?? -Infinity) >= 3000) {
+        this.anomalies.push({
+          type: "possible-stalled-pedestrian",
+          entityId, bot: observation.bot, simulatedMs: this.simulatedMs,
+          atGameTime: elapsedText(this.simulatedMs),
+          requestedInput: { forward: Number(input.forward)||0, strafe: Number(input.strafe)||0 },
+          position: here,
+          reason: "Movement requested but ground position advanced less than 0.5 m for 3 simulated seconds",
+        });
+        if (this.anomalies.length > MAX_ANOMALIES) this.anomalies.shift();
+        this.lastPedestrianWarningAt.set(entityId, this.simulatedMs);
+      }
+    }
+    for (const observation of entities) {
       const { vehicle, decision, entityId } = observation;
       if (!vehicle || !decision) { this.lastVehicleSamples.delete(entityId); continue; }
       const previous = this.lastVehicleSamples.get(entityId);
@@ -297,6 +332,18 @@ export class EngineLab {
       if (!previous) this.lastVehicleSamples.set(entityId, { since, position: vehicle.position });
     }
     for (const packet of this.game.drainEvents()) {
+      const payload = packet.payload ?? {};
+      const relatedIds = [
+        payload.entityId, payload.playerId, payload.targetId, payload.attackerId,
+        payload.driverId, payload.recipientId, payload.killerId,
+      ].filter(Boolean);
+      if (relatedIds.some(id => this.watch.includes(String(id)))) {
+        this.watchedEvents.push({
+          simulatedMs: Math.round(this.simulatedMs),
+          event: packet.event,
+          payload,
+        });
+      }
       const eventKey = packet.event + ":" + (packet.payload?.entityId ?? "");
       this.eventCounts.set(eventKey, (this.eventCounts.get(eventKey) ?? 0) + 1);
       this.eventCounts.set(packet.event + ":*", (this.eventCounts.get(packet.event + ":*") ?? 0) + 1);
@@ -306,6 +353,9 @@ export class EngineLab {
       });
     }
     if (this.events.length > MAX_EVENTS) this.events.splice(0, this.events.length - MAX_EVENTS);
+    if (this.watchedEvents.length > MAX_EVENTS) {
+      this.watchedEvents.splice(0, this.watchedEvents.length - MAX_EVENTS);
+    }
     return row;
   }
 
@@ -341,6 +391,7 @@ export class EngineLab {
       samples: this.samples.filter(row => row.index >= first).slice(0, bounded(limit, 20, 60)),
       anomalies: this.anomalies.slice(-20),
       recentEvents: this.events.slice(-20),
+      watchedEvents: this.watchedEvents.slice(-30),
       nextIndex: this.sampleCounter,
     };
   }
@@ -394,6 +445,7 @@ export class EngineLab {
       anomalies: this.anomalies.slice(-35),
       setupHistory: this.setupHistory.map(({ command, ok, error }) => ({ command, ok, error })),
       recentEvents: this.events.slice(-20),
+      watchedEvents: this.watchedEvents.slice(-30),
       eventCounts: Object.fromEntries([...this.eventCounts].filter(([name]) => name.endsWith(":*")).slice(0, 100)),
     };
   }
@@ -442,6 +494,81 @@ export async function handleEngineLabRequest(room, request) {
       case "scenario.advance": result = await lab.advance(body); break;
       case "scenario.observe": result = lab.observe(body); break;
       case "scenario.report": result = lab.report(); break;
+      case "scenario.view": {
+        if (lab.phase !== "running") throw new Error("Player view is only available during a running scenario");
+        const playerId = String(body.playerId ?? "");
+        const human = lab.game.host.services.get("entities").get(playerId);
+        if (!human || human.bot || !human.alive) {
+          if (!human || human.bot) throw new Error("Player view requires a human-controlled entity");
+        }
+        const snapshot = lab.game.api.snapshotFor(playerId, Date.now());
+        const self = snapshot.entities?.find(entity => entity.id === playerId) ?? null;
+        const observed = snapshot.spectator?.active
+          ? snapshot.entities?.find(entity => entity.id === snapshot.spectator.targetId)
+          : self;
+        const center = observed ?? self;
+        const distanceFrom = (item) => center
+          ? Math.hypot((Number(item.x) || 0) - (Number(center.x) || 0),
+            (Number(item.z) || 0) - (Number(center.z) || 0)) : Infinity;
+        const nearbyCrates = (snapshot.map?.crates ?? [])
+          .filter(item => !item.opened && distanceFrom(item) < 110)
+          .map(item => ({ ...item, distanceMeters: distanceFrom(item) }))
+          .sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8);
+        const nearbyVehicles = (snapshot.vehicles ?? [])
+          .filter(item => distanceFrom(item) < 160)
+          .map(item => ({
+            id: item.id, kind: item.kind, x: item.x, y: item.y, z: item.z,
+            occupied: Boolean(item.occupied ?? item.driverId),
+            driverId: item.driverId ?? null,
+            distanceMeters: distanceFrom(item),
+            heightDifferenceMeters: center ? Math.abs(
+              (Number(item.y)||0) - (Number(center.y)||0)
+            ) : null,
+            forwardSpeed: item.forwardSpeed ?? null,
+          }))
+          .sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 8);
+        const vehicles = lab.game.host.services.has("vehicles")
+          ? lab.game.host.services.get("vehicles") : null;
+        const currentCar = vehicles?.vehicleForDriver?.(playerId) ?? null;
+        const gameMap = lab.game.host.services.has("map")
+          ? lab.game.host.services.get("map") : null;
+        const nearbyDoors = (gameMap?.doors ?? [])
+          .filter(door => center && Math.hypot(
+            (Number(door.x) || 0) - (Number(center.x) || 0),
+            (Number(door.z) || 0) - (Number(center.z) || 0)
+          ) < 12)
+          .map(door => ({
+            id: door.id, name: door.name, open: Boolean(door.open),
+            x: door.x, y: door.y, z: door.z,
+            distanceMeters: distanceFrom(door),
+            heightDifferenceMeters: center ? Math.abs(
+              (Number(door.y)||0) - (Number(center.y)||0)
+            ) : null,
+          }));
+        const parachute = lab.game.host.services.has("parachute")
+          ? lab.game.host.services.get("parachute").stateFor?.(playerId) ?? null : null;
+        result = {
+          ...lab.status(), self, spectator: snapshot.spectator ?? null,
+          parachute, match: snapshot.match ?? null,
+          drivingVehicle: currentCar
+            ? { id: currentCar.id, x: currentCar.x, z: currentCar.z,
+              speed: currentCar.speed ?? null, driverId: currentCar.driverId ?? null } : null,
+          nearbyDoors, nearbyCrates, nearbyVehicles,
+          recentPlayerEvents: lab.watchedEvents.filter(packet => {
+            const p = packet.payload ?? {};
+            return [p.entityId, p.playerId, p.targetId, p.attackerId,
+              p.driverId, p.recipientId, p.killerId].includes(playerId);
+          }).slice(-20),
+          visibleEntities: (snapshot.entities ?? [])
+            .filter(entity => entity.id !== playerId && entity.id !== snapshot.spectator?.targetId)
+            .map(entity => ({
+              id: entity.id, alive: entity.alive, bot: entity.bot,
+              x: entity.x, y: entity.y, z: entity.z, health: entity.health,
+              distanceMeters: distanceFrom(entity),
+            })).sort((a, b) => a.distanceMeters - b.distanceMeters).slice(0, 12),
+        };
+        break;
+      }
       case "scenario.finish": result = lab.finish(); break;
       case "scenario.input": {
         if (lab.phase !== "running") throw new Error("Input is only available during a running scenario");

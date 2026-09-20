@@ -54,9 +54,24 @@ export async function setup(ctx) {
       return;
     }
 
-    if (input.interactPressed && vehicles.interact(playerId, now)) {
-      movement.setInput(playerId, {});
-      return;
+    // A car parked next to an interactive door must not steal the E press.
+    // The base match API resolves doors and crates through the real map
+    // interaction, while the vehicle interaction is a fallback on foot.
+    if (input.interactPressed) {
+      const actor = ctx.components.get(playerId, "Transform");
+      const atDoor = actor && (map.doors ?? []).some((door) => (
+        Math.abs((Number(actor.y) || 0) - (Number(door.y) || 0)) <= 2.2
+        && Math.hypot((Number(actor.x) || 0) - (Number(door.x) || 0),
+          (Number(actor.z) || 0) - (Number(door.z) || 0)) <= 1.45
+      ));
+      if (atDoor) {
+        originalHandleInput(playerId, input, now);
+        return;
+      }
+      if (vehicles.interact(playerId, now)) {
+        movement.setInput(playerId, {});
+        return;
+      }
     }
     originalHandleInput(playerId, input, now);
   };
