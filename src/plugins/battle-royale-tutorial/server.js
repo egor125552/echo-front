@@ -47,7 +47,16 @@ export async function setup(ctx) {
       && state.phase !== "complete"
       && entities.get(playerId)?.alive
     ));
-    if (demoNeeded) return { applied: 0, killed: false };
+    if (demoNeeded) {
+      const hp = ctx.components.get(entityId, "Health");
+      if (!hp) return { applied: 0, killed: false };
+      // Preserve genuine damage/hit feedback, but do not let the only
+      // training opponent die before its mandatory demonstrations.
+      const safeAmount = Math.min(Math.max(0, Number(amount) || 0), Math.max(0, hp.current - 1));
+      const outcome = originalApplyDamage(entityId, safeAmount, source);
+      if (outcome.applied > 0) health.heal(entityId, outcome.applied);
+      return outcome;
+    }
     return originalApplyDamage(entityId, amount, source);
   };
 
