@@ -126,6 +126,7 @@ export class EngineLab {
     this.watchedEvents = [];
     this.playerEvents = [];
     this.warehouseVehicleEvents = [];
+    this.warehouseCarHistory = new Map();
     // This internal AI event is intentionally not forwarded to human clients.
     // Observe it on the real engine bus so the reason for a parked car is not
     // lost behind the generic vehicle:exited / bot-dismount notification.
@@ -634,6 +635,19 @@ export async function handleEngineLabRequest(room, request) {
           occupied: Boolean(car.occupied), driverId: car.driverId ?? null,
           speed: Math.round((car.speed ?? 0) * 10) / 10,
         }));
+        const transitions = [];
+        for (const car of detailed) {
+          const previous = lab.warehouseCarHistory.get(car.id);
+          if (previous && previous.driverId !== car.driverId) {
+            transitions.push({
+              gameTime: lab.status().gameTime, vehicleId: car.id,
+              priorDriverId: previous.driverId, currentDriverId: car.driverId,
+              previouslyEmpty: !previous.driverId,
+              distanceFromWarehouseMeters: car.distanceFromWarehouseMeters,
+            });
+          }
+          lab.warehouseCarHistory.set(car.id, car);
+        }
         const events = lab.warehouseVehicleEvents.filter(e =>
           e.simulatedMs >= Math.max(0, Number(body.sinceSimulatedMs) || 0));
         const reasons = {}, abortedApproaches = {}, actualDriverReleases = {};
@@ -649,7 +663,8 @@ export async function handleEngineLabRequest(room, request) {
           vehicles: detailed, parked: detailed.filter(car=>!car.occupied).length,
           driven: detailed.filter(car=>car.occupied).length,
           botVehicleSummary: compactBotSummary,
-          events, releaseReasonsNearWarehouse: reasons,
+          events, occupancyTransitions: transitions,
+          releaseReasonsNearWarehouse: reasons,
           actualDriverReleaseReasons: actualDriverReleases,
           abortedApproachReasons: abortedApproaches,
           nearbyBotsOnFoot: host.services.get("entities").all().filter(entity=>{

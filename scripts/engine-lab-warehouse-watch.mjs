@@ -63,12 +63,13 @@ let approachStallAttempts=0, previousApproachDistance=Infinity;
 let drivingRecoveryTurns=0, drivingStallCount=0, drivingStartPosition=null;
 let requestedParking=false;
 let previousDrivingVehicleId=null;
-const warehouseSnapshots=[],warehouseEvents=[];
+const warehouseSnapshots=[],warehouseEvents=[],warehouseOccupancyTransitions=[];
 let lastWarehouseEventMs=0;
 const warehouseReportPath=path.join(os.homedir(),'Downloads','Echo Front warehouse traffic '+room+'.json');
 async function observeWarehouse() {
  const warehouse=await call('scenario.warehouse-traffic',{sinceSimulatedMs:lastWarehouseEventMs});
  for(const event of warehouse.events)warehouseEvents.push(event);
+ warehouseOccupancyTransitions.push(...warehouse.occupancyTransitions);
  if(warehouse.events.length) lastWarehouseEventMs=Math.max(
    lastWarehouseEventMs,...warehouse.events.map(e=>e.simulatedMs+1));
  const brief={gameTime:warehouse.gameTime,simulatedMs:warehouse.simulatedMs,
@@ -81,6 +82,7 @@ async function observeWarehouse() {
   console.log('WAREHOUSE',JSON.stringify({
    time:brief.gameTime,parked:brief.parked,driven:brief.driven,
    nearbyFootBots:brief.footBots.length,events:warehouse.events,
+   occupancyTransitions:warehouse.occupancyTransitions,
    reasons:warehouse.releaseReasonsNearWarehouse,
    actualDriverReleases:warehouse.actualDriverReleaseReasons,
    abortedApproaches:warehouse.abortedApproachReasons,
@@ -90,7 +92,7 @@ async function observeWarehouse() {
  }
  if(warehouseSnapshots.length%5===0){
   fs.writeFileSync(warehouseReportPath,JSON.stringify({
-   warehouseSnapshots,warehouseEvents,lastPlayerView:brief?state:null,
+   warehouseSnapshots,warehouseEvents,warehouseOccupancyTransitions,lastPlayerView:brief?state:null,
    gameRoom:room,matchContinues:true,
   },null,2));
   console.log('WAREHOUSE_REPORT',warehouseReportPath);
