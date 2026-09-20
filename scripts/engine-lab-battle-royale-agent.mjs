@@ -329,6 +329,48 @@ for(let turn=0;turn<maxTurns;turn++){
  }
  fs.writeFileSync('/tmp/echo-br-play-progress.json',JSON.stringify({phase,target,turn,time:state.gameTime,events:log.slice(-5),lastView:brief(state)}));
 }
+// A battle royale does not end when one player dies. Continue watching bots
+// already encountered while the SAME live match continues. No post-death input
+// or new bot positions are injected.
+if(state.self?.alive===false && followedBots.size>0){
+  console.log('SPECTATING_EXISTING_MATCH',JSON.stringify({
+    gameTime:state.gameTime,followed:[...followedBots.keys()],
+  }));
+  for(let spectatorTurn=0;spectatorTurn<72;spectatorTurn++){
+    const advanced=await call('scenario.advance',{steps:100,sampleEvery:20});
+    for(const observedEntity of advanced.last?.entities??[]){
+      const previous=followedBots.get(observedEntity.entityId);
+      if(!previous)continue;
+      const observed=summarizeBot(observedEntity);
+      if(!observed)continue;
+      const moved=previous.position&&observed.position
+        ?Math.hypot(previous.position.x-observed.position.x,
+          previous.position.z-observed.position.z):0;
+      if(observed.car!==previous.car || observed.phase!==previous.phase
+        || observed.goal!==previous.goal || moved>30 || observed.alive!==previous.alive){
+        const moment={gameTime:advanced.gameTime,event:observed.car!==previous.car
+          ? previous.car?'dismounted':'entered-vehicle'
+          : observed.goal!==previous.goal?'new-foot-decision'
+          :observed.alive!==previous.alive?'alive-changed':'moved-or-changed-phase',
+          movedMeters:moved,bot:observed,spectator:true};
+        botMoments.push(moment);
+        console.log('SPECTATOR_BOT',JSON.stringify(moment));
+        followedBots.set(observedEntity.entityId,observed);
+      }
+    }
+    for(const anomaly of advanced.newAnomalies??[]){
+      const observedDriver=advanced.last?.entities?.find(e=>e.entityId===anomaly.entityId);
+      if(observedDriver && anomaly.type==='possible-stalled-driver'){
+        const finding={gameTime:advanced.gameTime,event:'driver-stalled',
+          anomaly,driver:observedDriver,spectator:true};
+        botMoments.push(finding);
+        console.log('BOT_STALL_DIAGNOSTICS',JSON.stringify(finding).slice(0,5000));
+      }
+    }
+    if(spectatorTurn%10===0)console.log('SPECTATOR_TIME',advanced.gameTime);
+    if(advanced.last?.match?.phase==='ended')break;
+  }
+}
 await consumePlayerEvents();
 const report=await call('scenario.finish');
 const totals=playerEvents.reduce((m,e)=>(m[e.event]=(m[e.event]??0)+1,m),{});

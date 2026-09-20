@@ -85,7 +85,7 @@ export async function setup(ctx) {
   function release(id, now, reason) {
     const state = states.get(id);
     if (!state) return;
-    if (reason === "stuck" || reason === "unsafe") {
+    if (reason === "stuck" || reason === "unsafe" || reason === "traffic-deadlock") {
       vehicleCooldowns.set(state.vehicleId, now + BOT_VEHICLE_FAILURE_COOLDOWN_MS);
       const car = vehicles.stateFor(state.vehicleId);
       const nearestVehicle = car ? vehicles.snapshot()
@@ -584,6 +584,25 @@ export async function setup(ctx) {
   function drive(id, state, dt, now, trafficCars, humanPositions = []) {
     const car = vehicles.vehicleForDriver(id);
     if (!car || car.id !== state.vehicleId) { release(id, now, "driver-lost"); return; }
+    // A route can keep replanning and refreshing lastProgressAt while Rapier
+    // reports nearly the same world position. Neither the ordinary recovery
+    // nor the traffic-yield watchdog catches a zero-throttle obstacle in that
+    // case. Use a separate physical-position clock, irrespective of route and
+    // input, and eventually give the stuck bot its on-foot AI back.
+    if (state.phase !== "brake" && distance(car, state.destination) > 60
+      && car.speed < 1.5) {
+      if (!state.stationaryPosition || distance(car, state.stationaryPosition) > 3) {
+        state.stationaryPosition = { x: car.x, z: car.z };
+        state.stationaryAt = now;
+      } else if (now - (state.stationaryAt ?? now) >= 15_000) {
+        stop(state, now, "stuck");
+        vehicles.setInput(id, brakeInput(car));
+        return;
+      }
+    } else {
+      state.stationaryPosition = null;
+      state.stationaryAt = null;
+    }
     const rotation = car.rotation;
     const up = rotation ? 1 - 2 * (rotation.x ** 2 + rotation.z ** 2) : 1;
     if (up < .35 && state.phase !== "brake") stop(state, now, "unsafe");
@@ -831,11 +850,32 @@ export async function setup(ctx) {
         }
         if (yieldingHeadOn) counters.headOnYields++;
       }
+      // In a crowded junction the collision / pedestrian yield can remain
+      // asserted forever. Then both drivers keep the handbrake on, and the
+      // normal stuck recovery below is never reached. Do not accelerate
+      // through an occupied crossing: give up the driver's seat after an
+      // extended stationary yield so on-foot AI can resume.
+      if (car.speed < .8) {
+        if (!state.trafficStallPosition
+          || distance(car, state.trafficStallPosition) > 2) {
+          state.trafficStallPosition = { x: car.x, z: car.z };
+          state.trafficStallAt = now;
+        } else if (now - (state.trafficStallAt ?? now) >= 12_000) {
+          stop(state, now, "traffic-deadlock");
+          vehicles.setInput(id, brakeInput(car));
+          return;
+        }
+      } else {
+        state.trafficStallAt = null;
+        state.trafficStallPosition = null;
+      }
       const waitLimit = yieldingHeadOn ? 5000 : 9000;
       if (yieldingAtCrossing || yieldingCollision || yieldingPedestrian || now - state.trafficWaitAt < waitLimit) return;
     } else {
       if (state.trafficWaitAt) state.lastProgressAt = now;
       state.trafficWaitAt = null;
+      state.trafficStallAt = null;
+      state.trafficStallPosition = null;
     }
     if (now - state.lastProgressAt > 4000 && car.speed < 1.5) {
       const blocker = stationaryBlocker(car, trafficCars);
