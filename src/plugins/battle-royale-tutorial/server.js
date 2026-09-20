@@ -231,12 +231,16 @@ export async function setup(ctx) {
 
   ctx.events.on("navigation:reached", ({
     entityId,
+    targetId,
     targetKind,
     targetLoot,
     now,
   } = {}) => {
     const state = ensure(entityId);
     if (!state) return;
+    // A route can be replaced while an earlier arrival is still in transit.
+    // Do not complete a new objective using the abandoned target's event.
+    if (targetId && state.routeTargetId && targetId !== state.routeTargetId) return;
     const resolvedKind = targetKind ?? state.routeTargetKind;
     const resolvedLoot = targetLoot ?? state.routeTargetLoot;
 
