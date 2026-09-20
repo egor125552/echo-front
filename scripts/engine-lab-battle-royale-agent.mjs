@@ -118,10 +118,17 @@ async function observeEncounteredBots(view, latest) {
  }
 }
 
-for(let turn=0;turn<maxTurns;turn++){
+for(let turn=0;;turn++){
  const player=state.self;
  if(!player?.alive){record('eliminated','Player died during this actual battle royale');break;}
  if(state.match?.phase==='ended'){record('match-ended','Match ended');break;}
+ if(turn%20===0&&turn>0){
+   const progressReport=await call('scenario.report');
+   if(progressReport.matchOutcome?.phase==='ended'){
+     record('match-ended','Actual BR match ended, not an artificial observation cutoff');
+     break;
+   }
+ }
  const chute=player.parachute?.phase;
  let input={},step=60,action='observe',details='';
  if(state.drivingVehicle&&phase!=='driving'){
@@ -332,11 +339,11 @@ for(let turn=0;turn<maxTurns;turn++){
 // A battle royale does not end when one player dies. Continue watching bots
 // already encountered while the SAME live match continues. No post-death input
 // or new bot positions are injected.
-if(state.self?.alive===false && followedBots.size>0){
+if(state.self?.alive===false){
   console.log('SPECTATING_EXISTING_MATCH',JSON.stringify({
     gameTime:state.gameTime,followed:[...followedBots.keys()],
   }));
-  for(let spectatorTurn=0;spectatorTurn<72;spectatorTurn++){
+  for(let spectatorTurn=0;;spectatorTurn++){
     const advanced=await call('scenario.advance',{steps:100,sampleEvery:20});
     for(const observedEntity of advanced.last?.entities??[]){
       const previous=followedBots.get(observedEntity.entityId);
@@ -367,12 +374,23 @@ if(state.self?.alive===false && followedBots.size>0){
         console.log('BOT_STALL_DIAGNOSTICS',JSON.stringify(finding).slice(0,5000));
       }
     }
-    if(spectatorTurn%10===0)console.log('SPECTATOR_TIME',advanced.gameTime);
-    if(advanced.last?.match?.phase==='ended')break;
+    if(spectatorTurn%10===0){
+      console.log('SPECTATOR_TIME',advanced.gameTime);
+      const liveReport=await call('scenario.report');
+      const liveOutcome=liveReport.matchOutcome;
+      const ongoing=liveOutcome?.phase!=='ended';
+      const progress=path.join(os.homedir(),'Downloads','Echo Front Engine Lab '+room+'.json');
+      fs.writeFileSync(progress,JSON.stringify({
+        observations:log,botMoments,playerEvents,finalView:state,
+        report:liveReport,matchStillActive:ongoing,wallMs:Date.now()-started,
+      },null,2));
+      console.log('LIVE_REPORT_FILE',progress,'REMAINING',liveOutcome?.participantsRemaining);
+      if(!ongoing)break;
+    }
   }
 }
 await consumePlayerEvents();
-const report=await call('scenario.finish');
+const report=await call('scenario.report');
 const totals=playerEvents.reduce((m,e)=>(m[e.event]=(m[e.event]??0)+1,m),{});
 console.log('FINAL',JSON.stringify({
  objectiveVerdict:report.verdict,matchOutcome:report.matchOutcome,
