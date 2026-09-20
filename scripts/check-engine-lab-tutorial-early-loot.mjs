@@ -40,5 +40,8 @@ try {
  const afterOpen=tutorial.describe(playerId);
  console.log('ENGINE_LAB_EARLY_LOOT',JSON.stringify({phase:afterOpen.phase,neededLoot:afterOpen.neededLoot,rifleCollected:afterOpen.rifleCollected,armorCollected:afterOpen.armorCollected,opened:s.get('map').crates.find(x=>x.id==='crate-ground-armor')?.opened}));
  assert.equal(afterOpen.phase,'select-rifle','collecting required loot early must still advance tutorial');
+ game.api.handleInput(playerId,{interactPressed:true},Date.now());
+ await lab.advance({steps:2,sampleEvery:1});
+ assert.equal(phase(),'select-rifle','late navigation or repeated interaction must not undo successful loot');
  lab.finish();
 }finally{await game.host.stop()}

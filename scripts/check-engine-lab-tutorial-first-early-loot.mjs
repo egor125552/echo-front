@@ -30,5 +30,11 @@ try {
  console.log('ENGINE_LAB_FIRST_EARLY_LOOT',JSON.stringify({phase:afterOpen.phase,neededLoot:afterOpen.neededLoot,rifleCollected:afterOpen.rifleCollected}));
  assert.equal(afterOpen.phase,'select-second-crate','first crate must be credited even before navigation announces arrival');
  assert.equal(afterOpen.neededLoot,'armor');
+ // Repeated interaction and a late arrival from the now-opened crate must not
+ // consume the next objective or make the trainee search for the same loot.
+ game.api.handleInput(playerId,{interactPressed:true},Date.now());
+ await lab.advance({steps:2,sampleEvery:1});
+ assert.equal(phase(),'select-second-crate');
+ assert.equal(tutorial.describe(playerId).neededLoot,'armor');
  lab.finish();
 }finally{await game.host.stop()}
