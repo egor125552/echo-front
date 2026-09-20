@@ -166,6 +166,7 @@ for(let turn=0;turn<maxTurns;turn++){
     const traveled=drivingStartPosition&&state.drivingVehicle
       ? Math.hypot(state.drivingVehicle.x-drivingStartPosition.x,
         state.drivingVehicle.z-drivingStartPosition.z) : 0;
+    if(drivingStallCount>=4 || Math.max(Math.abs(state.drivingVehicle?.x||0),Math.abs(state.drivingVehicle?.z||0))>600){ requestedParking=true; drivingRecoveryTurns=0; }
     if(requestedParking){
       const speed=Number(state.drivingVehicle?.speed)||0;
       if(speed>1.2){
@@ -188,7 +189,7 @@ for(let turn=0;turn<maxTurns;turn++){
       action='drive';step=20;driveSeconds+=1;
       details='Engine Control input, not teleportation; no handbrake';
     }
-    if(traveled>120&&driveSeconds>=25&&drivingRecoveryTurns===0
+    if(traveled>120&&driveSeconds>=7&&drivingRecoveryTurns===0
         &&!requestedParking){
       requestedParking=true;
       details+='; next action brakes before exiting';
