@@ -195,12 +195,17 @@ export async function setup(ctx) {
     // Changing the active route during a crate objective must not leave the
     // trainee waiting to arrive at an unrelated destination.
     const wrongReplacement = (
-      state.phase === "follow-crate" && targetKind !== "crate"
+      (state.phase === "follow-crate" || state.phase === "interact-first-crate")
+      && targetKind !== "crate"
     ) || (
-      state.phase === "follow-second-crate"
+      (state.phase === "follow-second-crate" || state.phase === "interact-second-crate")
       && (targetKind !== "crate" || targetLoot !== state.neededLoot)
     );
-    if (wrongReplacement) recoverUnavailableRoute(entityId, state, now, { cancelled: true });
+    const interactionReplacement = state.phase === "interact-first-crate"
+      || state.phase === "interact-second-crate";
+    if (wrongReplacement || interactionReplacement) {
+      recoverUnavailableRoute(entityId, state, now, { cancelled: true });
+    }
     rememberRoute(state, targetKind, targetLoot, targetId);
     if (wrongReplacement) {
       state.routeCancelled = true;
