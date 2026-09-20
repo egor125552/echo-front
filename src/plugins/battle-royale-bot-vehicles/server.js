@@ -643,17 +643,33 @@ export async function setup(ctx) {
   function recover(id, state, car, now) {
     const reverseMeters = state.reverseStartPosition
       ? distance(car, state.reverseStartPosition) : 0;
-    // A pedestrian can enter the rear corridor AFTER reverse begins.
-    if (personInReverseCorridor(id, car)) {
+    const reverseStoppedByPerson = personInReverseCorridor(id, car);
+    const rearClearance = routes.clearDistance(car, car.angle + Math.PI, 8);
+    const reverseTimedOut = now - state.phaseAt > 2100;
+    if (reverseStoppedByPerson || reverseTimedOut || rearClearance < 2) {
       state.lastReverseMeters = reverseMeters;
+      // The exit is from a REAL car-controller maneuver, not a synthetic
+      // verdict. Include even successful reverses which were invisible in
+      // the old "released" log because the bot kept the driver's seat.
+      if (state.reverseStartPosition) {
+        ctx.events.emit("bot-vehicle:reverse-finished", {
+          entityId: id, vehicleId: state.vehicleId, now,
+          x: car.x, z: car.z,
+          movedMeters: Number(reverseMeters.toFixed(3)),
+          elapsedMs: now - state.phaseAt,
+          stationaryRecovery: (state.stationaryRecoveryAttempts ?? 0) > 0,
+          reason: reverseStoppedByPerson ? "pedestrian-behind"
+            : rearClearance < 2 ? "rear-obstacle" : "completed",
+        });
+      }
+      state.reverseStartPosition = null;
       state.phase = "travel"; state.phaseAt = now;
-      state.input = brakeInput(car);
-      vehicles.setInput(id, state.input);
-      return;
-    }
-    if (now - state.phaseAt > 2100 || routes.clearDistance(car, car.angle + Math.PI, 8) < 2) {
-      state.lastReverseMeters = reverseMeters;
-      state.phase = "travel"; state.phaseAt = now; state.lastProgressAt = now;
+      if (reverseStoppedByPerson) {
+        state.input = brakeInput(car);
+        vehicles.setInput(id, state.input);
+        return;
+      }
+      state.lastProgressAt = now;
       state.lastPosition = { ...car }; state.previousSteering = 0;
       state.route = routes.plan(car, state.destination);
       state.input = brakeInput(car);

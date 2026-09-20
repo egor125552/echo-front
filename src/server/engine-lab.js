@@ -135,6 +135,10 @@ export class EngineLab {
         "bot-vehicle:released",
         payload => this.recordWarehouseVehicleEvent("bot-vehicle:released", payload),
       );
+      this.warehouseReverseOff = this.game.host.events.on(
+        "bot-vehicle:reverse-finished",
+        payload => this.recordWarehouseVehicleEvent("bot-vehicle:reverse-finished", payload),
+      );
     }
     this.nextPlayerEventIndex = 0;
     this.setupHistory = [];
@@ -165,7 +169,11 @@ export class EngineLab {
       simulatedMs: Math.round(this.simulatedMs),
       gameTime: elapsedText(this.simulatedMs),
       event, driverId, vehicleId: payload.vehicleId ?? null,
-      reason: payload.reason ?? null, x, z,
+      reason: payload.reason ?? null,
+      movedMeters: payload.movedMeters ?? null,
+      reverseElapsedMs: payload.elapsedMs ?? null,
+      stationaryRecovery: payload.stationaryRecovery ?? null,
+      x, z,
       distanceFromWarehouseMeters: Math.round(Math.hypot(x - 60, z)),
       vehiclePosition: car ? {x: Math.round(car.x), z: Math.round(car.z)} : null,
       vehicleOccupied: Boolean(car?.occupied ?? car?.driverId),
