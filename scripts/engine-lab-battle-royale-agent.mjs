@@ -64,6 +64,60 @@ let approachStallAttempts=0, previousApproachDistance=Infinity;
 let drivingRecoveryTurns=0, drivingStallCount=0, drivingStartPosition=null;
 let requestedParking=false;
 let previousDrivingVehicleId=null;
+const followedBots=new Map();
+const botMoments=[];
+function summarizeBot(subject) {
+ if(!subject || subject.missing)return null;
+ return {
+  id:subject.entityId,alive:subject.alive,
+  position:subject.position,
+  car:subject.vehicleId??null,
+  phase:subject.decision?.phase??null,
+  goal:subject.brainDecision?.goal??null,
+  requestedMove: subject.movementInput
+    ? Math.hypot(subject.movementInput.forward||0,subject.movementInput.strafe||0) : null,
+  speed:subject.vehicle?.speed??null,
+ };
+}
+async function observeEncounteredBots(view, latest) {
+ // Follow a bot only after the player has encountered it in this live match.
+ const prospective = (view.nearbyVehicles??[])
+  .filter(car=>car.occupied && car.driverId && car.driverId!==PID)
+  .map(car=>view.visibleEntities?.find(entity=>entity.id===car.driverId && entity.bot && entity.alive))
+  .find(Boolean)
+  ?? (view.visibleEntities??[]).find(entity=>entity.bot&&entity.alive
+    && entity.distanceMeters<45);
+ if(prospective && !followedBots.has(prospective.id) && followedBots.size<3) {
+  try {
+   const result=await call('scenario.follow',{playerId:PID,entityId:prospective.id});
+   const observed=summarizeBot(result.subject);
+   followedBots.set(prospective.id,observed);
+   botMoments.push({gameTime:view.gameTime,event:'first-encounter',bot:observed});
+   console.log('BOT_FOLLOW',JSON.stringify({gameTime:view.gameTime,bot:observed}));
+  } catch(error) {
+   console.log('BOT_FOLLOW_UNAVAILABLE',String(error?.message??error).slice(0,250));
+  }
+ }
+ for(const [id,previous] of followedBots) {
+  const observed=summarizeBot(latest?.entities?.find(entity=>entity.entityId===id));
+  if(!observed)continue;
+  const moved=previous?.position && observed.position
+   ? Math.hypot(previous.position.x-observed.position.x,
+     previous.position.z-observed.position.z):0;
+  if(observed.car!==previous?.car || observed.phase!==previous?.phase
+     || observed.goal!==previous?.goal || moved>25 || observed.alive!==previous?.alive){
+   const moment={gameTime:view.gameTime,event:observed.car!==previous?.car
+     ? previous?.car?'dismounted':'entered-vehicle'
+     :observed.goal!==previous?.goal?'new-foot-decision'
+       :observed.alive!==previous?.alive?'alive-changed':'moved-or-changed-phase',
+    movedMeters:moved,bot:observed};
+   botMoments.push(moment);
+   console.log('BOT_OBSERVED',JSON.stringify(moment));
+   followedBots.set(id,observed);
+  }
+ }
+}
+
 for(let turn=0;turn<maxTurns;turn++){
  const player=state.self;
  if(!player?.alive){record('eliminated','Player died during this actual battle royale');break;}
@@ -219,6 +273,7 @@ for(let turn=0;turn<maxTurns;turn++){
  const advanced=await call('scenario.advance',{steps:step,sampleEvery:20});
  state=await call('scenario.view',{playerId:PID});
  await consumePlayerEvents();
+ await observeEncounteredBots(state,advanced.last);
  if(state.drivingVehicle && phase!=='driving'){
     phase='driving';action='vehicle-entered';details='Real driver status confirmed: '+state.drivingVehicle.id;
     previousDrivingVehicleId=state.drivingVehicle.id;
@@ -269,11 +324,12 @@ await consumePlayerEvents();
 const report=await call('scenario.finish');
 const totals=playerEvents.reduce((m,e)=>(m[e.event]=(m[e.event]??0)+1,m),{});
 console.log('FINAL',JSON.stringify({
- verdict:report.verdict,objectives:report.objectives??report.results,
+ objectiveVerdict:report.verdict,matchOutcome:report.matchOutcome,
+ objectives:report.objectives??report.results,
  gameTime:report.gameTime,realTime:report.realTime,counts:report.eventCounts,
  playerEventCounts:totals,anomalies:report.anomalies,
  finalView:brief(state),phases:log.map(x=>x.action)
 }).slice(0,9500));
 const out=path.join(os.homedir(),'Downloads','Echo Front Engine Lab '+room+'.json');
-fs.writeFileSync(out,JSON.stringify({observations:log,playerEvents,finalView:state,report,wallMs:Date.now()-started},null,2));
+fs.writeFileSync(out,JSON.stringify({observations:log,botMoments,playerEvents,finalView:state,report,wallMs:Date.now()-started},null,2));
 console.log('REPORT_FILE',out);

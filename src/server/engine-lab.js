@@ -444,6 +444,21 @@ export class EngineLab {
 
   report() {
     const latest = this.samples.at(-1) ?? null;
+    const liveMatch = this.game.host.services.has("battle-royale")
+      ? this.game.host.services.get("battle-royale").status() : null;
+    const watchedHumans = this.watch.map(id => this.game.host.services.get("entities").get(id))
+      .filter(entity => entity && !entity.bot);
+    const matchOutcome = liveMatch ? {
+      phase: liveMatch.phase,
+      participantsRemaining: liveMatch.alive,
+      participantsAtStart: liveMatch.total,
+      winnerId: liveMatch.winnerId ?? null,
+      players: watchedHumans.map(entity => ({
+        entityId: entity.id,
+        status: liveMatch.phase === "ended" && liveMatch.winnerId === entity.id
+          ? "winner" : entity.alive ? "alive" : "eliminated",
+      })),
+    } : null;
     const results = this.objectives.map(objective => {
       if (objective.type === "event-count") {
         const key = objective.event + ":" + (objective.entityId ?? "*");
@@ -480,7 +495,8 @@ export class EngineLab {
       };
     });
     return {
-      ...this.status(), objectives: results,
+      ...this.status(), objectives: results, matchOutcome,
+      // "verdict" covers the explicit objectives only, not victory in the match.
       verdict: results.length === 0 ? "no-objectives"
         : results.some(result => result.status === "failed") ? "failed"
           : results.every(result => result.status === "passed")
@@ -567,6 +583,32 @@ export async function handleEngineLabRequest(room, request) {
               packet.payload?.killerId,
             ].includes(requestedPlayerId)),
         };
+        break;
+      }
+      case "scenario.follow": {
+        if (lab.phase !== "running") throw new Error("Follow requires a running scenario");
+        const playerId = String(body.playerId ?? "");
+        const entityId = String(body.entityId ?? "");
+        const host = lab.game.host;
+        const player = host.services.get("entities").get(playerId);
+        const subject = host.services.get("entities").get(entityId);
+        if (!player || player.bot || !subject?.bot) {
+          throw new Error("Follow requires a human player and an existing bot");
+        }
+        const playerState = lab.game.api.snapshotFor(playerId, Date.now());
+        const playerView = playerState.entities?.find(entity => entity.id === playerId);
+        const subjectView = playerState.entities?.find(entity => entity.id === entityId);
+        if (!playerView || !subjectView || Math.hypot(
+          (Number(playerView.x) || 0) - (Number(subjectView.x) || 0),
+          (Number(playerView.z) || 0) - (Number(subjectView.z) || 0),
+        ) > 160) {
+          throw new Error("Bot must be visible and within 160 m of the player to follow");
+        }
+        if (!lab.watch.includes(entityId)) {
+          if (lab.watch.length >= 12) throw new Error("Maximum of 12 followed entities");
+          lab.watch.push(entityId);
+        }
+        result = { ...lab.status(), subject: lab.captureEntity(entityId) };
         break;
       }
       case "scenario.prepare": result = await lab.prepare(body.commands); break;
