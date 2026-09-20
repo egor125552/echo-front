@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { ENGINE_DIAGNOSTICS_CONTROL } from "../config/engine-diagnostics.js";
 import { createEchoFrontGame, normalizeGameMode } from "./game.js";
 import { handleEngineControlRequest } from "./engine-control-route.js";
+import { handleEngineLabRequest } from "./engine-lab.js";
 import {
   activeSocketCount,
   cleanupDeadline,
@@ -51,6 +52,7 @@ export class MatchRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.game = null;
+    this.lab = null;
     this.mode = null;
     this.tutorial = false;
     this.gameLoopTimer = null;
@@ -187,7 +189,7 @@ export class MatchRoom extends DurableObject {
   }
 
   startGameLoop() {
-    if (this.gameLoopTimer || !this.game) return;
+    if (this.lab || this.gameLoopTimer || !this.game) return;
     this.lastStepAt = Date.now();
     this.gameLoopTimer = setInterval(() => this.runGameLoopTick(), SIMULATION_TICK_MS);
   }
@@ -313,6 +315,12 @@ export class MatchRoom extends DurableObject {
     if (requestUrl.pathname === "/api/diagnostics") return this.diagnosticsResponse(requestUrl);
     if (requestUrl.pathname === "/api/play-error") return this.runtimeErrorResponse();
     if (requestUrl.pathname === "/api/engine-command") return handleEngineControlRequest(this, request);
+    if (requestUrl.pathname === "/api/engine-lab") {
+      if (!this.env.ENGINE_LAB_TOKEN || request.headers.get("X-Engine-Lab-Token") !== this.env.ENGINE_LAB_TOKEN) {
+        return Response.json({ ok: false }, { status: 401 });
+      }
+      return handleEngineLabRequest(this, request);
+    }
 
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("WebSocket required", { status: 426 });
@@ -472,6 +480,7 @@ export class MatchRoom extends DurableObject {
       this.game = null;
     }
     this.mode = null;
+    this.lab = null;
     this.tutorial = false;
     this.disconnectedHumans.clear();
     this.hotReconnectUntil = 0;

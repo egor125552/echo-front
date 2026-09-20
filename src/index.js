@@ -146,6 +146,24 @@ export default {
       return room.fetch(forwarded);
     }
 
+    if (url.pathname === "/api/engine-lab") {
+      const headers = { "Cache-Control": "no-store" };
+      const expected = env.ENGINE_LAB_TOKEN;
+      if (!ENGINE_CONTROL.enabled || typeof expected !== "string" || expected.length < 32) {
+        return Response.json({ ok: false, error: "Engine Lab is unavailable" }, { status: 404, headers });
+      }
+      if (request.headers.get("X-Engine-Lab-Token") !== expected) {
+        return Response.json({ ok: false, error: "Unauthorized" }, { status: 401, headers });
+      }
+      const mode = url.searchParams.get("mode");
+      const rawRoom = url.searchParams.get("room") ?? "";
+      if (!["tdm", "battle-royale"].includes(mode) || !/^[a-z0-9-]{4,48}$/.test(rawRoom)) {
+        return Response.json({ ok: false, error: "Explicit mode and valid isolated room required" }, { status: 400, headers });
+      }
+      const room = env.MATCH_ROOM.getByName(`engine-lab:${mode}:${rawRoom}`);
+      return room.fetch(request);
+    }
+
     if (url.pathname === "/api/play") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response("WebSocket required", { status: 426 });
