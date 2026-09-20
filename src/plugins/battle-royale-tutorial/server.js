@@ -192,7 +192,20 @@ export async function setup(ctx) {
   } = {}) => {
     const state = ensure(entityId);
     if (!state) return;
+    // Changing the active route during a crate objective must not leave the
+    // trainee waiting to arrive at an unrelated destination.
+    const wrongReplacement = (
+      state.phase === "follow-crate" && targetKind !== "crate"
+    ) || (
+      state.phase === "follow-second-crate"
+      && (targetKind !== "crate" || targetLoot !== state.neededLoot)
+    );
+    if (wrongReplacement) recoverUnavailableRoute(entityId, state, now, { cancelled: true });
     rememberRoute(state, targetKind, targetLoot, targetId);
+    if (wrongReplacement) {
+      state.routeCancelled = true;
+      return;
+    }
 
     if (state.phase === "select-navigation") {
       advance(entityId, "follow-navigation", now);
