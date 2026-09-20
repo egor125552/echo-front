@@ -166,6 +166,11 @@ export class EngineLab {
       event, driverId, vehicleId: payload.vehicleId ?? null,
       reason: payload.reason ?? null, x, z,
       distanceFromWarehouseMeters: Math.round(Math.hypot(x - 60, z)),
+      vehiclePosition: car ? {x: Math.round(car.x), z: Math.round(car.z)} : null,
+      vehicleOccupied: Boolean(car?.occupied ?? car?.driverId),
+      hadEnteredVehicle: typeof payload.hadEnteredVehicle === "boolean"
+        ? payload.hadEnteredVehicle : null,
+      lastDrivingPhase: payload.lastDrivingPhase ?? null,
       driverAlive: entity.alive,
     };
     this.warehouseVehicleEvents.push(recorded);
@@ -631,10 +636,13 @@ export async function handleEngineLabRequest(room, request) {
         }));
         const events = lab.warehouseVehicleEvents.filter(e =>
           e.simulatedMs >= Math.max(0, Number(body.sinceSimulatedMs) || 0));
-        const reasons = {};
+        const reasons = {}, abortedApproaches = {}, actualDriverReleases = {};
         for (const event of events) {
           if (event.event !== "bot-vehicle:released") continue;
           reasons[event.reason] = (reasons[event.reason] ?? 0) + 1;
+          const table = event.hadEnteredVehicle
+            ? actualDriverReleases : abortedApproaches;
+          table[event.reason] = (table[event.reason] ?? 0) + 1;
         }
         result = {
           ...lab.status(), warehouse: { x: 60, z: 0, radius: 180 },
@@ -642,6 +650,8 @@ export async function handleEngineLabRequest(room, request) {
           driven: detailed.filter(car=>car.occupied).length,
           botVehicleSummary: compactBotSummary,
           events, releaseReasonsNearWarehouse: reasons,
+          actualDriverReleaseReasons: actualDriverReleases,
+          abortedApproachReasons: abortedApproaches,
           nearbyBotsOnFoot: host.services.get("entities").all().filter(entity=>{
             if(!entity.bot || !entity.alive) return false;
             const t=host.components.get(entity.id,"Transform");

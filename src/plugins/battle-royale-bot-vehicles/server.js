@@ -109,7 +109,14 @@ export async function setup(ctx) {
     cooldowns.set(id, now + retryDelay);
     if (botState(id)) { botState(id).vehicleControl = false; botState(id).nextThinkAt = 0; }
     setFootInput(id, {});
-    ctx.events.emit("bot-vehicle:released", { entityId: id, vehicleId: state.vehicleId, reason, now });
+    ctx.events.emit("bot-vehicle:released", {
+      entityId: id, vehicleId: state.vehicleId, reason, now,
+      // "combat" can abort an approach before the bot EVER occupies the car.
+      // Distinguish this from a driver who actually exited, otherwise a count
+      // of cancelled approaches misleadingly looks like abandoned vehicles.
+      hadEnteredVehicle: state.phase !== "approach",
+      lastDrivingPhase: state.phase,
+    });
   }
 
   function driverLimit() {

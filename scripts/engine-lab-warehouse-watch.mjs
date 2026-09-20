@@ -82,6 +82,8 @@ async function observeWarehouse() {
    time:brief.gameTime,parked:brief.parked,driven:brief.driven,
    nearbyFootBots:brief.footBots.length,events:warehouse.events,
    reasons:warehouse.releaseReasonsNearWarehouse,
+   actualDriverReleases:warehouse.actualDriverReleaseReasons,
+   abortedApproaches:warehouse.abortedApproachReasons,
    global:brief.releaseReasonsGlobal,
    cars:brief.cars.filter(car=>car.distanceFromWarehouseMeters<80),
   }).slice(0,13500));
