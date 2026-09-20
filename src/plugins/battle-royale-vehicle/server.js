@@ -429,6 +429,8 @@ export async function setup(ctx) {
       handbrake: handbrakeArmed && requestedHandbrake,
       nitro: Boolean(raw.fireHeld),
     };
+    if (Math.abs(input.throttle) > .08 && !input.handbrake
+      && chassis.body?.isSleeping?.()) chassis.body.wakeUp();
     return true;
   }
 

@@ -784,6 +784,12 @@ export async function setup(ctx) {
       handbrake: entry.handbrakeArmed && requestedHandbrake,
       nitro: Boolean(raw.fireHeld),
     };
+    // Rapier puts a stationary chassis to sleep. Wheel engine-force changes
+    // alone do not necessarily wake the rigid body, so a bot may command
+    // reverse twice and remain at the exact same coordinates. Wake only on
+    // real drive input, not on idle/braking (parked cars should stay asleep).
+    if (Math.abs(entry.input.throttle) > .08 && !entry.input.handbrake
+      && entry.body?.isSleeping?.()) entry.body.wakeUp();
     return true;
   }
 

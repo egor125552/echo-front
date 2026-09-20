@@ -186,6 +186,7 @@ export async function setup(ctx) {
     const rear = car ? routes.clearDistance(car, car.angle + Math.PI, 9) : null;
     state.stopTelemetry = {
       reason, at: now, phaseBeforeBrake: state.phase,
+      chassisSleeping: physics.dynamicBody(state.vehicleId)?.isSleeping?.() ?? null,
       forward: state.input?.forward ?? null,
       handbrake: state.input?.sprint ?? null,
       obstacleDistance: state.lastObstacleDistance ?? null,
@@ -195,6 +196,7 @@ export async function setup(ctx) {
         : Number.isFinite(rear) ? rear : "clear",
       recoveries: state.recoveries ?? 0,
       stationaryRecoveryAttempts: state.stationaryRecoveryAttempts ?? 0,
+      lastReverseMeters: state.lastReverseMeters ?? null,
       stationaryRecoveryBlockedBy: state.stationaryRecoveryBlockedBy ?? null,
       traffic: state.traffic ? { ...state.traffic } : null,
       pedestrian: state.lastPedestrian ? { ...state.lastPedestrian } : null,
@@ -639,21 +641,33 @@ export async function setup(ctx) {
   }
 
   function recover(id, state, car, now) {
+    const reverseMeters = state.reverseStartPosition
+      ? distance(car, state.reverseStartPosition) : 0;
     // A pedestrian can enter the rear corridor AFTER reverse begins.
     if (personInReverseCorridor(id, car)) {
+      state.lastReverseMeters = reverseMeters;
       state.phase = "travel"; state.phaseAt = now;
-      vehicles.setInput(id, brakeInput(car));
+      state.input = brakeInput(car);
+      vehicles.setInput(id, state.input);
       return;
     }
     if (now - state.phaseAt > 2100 || routes.clearDistance(car, car.angle + Math.PI, 8) < 2) {
+      state.lastReverseMeters = reverseMeters;
       state.phase = "travel"; state.phaseAt = now; state.lastProgressAt = now;
       state.lastPosition = { ...car }; state.previousSteering = 0;
       state.route = routes.plan(car, state.destination);
-      vehicles.setInput(id, brakeInput(car));
+      state.input = brakeInput(car);
+      vehicles.setInput(id, state.input);
       return;
     }
-    vehicles.setInput(id, { forward: car.forwardSpeed > .5 ? -1 : -.65,
-      strafe: state.recoverTurn, sprint: false, fireHeld: false });
+    state.input = {
+      forward: car.forwardSpeed > .5 ? -1 : -.65,
+      // First reverse straight away from the obstacle. Steering the
+      // wheels immediately can swing the chassis into the adjacent wall.
+      strafe: now - state.phaseAt < 900 ? 0 : state.recoverTurn,
+      sprint: false, fireHeld: false,
+    };
+    vehicles.setInput(id, state.input);
   }
 
   function drive(id, state, dt, now, trafficCars, humanPositions = []) {
@@ -681,15 +695,17 @@ export async function setup(ctx) {
             const left = routes.clearDistance(car, car.angle - .6, 20);
             const right = routes.clearDistance(car, car.angle + .6, 20);
             state.phase = "reverse"; state.phaseAt = now;
+            state.reverseStartPosition = { x: car.x, z: car.z };
             state.recoverTurn = left > right ? .8 : -.8;
             state.stationaryRecoveryAttempts = (state.stationaryRecoveryAttempts ?? 0) + 1;
             state.nextStationaryRecoveryAt = now + 5_000;
             state.recoveries++; counters.recoveries++;
             state.lastStationaryRecoveryAt = now;
-            vehicles.setInput(id, {
-              forward: -.65, strafe: state.recoverTurn,
+            state.input = {
+              forward: -.65, strafe: 0,
               sprint: false, fireHeld: false,
-            });
+            };
+            vehicles.setInput(id, state.input);
             return;
           }
           state.stationaryRecoveryBlockedBy =
