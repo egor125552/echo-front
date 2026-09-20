@@ -73,7 +73,8 @@ async function observeWarehouse() {
    parked:warehouse.parked,driven:warehouse.driven,
    cars:warehouse.vehicles,footBots:warehouse.nearbyBotsOnFoot,
    activeDrivers:warehouse.botVehicleSummary.driving,
-   releaseReasonsGlobal:warehouse.botVehicleSummary.releaseReasons};
+   releaseReasonsGlobal:warehouse.botVehicleSummary.releaseReasons,
+   quarantinedCars:warehouse.botVehicleSummary.stationaryVehicleFailures};
  warehouseSnapshots.push(brief);
  if(warehouse.events.length || warehouseSnapshots.length%5===0){
   console.log('WAREHOUSE',JSON.stringify({
@@ -84,6 +85,7 @@ async function observeWarehouse() {
    actualDriverReleases:warehouse.actualDriverReleaseReasons,
    abortedApproaches:warehouse.abortedApproachReasons,
    global:brief.releaseReasonsGlobal,
+   quarantinedCars:brief.quarantinedCars,
    // Always include both vehicles referenced by a real observed event,
    // even when the encounter is beyond the immediate warehouse entrance.
    cars:brief.cars.filter(car=>car.distanceFromWarehouseMeters<80

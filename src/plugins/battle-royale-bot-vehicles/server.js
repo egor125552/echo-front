@@ -8,6 +8,7 @@ export const BOT_VEHICLE_SEARCH_RADIUS = 125;
 export const BOT_VEHICLE_REFILL_RADIUS = 210;
 export const BOT_VEHICLE_ASSIGNMENTS_PER_SCAN = 12;
 export const BOT_VEHICLE_FAILURE_COOLDOWN_MS = 60_000;
+export const BOT_VEHICLE_STATIONARY_FAILURE_QUARANTINE_MS = 180_000;
 export const BOT_VEHICLE_CRASH_COOLDOWN_MS = 30_000;
 export const BOT_VEHICLE_RETRY_COOLDOWN_MS = 1_500;
 export const BOT_VEHICLE_APPROACH_INTERVAL_MS = 100;
@@ -44,6 +45,18 @@ export async function setup(ctx) {
     return target;
   } });
   const states = new Map(), reservations = new Map(), cooldowns = new Map(), vehicleCooldowns = new Map();
+  const stationaryVehicleFailures = new Map();
+  const sameFailedParkingSpot = (car, now) => {
+    const failed = stationaryVehicleFailures.get(car.id);
+    if (!failed) return false;
+    // Physical displacement (including movement by a human) invalidates
+    // the old failure location. A bounded expiry keeps the fleet reusable.
+    if (now >= failed.until || distance(car, failed) >= 8) {
+      stationaryVehicleFailures.delete(car.id);
+      return false;
+    }
+    return true;
+  };
   const recentAttackers = new Map();
   const pedestrianSamples = new Map();
   const lastVehicleImpacts = new Map();
@@ -88,6 +101,13 @@ export async function setup(ctx) {
     if (reason === "stuck" || reason === "unsafe" || reason === "traffic-deadlock") {
       vehicleCooldowns.set(state.vehicleId, now + BOT_VEHICLE_FAILURE_COOLDOWN_MS);
       const car = vehicles.stateFor(state.vehicleId);
+      if (car && state.phase !== "approach"
+        && (reason === "stuck" || reason === "traffic-deadlock")) {
+        stationaryVehicleFailures.set(car.id, {
+          x: car.x, z: car.z, reason,
+          until: now + BOT_VEHICLE_STATIONARY_FAILURE_QUARANTINE_MS,
+        });
+      }
       const nearestVehicle = car ? vehicles.snapshot()
         .filter(other => other.id !== state.vehicleId)
         .map(other => ({ other, distance: distance(car, other) }))
@@ -160,6 +180,7 @@ export async function setup(ctx) {
     if (!entity?.bot || !entity.alive || !botState(id) || !p || p.downed || states.has(id)
       || states.size >= driverLimit() || !car || car.occupied || reservations.has(vehicleId)
       || (vehicleCooldowns.get(vehicleId) ?? 0) > now
+      || sameFailedParkingSpot(car, now)
       || !destination || !Number.isFinite(destination.x) || !Number.isFinite(destination.z)
       || initialDistance > maxDistance || distance(p, destination) < 60
       || get("parachute").stateFor(id)?.airborne || get("ragdoll").isActive(id)
@@ -1241,7 +1262,8 @@ export async function setup(ctx) {
     if (now < nextScan || states.size >= targetDrivers) return;
     nextScan = now + 1000;
     const available = vehicles.snapshot().filter(car => !car.occupied && !reservations.has(car.id)
-      && (vehicleCooldowns.get(car.id) ?? 0) <= now && car.speed < 1.5);
+      && (vehicleCooldowns.get(car.id) ?? 0) <= now
+      && !sameFailedParkingSpot(car, now) && car.speed < 1.5);
     lastScan = { eligible: 0, availableCars: available.length, nearCar: 0, refillNearCar: 0, withGoal: 0, assigned: 0 };
     const eligible = [];
     const nearestAvailableDistances = [];
@@ -1413,6 +1435,9 @@ export async function setup(ctx) {
         recentFailures: structuredClone(recentFailures),
         recentCrashes: structuredClone(recentCrashes),
         vehicleCooldowns: [...vehicleCooldowns].map(([vehicleId, until]) => ({ vehicleId, until })),
+        stationaryVehicleFailures: [...stationaryVehicleFailures].map(([vehicleId, failed]) => ({
+          vehicleId, ...failed,
+        })),
         states: [...states].map(([id, state]) => ({ id, ...structuredClone(state) })) };
     } });
 }

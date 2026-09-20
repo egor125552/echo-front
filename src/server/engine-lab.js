@@ -658,6 +658,7 @@ export async function handleEngineLabRequest(room, request) {
           approaching: botSummary.approaching,
           releaseReasons: botSummary.releaseReasons,
           recentFailures: botSummary.recentFailures?.slice(-12) ?? [],
+          stationaryVehicleFailures: botSummary.stationaryVehicleFailures ?? [],
           recentCrashes: botSummary.recentCrashes?.slice(-12) ?? [],
         };
         const close = fleet.filter(car => Math.hypot(car.x - 60, car.z) <= 180);
