@@ -25,7 +25,7 @@ export const TUTORIAL_PHASES = [
 export const manifest = {
   id: "battle-royale-tutorial",
   version: "1.3.0",
-  requires: ["entities", "battle-royale", "battle-royale-parachute", "movement"],
+  requires: ["entities", "battle-royale", "battle-royale-parachute", "movement", "health"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
 
@@ -33,7 +33,23 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const parachute = ctx.services.get("parachute");
   const movement = ctx.services.get("movement");
+  const health = ctx.services.get("health");
   const states = new Map();
+
+  // The training match has only one bot. If it dies before either mandatory
+  // damage demonstration, there is no opponent left and the match ends.
+  // Protect it until the tutorial completes; ordinary BR uses another preset.
+  const originalApplyDamage = health.applyDamage.bind(health);
+  health.applyDamage = (entityId, amount, source = {}) => {
+    const target = entities.get(entityId);
+    const demoNeeded = target?.bot && [...states].some(([playerId, state]) => (
+      state.demoBotId === entityId
+      && state.phase !== "complete"
+      && entities.get(playerId)?.alive
+    ));
+    if (demoNeeded) return { applied: 0, killed: false };
+    return originalApplyDamage(entityId, amount, source);
+  };
 
   function phaseIndex(phase) {
     return Math.max(0, TUTORIAL_PHASES.indexOf(phase));
