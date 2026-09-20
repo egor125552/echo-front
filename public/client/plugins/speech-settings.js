@@ -333,7 +333,7 @@ export async function setup(ctx) {
       if (requestGeneration !== generation) return;
       clearStartWatchdog();
       if (activeUtterance === utterance) activeUtterance = null;
-      report("ended", { retry });
+      report("ended", { retry, requestGeneration });
     };
 
     utterance.onerror = (event) => {
@@ -435,6 +435,7 @@ export async function setup(ctx) {
     stop,
     prime(reason = "manual") { return primeFromGesture(reason); },
     refreshVoices,
+    get requestGeneration() { return generation; },
     get rate() { return rate; },
     get enabled() { return enabled; },
     get supported() { return Boolean(synth && window.SpeechSynthesisUtterance); },

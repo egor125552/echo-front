@@ -62,12 +62,14 @@ export async function setup(ctx) {
   let lastIncomingDamage = null;
   let lastTutorial = null;
   let pendingAfterSpeech = null;
+  let pendingSpeechGeneration = null;
   let pendingAfterSpeechTimer = null;
 
   function clearPendingAfterSpeech() {
     if (pendingAfterSpeechTimer != null) clearTimeout(pendingAfterSpeechTimer);
     pendingAfterSpeechTimer = null;
     pendingAfterSpeech = null;
+    pendingSpeechGeneration = null;
   }
 
   function estimatedSpeechMs(text) {
@@ -93,6 +95,7 @@ export async function setup(ctx) {
       }, estimatedSpeechMs(text));
     }
     speech.say(text, { interrupt: true });
+    if (typeof afterSpeech === "function") pendingSpeechGeneration = speech.requestGeneration;
   }
 
   function presentPhase(tutorial) {
@@ -130,8 +133,9 @@ export async function setup(ctx) {
     present(TEAM_MESSAGES[phase]);
   }
 
-  ctx.events.on("speech:state", ({ reason } = {}) => {
-    if (reason !== "ended" || typeof pendingAfterSpeech !== "function") return;
+  ctx.events.on("speech:state", ({ reason, requestGeneration } = {}) => {
+    if (reason !== "ended" || typeof pendingAfterSpeech !== "function"
+      || pendingSpeechGeneration == null || requestGeneration !== pendingSpeechGeneration) return;
     const callback = pendingAfterSpeech;
     clearPendingAfterSpeech();
     callback();
