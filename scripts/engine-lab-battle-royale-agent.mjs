@@ -290,6 +290,15 @@ for(let turn=0;turn<maxTurns;turn++){
      e.event==='loot:picked'&&e.payload?.entityId===PID).at(-1).payload).slice(0,280);
  }
  if(advanced.newAnomalies?.length){
+   for(const anomaly of advanced.newAnomalies){
+     const observedDriver=advanced.last?.entities?.find(entity=>entity.entityId===anomaly.entityId);
+     if(anomaly.type==='possible-stalled-driver' && observedDriver){
+       const finding={gameTime:advanced.gameTime,event:'driver-stalled',anomaly,
+         driver:observedDriver};
+       botMoments.push(finding);
+       console.log('BOT_STALL_DIAGNOSTICS',JSON.stringify(finding).slice(0,5000));
+     }
+   }
    details+='; anomalies '+JSON.stringify(advanced.newAnomalies).slice(0,500);
    const pedestrianStall=advanced.newAnomalies.some(x=>x.type==='possible-stalled-pedestrian'
      && x.entityId===PID);

@@ -213,6 +213,14 @@ export class EngineLab {
         phase: bot.phase ?? null, destination: position(bot.destination),
         recoveries: finite(bot.recoveries), input: bot.input ?? null,
         routeIndex: bot.route?.index ?? null,
+        routePoint: position(bot.route?.points?.[bot.route?.index ?? 0]),
+        lastControlAt: bot.lastControlAt ?? null,
+        lastProgressAt: bot.lastProgressAt ?? null,
+        trafficWaitAt: bot.trafficWaitAt ?? null,
+        collisionYieldUntil: bot.collisionYieldUntil ?? null,
+        crossingYieldUntil: bot.crossingYieldUntil ?? null,
+        parkedAvoidUntil: bot.parkedAvoidUntil ?? null,
+        reason: bot.reason ?? null,
       } : null,
     };
   }
@@ -358,10 +366,19 @@ export class EngineLab {
           type: "possible-stalled-driver", entityId, vehicleId: observation.vehicleId,
           atGameTime: elapsedText(this.simulatedMs), simulatedMs: this.simulatedMs,
           phase: decision.phase,
-          reason: "Driving toward a distant goal, displacement under 0.5 m for at least 4 simulated seconds",
-          requestedForward: finite(decision.input?.forward),
+          requestedForward: finite(vehicle.input?.forward ?? decision.input?.forward),
+          requestedSteering: finite(vehicle.input?.strafe ?? decision.input?.strafe),
           actualSpeed: vehicle.speed,
           goalDistance,
+          trafficWaitAt: decision.trafficWaitAt,
+          lastProgressAt: decision.lastProgressAt,
+          collisionYieldUntil: decision.collisionYieldUntil,
+          crossingYieldUntil: decision.crossingYieldUntil,
+          recoveries: decision.recoveries,
+          routePoint: decision.routePoint,
+          reason: Math.abs(Number(vehicle.input?.forward ?? decision.input?.forward) || 0) < .1
+            ? "Vehicle stationary with neutral throttle despite a distant goal; inspect yield, obstacle and recovery state"
+            : "Vehicle stationary despite nonzero throttle toward a distant goal",
           position: vehicle.position,
         });
         if (this.anomalies.length > MAX_ANOMALIES) this.anomalies.shift();
