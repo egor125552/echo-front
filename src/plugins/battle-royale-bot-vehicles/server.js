@@ -861,6 +861,28 @@ export async function setup(ctx) {
     if (crossingHold && traffic?.type !== "crossing") obstacleDistance = Math.min(obstacleDistance, 0);
     let drivePoint = ram?.point ?? path.point;
     if (parkedLead) {
+      // Diagnostic only: an empty vehicle can block several directions, and
+      // counting the final dismount does not reveal why the driver did not
+      // route around it. Sample at most once per bot / 4 simulated seconds.
+      if (now >= (state.nextParkedProbeAt ?? 0)) {
+        state.nextParkedProbeAt = now + 4000;
+        const right = routes.clearDistance(car, car.angle + .38, 30);
+        const left = routes.clearDistance(car, car.angle - .38, 30);
+        const rear = routes.clearDistance(car, car.angle + Math.PI, 12);
+        ctx.events.emit("bot-vehicle:parked-probe", {
+          entityId:id, vehicleId:state.vehicleId, parkedVehicleId:leadVehicle.id,
+          now, separation:followingTraffic.distance,
+          leftClearance:Number.isFinite(left) ? left : "clear",
+          rightClearance:Number.isFinite(right) ? right : "clear",
+          rearClearance:Number.isFinite(rear) ? rear : "clear",
+          desiredHeading:headingTo(car,path.point),
+          carHeading:car.angle,
+          obstacleDistance:Number.isFinite(obstacleDistance)
+            ? obstacleDistance : "clear",
+          previousAvoidVehicleId:state.parkedAvoidVehicleId ?? null,
+          inRecovery:state.phase === "reverse",
+        });
+      }
       if (state.parkedAvoidVehicleId !== leadVehicle.id || (state.parkedAvoidUntil ?? 0) <= now) {
         const right = routes.clearDistance(car, car.angle + .38, 30);
         const left = routes.clearDistance(car, car.angle - .38, 30);

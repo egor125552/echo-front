@@ -139,6 +139,10 @@ export class EngineLab {
         "bot-vehicle:reverse-finished",
         payload => this.recordWarehouseVehicleEvent("bot-vehicle:reverse-finished", payload),
       );
+      this.warehouseParkedProbeOff = this.game.host.events.on(
+        "bot-vehicle:parked-probe",
+        payload => this.recordWarehouseVehicleEvent("bot-vehicle:parked-probe", payload),
+      );
     }
     this.nextPlayerEventIndex = 0;
     this.setupHistory = [];
@@ -170,6 +174,14 @@ export class EngineLab {
       gameTime: elapsedText(this.simulatedMs),
       event, driverId, vehicleId: payload.vehicleId ?? null,
       reason: payload.reason ?? null,
+      parkedVehicleId: payload.parkedVehicleId ?? null,
+      separation: payload.separation ?? null,
+      leftClearance: payload.leftClearance ?? null,
+      rightClearance: payload.rightClearance ?? null,
+      rearClearance: payload.rearClearance ?? null,
+      desiredHeading: payload.desiredHeading ?? null,
+      carHeading: payload.carHeading ?? null,
+      probeObstacleDistance: payload.obstacleDistance ?? null,
       movedMeters: payload.movedMeters ?? null,
       reverseElapsedMs: payload.elapsedMs ?? null,
       stationaryRecovery: payload.stationaryRecovery ?? null,

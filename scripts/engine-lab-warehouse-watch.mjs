@@ -84,7 +84,11 @@ async function observeWarehouse() {
    actualDriverReleases:warehouse.actualDriverReleaseReasons,
    abortedApproaches:warehouse.abortedApproachReasons,
    global:brief.releaseReasonsGlobal,
-   cars:brief.cars.filter(car=>car.distanceFromWarehouseMeters<80),
+   // Always include both vehicles referenced by a real observed event,
+   // even when the encounter is beyond the immediate warehouse entrance.
+   cars:brief.cars.filter(car=>car.distanceFromWarehouseMeters<80
+     || warehouse.events.some(event=>event.vehicleId===car.id
+       || event.parkedVehicleId===car.id)),
   }).slice(0,13500));
  }
 
