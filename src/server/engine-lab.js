@@ -6,6 +6,10 @@
 const MAX_SAMPLES = 2400;
 const MAX_EVENTS = 180;
 const MAX_ANOMALIES = 120;
+const MAX_PLAYER_EVENTS = 1024;
+const NOISY_PLAYER_EVENTS = new Set([
+  "sound:spatial", "feedback:sound", "movement:blocked",
+]);
 const SETUP_COMMANDS = new Set([
   "entity.spawn", "entity.remove", "component.patch", "component.set",
   "game.step", "physics.raycast", "physics.stats", "physics.contact-forces",
@@ -120,6 +124,8 @@ export class EngineLab {
     this.anomalies = [];
     this.events = [];
     this.watchedEvents = [];
+    this.playerEvents = [];
+    this.nextPlayerEventIndex = 0;
     this.setupHistory = [];
     this.watch = [...new Set(watch.map(String))].slice(0, 12);
     this.objectives = objectives.map(validObjective);
@@ -127,6 +133,8 @@ export class EngineLab {
     this.lastVehicleSamples = new Map();
     this.lastPedestrianSamples = new Map();
     this.lastPedestrianWarningAt = new Map();
+    this.lastHumanDriverSamples = new Map();
+    this.lastHumanDriverWarningAt = new Map();
     this.lastStallAt = new Map();
     this.lastObservationClock = null;
   }
@@ -299,6 +307,36 @@ export class EngineLab {
       }
     }
     for (const observation of entities) {
+      const { entityId, vehicle, bot } = observation;
+      const requestedForward = Number(vehicle?.input?.forward)
+        || Number(vehicle?.input?.throttle) || 0;
+      const accelerating = observation.alive && !bot && vehicle
+        && vehicle.driverId === entityId && Math.abs(requestedForward) >= .4;
+      if (!accelerating || !vehicle?.position) {
+        this.lastHumanDriverSamples.delete(entityId);
+        continue;
+      }
+      const previous = this.lastHumanDriverSamples.get(entityId);
+      if (!previous || (horizontal(previous.position, vehicle.position) ?? Infinity) >= 1) {
+        this.lastHumanDriverSamples.set(entityId, {
+          since: this.simulatedMs, position: vehicle.position,
+        });
+        continue;
+      }
+      if (this.simulatedMs - previous.since >= 3000
+        && this.simulatedMs - (this.lastHumanDriverWarningAt.get(entityId) ?? -Infinity) >= 3000) {
+        this.anomalies.push({
+          type: "possible-stalled-human-driver", entityId,
+          vehicleId: observation.vehicleId,
+          simulatedMs: this.simulatedMs, atGameTime: elapsedText(this.simulatedMs),
+          position: vehicle.position, requestedForward, actualSpeed: vehicle.speed,
+          reason: "Player held vehicle throttle but the car moved less than 1 m in 3 simulated seconds",
+        });
+        if (this.anomalies.length > MAX_ANOMALIES) this.anomalies.shift();
+        this.lastHumanDriverWarningAt.set(entityId, this.simulatedMs);
+      }
+    }
+    for (const observation of entities) {
       const { vehicle, decision, entityId } = observation;
       if (!vehicle || !decision) { this.lastVehicleSamples.delete(entityId); continue; }
       const previous = this.lastVehicleSamples.get(entityId);
@@ -338,11 +376,19 @@ export class EngineLab {
         payload.driverId, payload.recipientId, payload.killerId,
       ].filter(Boolean);
       if (relatedIds.some(id => this.watch.includes(String(id)))) {
-        this.watchedEvents.push({
+        const event = {
           simulatedMs: Math.round(this.simulatedMs),
-          event: packet.event,
-          payload,
-        });
+          event: packet.event, payload,
+        };
+        this.watchedEvents.push(event);
+        if (!NOISY_PLAYER_EVENTS.has(packet.event)) {
+          this.playerEvents.push({
+            ...event, index: this.nextPlayerEventIndex++,
+          });
+          if (this.playerEvents.length > MAX_PLAYER_EVENTS) {
+            this.playerEvents.splice(0, this.playerEvents.length - MAX_PLAYER_EVENTS);
+          }
+        }
       }
       const eventKey = packet.event + ":" + (packet.payload?.entityId ?? "");
       this.eventCounts.set(eventKey, (this.eventCounts.get(eventKey) ?? 0) + 1);
@@ -489,6 +535,40 @@ export async function handleEngineLabRequest(room, request) {
     if (!lab) throw new Error("Scenario not created");
     let result;
     switch (action) {
+      case "scenario.player-events": {
+        if (lab.phase !== "running" && lab.phase !== "finished") {
+          throw new Error("Player events require a started scenario");
+        }
+        const requestedPlayerId = String(body.playerId ?? "");
+        const playerEntity = lab.game.host.services.get("entities").get(requestedPlayerId);
+        if (!playerEntity || playerEntity.bot) {
+          throw new Error("Player events require a human-controlled entity");
+        }
+        const requestedFrom = Math.max(0, Math.floor(Number(body.fromIndex) || 0));
+        const firstAvailable = lab.playerEvents[0]?.index ?? lab.nextPlayerEventIndex;
+        const since = Math.max(requestedFrom, firstAvailable);
+        const events = lab.playerEvents.filter(packet => {
+          if (packet.index < since) return false;
+          const payload = packet.payload ?? {};
+          return [payload.entityId, payload.playerId, payload.targetId,
+            payload.attackerId, payload.driverId, payload.recipientId,
+            payload.killerId].includes(requestedPlayerId);
+        }).slice(0, bounded(body.limit, 50, 200));
+        result = {
+          ...lab.status(), playerId: requestedPlayerId, events,
+          firstAvailableIndex: firstAvailable,
+          nextIndex: events.at(-1)?.index + 1 || since,
+          truncated: requestedFrom < firstAvailable,
+          hasMore: lab.playerEvents.some(packet => packet.index >=
+            (events.at(-1)?.index + 1 || since) && [
+              packet.payload?.entityId, packet.payload?.playerId,
+              packet.payload?.targetId, packet.payload?.attackerId,
+              packet.payload?.driverId, packet.payload?.recipientId,
+              packet.payload?.killerId,
+            ].includes(requestedPlayerId)),
+        };
+        break;
+      }
       case "scenario.prepare": result = await lab.prepare(body.commands); break;
       case "scenario.start": result = lab.start(); break;
       case "scenario.advance": result = await lab.advance(body); break;

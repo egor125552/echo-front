@@ -12,8 +12,38 @@ async function call(action,params={}) {
  const j=await r.json();if(!r.ok||!j.ok)throw Error(action+' '+JSON.stringify(j).slice(0,700));return j.result??j;
 }
 const PID='human-agent',log=[],started=Date.now();
+const playerEvents=[];
+let playerEventCursor=0;
+async function consumePlayerEvents() {
+  for(let page=0;page<12;page++){
+    const batch=await call('scenario.player-events',{
+      playerId:PID,fromIndex:playerEventCursor,limit:200,
+    });
+    if(batch.truncated) {
+      const warning={event:'engine-lab:event-gap',
+        index:playerEventCursor,firstAvailableIndex:batch.firstAvailableIndex};
+      playerEvents.push(warning);
+      console.log('PLAYER_EVENT',JSON.stringify(warning));
+    }
+    for(const event of batch.events){
+      playerEvents.push(event);
+      if(['loot:picked','vehicle:entered','vehicle:exited','vehicle:impact',
+        'entity:died','battle-royale:eliminated','combat:damage',
+        'injury:downed'].includes(event.event)) {
+        console.log('PLAYER_EVENT',JSON.stringify(event).slice(0,900));
+      }
+    }
+    playerEventCursor=batch.nextIndex;
+    if(!batch.hasMore)break;
+    if(page===11)throw Error('Player event pagination exceeded maximum pages');
+  }
+}
 const maxTurns=Math.max(1,Math.min(480,Number(process.argv[4])||240));
-await call('scenario.create',{watch:[PID]});
+await call('scenario.create',{watch:[PID],objectives:[
+ {type:'event-count',event:'parachute:landed',entityId:PID,minimumCount:1},
+ {type:'event-count',event:'loot:picked',entityId:PID,minimumCount:1},
+ {type:'event-count',event:'vehicle:entered',entityId:PID,minimumCount:1},
+]});
 await call('scenario.prepare',{commands:[{command:'service.call',args:{service:'match-api',method:'connectHuman',arguments:[PID]}}]});
 await call('scenario.start');
 let state=await call('scenario.view',{playerId:PID});
@@ -31,13 +61,22 @@ let carId=null,lootingAttempts=0,carAttempts=0,driveSeconds=0,combatSeconds=0,la
 let triedDoor=0;
 let lastPedestrianWarningCount=0, outsideWarehouseTarget={x:135,z:-60};
 let approachStallAttempts=0, previousApproachDistance=Infinity;
+let drivingRecoveryTurns=0, drivingStallCount=0, drivingStartPosition=null;
+let requestedParking=false;
+let previousDrivingVehicleId=null;
 for(let turn=0;turn<maxTurns;turn++){
  const player=state.self;
  if(!player?.alive){record('eliminated','Player died during this actual battle royale');break;}
  if(state.match?.phase==='ended'){record('match-ended','Match ended');break;}
  const chute=player.parachute?.phase;
  let input={},step=60,action='observe',details='';
- if(state.drivingVehicle&&phase!=='driving'){phase='driving';record('already-driving',state.drivingVehicle.id);}
+ if(state.drivingVehicle&&phase!=='driving'){
+   phase='driving';
+   previousDrivingVehicleId=state.drivingVehicle.id;
+   drivingStartPosition={x:state.drivingVehicle.x,z:state.drivingVehicle.z};
+   driveSeconds=0;requestedParking=false;
+   record('already-driving',state.drivingVehicle.id);
+ }
  if(chute!=='landed' && chute!=='grounded' && player.parachute?.airborne){
    phase='drop';let nav=direction(player,target);
    input={forward:Math.min(1,nav.distance>4?1:0)*nav.forward,strafe:Math.min(1,nav.distance>4?1:0)*nav.strafe,sprint:true};
@@ -124,9 +163,36 @@ for(let turn=0;turn<maxTurns;turn++){
       if(carAttempts>6){action='cannot-enter-car';phase='explore';}
     }else{const nav=direction(player,outsideWarehouseTarget);input={forward:nav.forward,strafe:nav.strafe,sprint:true};action='searching-for-car';details='Search road outside warehouse';step=20;}
  } else if(phase==='driving'){
-    input={forward:1,strafe:(driveSeconds%18>11?.25:0),sprint:driveSeconds%12<3};
-    action='drive';step=60;driveSeconds+=3;details='Engine Control input, not teleportation';
-    if(driveSeconds>=35){input={interactPressed:true};phase='explore';action='exit-car';}
+    const traveled=drivingStartPosition&&state.drivingVehicle
+      ? Math.hypot(state.drivingVehicle.x-drivingStartPosition.x,
+        state.drivingVehicle.z-drivingStartPosition.z) : 0;
+    if(requestedParking){
+      const speed=Number(state.drivingVehicle?.speed)||0;
+      if(speed>1.2){
+        // sprint is the HANDBRAKE while seated, not a running modifier.
+        input={forward:0,strafe:0,sprint:true};action='brake-before-exit';
+        details='Slow the actual car to under 1.2 m/s, current '+speed.toFixed(1);
+        step=10;
+      }else{
+        input={interactPressed:true};phase='explore';action='exit-parked-car';
+        details='The car is nearly stationary; exit without an unsafe jump-out';
+        step=4;
+      }
+    }else if(drivingRecoveryTurns>0){
+      input={forward:-.8,strafe:drivingStallCount%2?.6:-.6,sprint:false};
+      drivingRecoveryTurns--;
+      action='reverse-and-turn';step=20;
+      details='Back out of an obstacle instead of holding forward throttle';
+    }else{
+      input={forward:1,strafe:(driveSeconds%18>11?.25:0),sprint:false};
+      action='drive';step=20;driveSeconds+=1;
+      details='Engine Control input, not teleportation; no handbrake';
+    }
+    if(traveled>120&&driveSeconds>=25&&drivingRecoveryTurns===0
+        &&!requestedParking){
+      requestedParking=true;
+      details+='; next action brakes before exiting';
+    }
  } else{
    const enemy=state.visibleEntities?.filter(e=>e.bot&&e.alive).sort((a,b)=>a.distanceMeters-b.distanceMeters)[0];
    if(enemy&&enemy.distanceMeters<35){
@@ -151,17 +217,33 @@ for(let turn=0;turn<maxTurns;turn++){
  await call('scenario.input',{playerId:PID,input});
  const advanced=await call('scenario.advance',{steps:step,sampleEvery:20});
  state=await call('scenario.view',{playerId:PID});
+ await consumePlayerEvents();
  if(state.drivingVehicle && phase!=='driving'){
-    phase='driving';action='vehicle-entered';details='Real driver status confirmed: '+carId;
+    phase='driving';action='vehicle-entered';details='Real driver status confirmed: '+state.drivingVehicle.id;
+    previousDrivingVehicleId=state.drivingVehicle.id;
+    drivingStartPosition={x:state.drivingVehicle.x,z:state.drivingVehicle.z};
+    driveSeconds=0;drivingRecoveryTurns=0;drivingStallCount=0;requestedParking=false;
  }
  if(phase==='driving'&&!state.drivingVehicle&&driveSeconds>0){
     phase='explore';action='vehicle-exited';details='Real driver status lost';
  }
- if(phase==='loot' && !lootCollected && state.recentPlayerEvents?.some(e=>e.event==='loot:picked')){lootCollected=true;phase='vehicle';action='loot-confirmed';details='Actual loot:picked event '+JSON.stringify(state.recentPlayerEvents.filter(e=>e.event==='loot:picked').at(-1).payload).slice(0,280);}
+ if(phase==='loot' && !lootCollected && playerEvents.some(e=>e.event==='loot:picked'
+     && e.payload?.entityId===PID)){
+   lootCollected=true;phase='vehicle';action='loot-confirmed';
+   details='Actual loot:picked event '+JSON.stringify(playerEvents.filter(e=>
+     e.event==='loot:picked'&&e.payload?.entityId===PID).at(-1).payload).slice(0,280);
+ }
  if(advanced.newAnomalies?.length){
    details+='; anomalies '+JSON.stringify(advanced.newAnomalies).slice(0,500);
    const pedestrianStall=advanced.newAnomalies.some(x=>x.type==='possible-stalled-pedestrian'
      && x.entityId===PID);
+   if(phase==='driving'&&advanced.newAnomalies.some(x=>
+      x.type==='possible-stalled-human-driver'&&x.entityId===PID)){
+      drivingRecoveryTurns=3;
+      drivingStallCount++;
+      action='stalled-driver-reverse-next';
+      details+='; next three actions reverse and turn';
+   }
    if(pedestrianStall){
      if(phase==='vehicle'&&state.self?.y>1.6){action='stalled-choose-stairs';}
      else if(phase==='vehicle'){
@@ -175,15 +257,22 @@ for(let turn=0;turn<maxTurns;turn++){
      }
    }
 }
- if(turn%3===0||action==='open-parachute'||action==='landed'||action==='take-loot'||action==='approach-door'||action==='try-warehouse-door'||action==='descend-warehouse-stairs'||action==='open-exit-door'||action==='navigate-warehouse-exit'||action==='detour-around-warehouse'||action.startsWith('stalled-')||action==='loot-confirmed'||action==='escape-into-car'||action==='fight-or-retreat'||action==='enter-car'||action==='vehicle-entered'||action==='vehicle-exited'||action==='combat'||before.self.alive!==state.self?.alive)record(action,details);
+ if(turn%3===0||action==='open-parachute'||action==='landed'||action==='take-loot'||action==='approach-door'||action==='try-warehouse-door'||action==='descend-warehouse-stairs'||action==='open-exit-door'||action==='navigate-warehouse-exit'||action==='detour-around-warehouse'||action.startsWith('stalled-')||action==='loot-confirmed'||action==='escape-into-car'||action==='fight-or-retreat'||action==='enter-car'||action==='vehicle-entered'||action==='vehicle-exited'||action==='brake-before-exit'||action==='exit-parked-car'||action==='reverse-and-turn'||action==='combat'||before.self.alive!==state.self?.alive)record(action,details);
  if(turn%10===0){
    const report=await call('scenario.report');
    console.log('EVENTS',JSON.stringify({time:state.gameTime,counts:report.eventCounts,anomalies:report.anomalies.length,phase}));
  }
  fs.writeFileSync('/tmp/echo-br-play-progress.json',JSON.stringify({phase,target,turn,time:state.gameTime,events:log.slice(-5),lastView:brief(state)}));
 }
+await consumePlayerEvents();
 const report=await call('scenario.finish');
-console.log('FINAL',JSON.stringify({verdict:report.verdict,gameTime:report.gameTime,realTime:report.realTime,counts:report.eventCounts,anomalies:report.anomalies,finalView:brief(state),phases:log.map(x=>x.action)}).slice(0,9500));
+const totals=playerEvents.reduce((m,e)=>(m[e.event]=(m[e.event]??0)+1,m),{});
+console.log('FINAL',JSON.stringify({
+ verdict:report.verdict,objectives:report.objectives??report.results,
+ gameTime:report.gameTime,realTime:report.realTime,counts:report.eventCounts,
+ playerEventCounts:totals,anomalies:report.anomalies,
+ finalView:brief(state),phases:log.map(x=>x.action)
+}).slice(0,9500));
 const out=path.join(os.homedir(),'Downloads','Echo Front Engine Lab '+room+'.json');
-fs.writeFileSync(out,JSON.stringify({observations:log,finalView:state,report,wallMs:Date.now()-started},null,2));
+fs.writeFileSync(out,JSON.stringify({observations:log,playerEvents,finalView:state,report,wallMs:Date.now()-started},null,2));
 console.log('REPORT_FILE',out);
