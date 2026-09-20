@@ -3,6 +3,8 @@ export const INITIAL_ZONE_RADIUS = 1450;
 export const FINAL_ZONE_RADIUS = 35;
 export const ZONE_GRACE_MS = 3 * 60_000;
 export const ZONE_SHRINK_MS = 20 * 60_000;
+export const FINAL_ZONE_HOLD_MS = 3 * 60_000;
+export const FINAL_ZONE_COLLAPSE_MS = 3 * 60_000;
 export const ZONE_DAMAGE_PER_SECOND = 12;
 export const ZONE_STEERING_BUFFER = 70;
 export const REMAINING_THRESHOLDS = [75, 50, 25, 10, 5, 2, 1];
@@ -69,7 +71,16 @@ export async function setup(ctx) {
   function zoneRadiusAt(now = Date.now()) {
     if (!zoneClockStartedAt || now <= zoneClockStartedAt + ZONE_GRACE_MS) return INITIAL_ZONE_RADIUS;
     const progress = clamp01((now - zoneClockStartedAt - ZONE_GRACE_MS) / ZONE_SHRINK_MS);
-    return INITIAL_ZONE_RADIUS + (FINAL_ZONE_RADIUS - INITIAL_ZONE_RADIUS) * progress;
+    if (progress < 1) {
+      return INITIAL_ZONE_RADIUS + (FINAL_ZONE_RADIUS - INITIAL_ZONE_RADIUS) * progress;
+    }
+    // The old 35 m safe circle persisted forever. Three survivors could remain
+    // inside it, outside each other's engagement range, for hours. After a
+    // short final fight window, close the circle all the way to its centre.
+    // Zone pressure then resolves a stalemate through normal health damage.
+    const finalAt = zoneClockStartedAt + ZONE_GRACE_MS + ZONE_SHRINK_MS;
+    const overtime = clamp01((now - finalAt - FINAL_ZONE_HOLD_MS) / FINAL_ZONE_COLLAPSE_MS);
+    return Math.max(0, FINAL_ZONE_RADIUS * (1 - overtime));
   }
 
   function status(now = Date.now()) {
@@ -199,6 +210,11 @@ export async function setup(ctx) {
     const radius = zoneRadiusAt(now);
     const damage = zoneDamageForElapsed(elapsedMs);
     for (const entity of aliveEntities()) {
+      // Damage can eliminate the penultimate player synchronously. That ends
+      // the match and declares the survivor. Never damage that winner again
+      // from this tick's previously captured list of alive entities.
+      if (phase !== "active") break;
+      if (!entity.alive) continue;
       const transform = ctx.components.get(entity.id, "Transform");
       if (!transform) continue;
       const distance = Math.hypot(transform.x, transform.z);
