@@ -1,6 +1,4 @@
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 const base=process.argv[2]??'http://127.0.0.1:8793';
 const tokenFile=process.argv[3];
 if(!tokenFile)throw new Error('Usage: node scripts/engine-lab-battle-royale-agent.mjs <local-url> <private-token-file>');
@@ -334,7 +332,6 @@ for(let turn=0;;turn++){
    const report=await call('scenario.report');
    console.log('EVENTS',JSON.stringify({time:state.gameTime,counts:report.eventCounts,anomalies:report.anomalies.length,phase}));
  }
- fs.writeFileSync('/tmp/echo-br-play-progress.json',JSON.stringify({phase,target,turn,time:state.gameTime,events:log.slice(-5),lastView:brief(state)}));
 }
 // A battle royale does not end when one player dies. Continue watching bots
 // already encountered while the SAME live match continues. No post-death input
@@ -379,12 +376,7 @@ if(state.self?.alive===false){
       const liveReport=await call('scenario.report');
       const liveOutcome=liveReport.matchOutcome;
       const ongoing=liveOutcome?.phase!=='ended';
-      const progress=path.join(os.homedir(),'Downloads','Echo Front Engine Lab '+room+'.json');
-      fs.writeFileSync(progress,JSON.stringify({
-        observations:log,botMoments,playerEvents,finalView:state,
-        report:liveReport,matchStillActive:ongoing,wallMs:Date.now()-started,
-      },null,2));
-      console.log('LIVE_REPORT_FILE',progress,'REMAINING',liveOutcome?.participantsRemaining);
+      console.log('LIVE_MATCH',liveReport.gameTime,'REMAINING',liveOutcome?.participantsRemaining);
       if(!ongoing)break;
     }
   }
@@ -399,6 +391,4 @@ console.log('FINAL',JSON.stringify({
  playerEventCounts:totals,anomalies:report.anomalies,
  finalView:brief(state),phases:log.map(x=>x.action)
 }).slice(0,9500));
-const out=path.join(os.homedir(),'Downloads','Echo Front Engine Lab '+room+'.json');
-fs.writeFileSync(out,JSON.stringify({observations:log,botMoments,playerEvents,finalView:state,report,wallMs:Date.now()-started},null,2));
-console.log('REPORT_FILE',out);
+console.log('OBSERVATION_COMPLETE',room);
