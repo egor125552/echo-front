@@ -289,7 +289,7 @@ export async function setup(ctx) {
 
     recordLoot(state, loot);
 
-    if (state.phase === "interact-first-crate") {
+    if (["select-navigation", "follow-navigation", "select-crate", "follow-crate", "interact-first-crate"].includes(state.phase)) {
       if (state.rifleCollected && state.armorCollected) {
         if (advance(entityId, "select-rifle", now)) acceptAlreadySelectedRifle(entityId, now);
       } else {
@@ -298,7 +298,7 @@ export async function setup(ctx) {
       return;
     }
 
-    if (state.phase === "interact-second-crate") {
+    if (["select-second-crate", "follow-second-crate", "interact-second-crate"].includes(state.phase)) {
       if (state.rifleCollected && state.armorCollected) {
         if (advance(entityId, "select-rifle", now)) acceptAlreadySelectedRifle(entityId, now);
       } else {
