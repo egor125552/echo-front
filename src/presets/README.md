@@ -1,8 +1,9 @@
-# Presets
+# Серверные наборы игровых модулей
 
-- `empty.js`: microkernel without gameplay.
-- `walking-test.js`: Rapier physics, arena, entities, movement only.
-- `combat-test.js`: shooting and health without armor or bots.
-- `echo-front.js`: the complete playable prototype.
+`echo-front.js` экспортирует `echoFrontPreset` для командного боя и `echoFrontTutorialPreset` с учебными модулями. `battle-royale.js` экспортирует `battleRoyalePreset` для обычной королевской битвы и `battleRoyaleTutorialPreset` для учебной высадки и последующих шагов.
 
-Presets are composition roots. Gameplay plugins must never import each other directly.
+Отдельные наборы `empty.js`, `walking-test.js` и `combat-test.js` предназначены для изолированных конфигураций микродвижка, а не для публичных режимов выбора игрока.
+
+`src/server/game.js` выбирает нужный набор по режиму и признаку обучения. Изменение набора не означает автоматического переноса новых систем во все остальные режимы; для новой механики проверьте оба обычных режима и обе учебные конфигурации.
+
+Игровым модулям следует общаться через сервисы, события и компоненты, а связи задавать в пресете. См. [архитектуру](../../ARCHITECTURE.md) и [проверку через Engine Control](../../ENGINE_CONTROL_TESTING.md).

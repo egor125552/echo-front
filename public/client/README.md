@@ -1,3 +1,9 @@
-# Echo Front browser client
+# Браузерный клиент Echo Front
 
-The browser client is itself plugin-composed. `bootstrap.js` loads the Echo Front client preset. Input, network transport, audio rendering, sound mapping, HUD, and accessibility announcements are separate plugins.
+`bootstrap.js` запускает страницу `public/index.html`, подготавливает необходимые звуки, показывает рекомендацию обучения при первом посещении браузера и открывает игровое подключение. `presets/echo-front.js` собирает клиент из отдельных модулей `plugins/`.
+
+`input.js` объединяет клавиатуру, сенсорные кнопки и виртуальный ввод; `iphone-gestures.js`, `gamepad-input.js` и `keyboard-camera-turn.js` добавляют свои способы управления. `accessible-menus.js` создаёт доступные меню и карту и скрывает старые сенсорные кнопки переключения целей. На телефоне цель выбирается в Карте одним подтверждением, которое сразу активирует маршрут.
+
+`network.js` использует WebSocket, обрабатывает переподключение и передаёт ввод; `snapshot-smoothing.js` сглаживает сетевые снимки. `spatial-audio.js`, звуковые наборы и специализированные аудиоплагины воспроизводят игровые звуки. `speech-settings.js`, `announcer.js` и `tutorial-guide.js` отвечают за голосовое сопровождение; `game-hud.js` и `accessible-menus.js` — за экранный интерфейс.
+
+При изменении действия обновляйте сразу интерфейс, `public/index.html`, учебные фразы и [руководство игрока](../../PLAYER_GUIDE.md). Автоматическая проверка кода не подтверждает, что VoiceOver может активировать кнопку и что звук действительно прозвучит вовремя.

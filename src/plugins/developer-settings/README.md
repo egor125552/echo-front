@@ -1,31 +1,9 @@
-# Temporary developer settings module
+# Временный модуль настроек разработчика
 
-This module is intentionally temporary.
+Этот модуль нужен для изменения экспериментальных параметров в живой королевской битве и наблюдения, какие значения получает настоящий серверный runtime. Он не является пользовательскими настройками игры.
 
-Purpose:
-- tune runtime gameplay values during a live Battle Royale match;
-- verify which values actually reach the real runtime;
-- avoid changing permanent gameplay modules while experimenting.
+Серверная часть: `src/plugins/developer-settings/server.js`; интерфейс: `public/client/plugins/developer-settings-ui.js`. Подключение выполнено в `src/presets/battle-royale.js` и `public/client/presets/echo-front.js`. Дополнительная проверка изоляции модуля находится в `src/plugins/developer-settings/check.mjs`.
 
-Isolation rule:
-- no developer-mode code may be added to match-room, the normal network plugin, ragdoll, parkour, parachute, or other permanent gameplay modules;
-- check.mjs enforces this for the currently covered core files.
+Изменения параметров относятся только к текущему матчу: не рассчитывайте на сохранение после перезапуска комнаты. Экспериментальное значение нельзя считать исправлением механики, пока оно не перенесено в постоянный модуль и не проверено на обычном матче.
 
-Current temporary files:
-- src/plugins/developer-settings/server.js
-- src/plugins/developer-settings/check.mjs
-- src/plugins/developer-settings/README.md
-- public/client/plugins/developer-settings-ui.js
-
-Current permanent-file wiring:
-- src/presets/battle-royale.js imports and installs developerSettings;
-- public/client/presets/echo-front.js imports and installs developerSettingsUi.
-
-To remove developer mode later:
-1. Remove the developerSettings import and preset entry from src/presets/battle-royale.js.
-2. Remove the developerSettingsUi import and preset entry from public/client/presets/echo-front.js.
-3. Delete src/plugins/developer-settings/.
-4. Delete public/client/plugins/developer-settings-ui.js.
-5. Run the normal project tests and a Wrangler dry-run.
-
-No gameplay defaults are persisted by this module. Runtime changes disappear with the match.
+Для удаления временного режима удалите его серверный импорт и запись в `battle-royale.js`, клиентский импорт и запись в клиентском пресете, затем файлы `src/plugins/developer-settings/` и `public/client/plugins/developer-settings-ui.js`. После этого проверьте загрузку клиента, сборку Worker и реальные игровые сценарии через Engine Control; тесты инфраструктуры не подтверждают поведение механики.

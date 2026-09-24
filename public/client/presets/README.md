@@ -1,3 +1,7 @@
-# Client preset
+# Набор модулей браузерного клиента
 
-The browser build is composed from independent plugins for keyboard input, Cloudflare session transport, hybrid spatial audio, the sound pack, HUD, and screen-reader announcements. Client plugins do not import each other directly; the preset is the composition root.
+`echo-front.js` задаёт состав и порядок подключения клиентских модулей. В нём собраны ввод с клавиатуры, поворот взгляда, WebSocket, сенсорное управление и геймпад, журнал, сглаживание снимков, настройки речи, доступные меню и карта, пространственные и событийные звуки, навигация, HUD и учебный ведущий.
+
+При добавлении клиентского модуля объявляйте его `manifest` и необходимые сервисы. Проверяйте порядок и зависимости в пресете, а не импортируйте один произвольный клиентский игровой плагин напрямую в другой.
+
+Подробности: [устройство игры](../../../ARCHITECTURE.md), [клиент](../README.md), [управление и доступность](../../../PLAYER_GUIDE.md).

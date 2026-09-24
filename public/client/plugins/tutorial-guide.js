@@ -22,7 +22,7 @@ const BATTLE_ROYALE_MESSAGES = {
   "ground-run": "Посадка завершена. Теперь пробеги небольшой участок. Удерживай движение вперёд и Shift. Я продолжу только после нескольких настоящих беговых шагов.",
   "automatic-parachute": "Теперь отдельная демонстрация аварийного парашюта. Когда я закончу эту фразу, игра снова поднимет тебя в воздух. Ничего не нажимай, особенно пробел. Игра сама раскроет купол, когда запас высоты станет опасно мал.",
   "automatic-parachute-land": "Автоматическое аварийное раскрытие сработало. Запомни этот звук: если в начале падения ты вообще не раскрыл парашют, игра страхует тебя перед землёй. Теперь дождись посадки.",
-  "select-navigation": "Теперь навигация. На клавиатуре нажми M, чтобы выбрать цель, затем Enter, чтобы построить маршрут. На сенсорном экране используй кнопки выбора цели и Маршрут.",
+  "select-navigation": "Теперь навигация. На клавиатуре нажми M, на сенсорном экране открой кнопку Карта. Выбери цель из списка и подтверди её: маршрут включится сразу.",
   "follow-navigation": "Маршрут построен. Двигайся по звуковым подсказкам. Навигация будет сообщать направление и расстояние.",
   "select-crate": "Теперь выбери в навигации любой ящик и запусти маршрут к нему.",
   "follow-crate": "Маршрут к ящику запущен. Дойди до него по звуковым подсказкам.",
@@ -108,14 +108,14 @@ export async function setup(ctx) {
         const next = phase === "select-second-crate"
           ? secondCrateMessage(tutorial)
           : BATTLE_ROYALE_MESSAGES[phase];
-        present(`Маршрут отключён. Выбери цель и построй маршрут снова. ${next}`);
+        present(`Маршрут отключён. Открой Карту и подтверди нужную цель ещё раз. ${next}`);
         return;
       }
       if (tutorial.routeLost && ["select-navigation", "select-crate", "select-second-crate"].includes(phase)) {
         const next = phase === "select-second-crate"
           ? secondCrateMessage(tutorial)
           : BATTLE_ROYALE_MESSAGES[phase];
-        present(`Предыдущая цель больше недоступна. Выбери другую. ${next}`);
+        present(`Предыдущая цель больше недоступна. Открой Карту и подтверди другую цель. ${next}`);
         return;
       }
       if (phase === "select-second-crate") {
@@ -185,7 +185,7 @@ export async function setup(ctx) {
       && ["select-navigation", "select-crate", "select-second-crate"].includes(lastPhase)
     ) {
       const distance = Math.max(0, Math.round(Number(payload.distanceMeters ?? payload.distance) || 0));
-      present(`Выбрано: ${payload.targetName || "цель"}. ${distance} метров. На клавиатуре нажми Enter, на сенсорном экране нажми Маршрут.`);
+      present(`Выбрано: ${payload.targetName || "цель"}. ${distance} метров. Если маршрут уже включён, двигайся по звуковым подсказкам. Иначе открой Карту и подтверди цель ещё раз.`);
       return;
     }
 

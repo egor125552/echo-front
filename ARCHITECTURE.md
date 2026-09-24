@@ -1,16 +1,35 @@
-# Echo Front architecture
+# Архитектура Echo Front
 
-Echo Front is a preset, not a monolithic game class. The microkernel only provides plugin lifecycle, events, services, components, scheduling boundaries, and platform adapters. Gameplay lives under `src/plugins/` and browser behavior lives under `public/client/plugins/`.
+Актуально для локальной ветки main на 23 сентября 2026 года. Echo Front не является одним большим игровым классом: серверный и браузерный клиенты составлены из самостоятельных модулей.
 
-## Rules
+## Как устроен запуск
 
-- Core must not import gameplay plugins.
-- A plugin must not import another plugin directly.
-- Plugins communicate through services, events, and components.
-- Plugin capabilities are declared in each manifest and enforced by the server plugin host.
-- Physics is supplied by the `rapier-physics` plugin.
-- Armor is optional. An entity has armor only if the Armor component exists.
-- Bot fill and bot loadouts are separate plugins; loadouts decide whether a bot receives armor.
-- Presets compose the game. `empty`, `walking-test`, `combat-test`, and `echo-front` demonstrate that mechanics can be removed without rewriting the microkernel.
+`src/index.js` обрабатывает HTTP-запросы и передаёт подключения соответствующему Durable Object `MatchRoom` из `src/server/match-room.js`. `src/server/game.js` выбирает игровой набор модулей по режиму и признаку обучения, создаёт `PluginHost` и открывает игровое API. `public/index.html` — страница игрока, `public/client/bootstrap.js` — запуск браузерных модулей, `public/client/presets/echo-front.js` — их состав.
 
-`scripts/architecture-check.mjs` turns these rules into CI failures when a direct cross-plugin dependency is introduced.
+Транспорт текущей игры — **WebSocket** через `/api/play`; проект не использует обычный UDP как браузерный игровой транспорт. Параметры `mode` и `room` определяют комнату; обучение использует отдельную комнату `tutorial-<идентификатор сессии>` и свой набор игровых модулей.
+
+Cloudflare Worker обслуживает статику из `public/` и API. Durable Object хранит игровой матч, обрабатывает вход игроков, действия, события и сетевые снимки; при восстановлении соединения клиент пытается вернуться в сессию. Физический мир Rapier создаётся игровым модулем `rapier-physics`, а не копируется в клиент.
+
+## Серверные наборы модулей
+
+`src/presets/echo-front.js` содержит `echoFrontPreset` для командного боя и `echoFrontTutorialPreset` с учебными сценариями. `src/presets/battle-royale.js` содержит `battleRoyalePreset` и `battleRoyaleTutorialPreset`: последний заменяет обычное заполнение ботами и автопарк учебными модулями и подключает учебную логику.
+
+Реализованные семейства модулей королевской битвы включают карту, создание зданий, лестницы и наземную навигацию, добычу, зону, парашют, автомобильную физику и автопарк, ранения, броню, оружие, ботов, ragdoll и звуки. Смотрите конкретные функции в `src/plugins/`; не переносите механику между картами простым копированием её старого названия.
+
+`src/core/` предоставляет жизненный цикл плагинов, события, компоненты и сервисы. Модули заявляют зависимости в `manifest` и обмениваются данными через сервисы, события и компоненты. При добавлении механики избегайте прямого импорта одного игрового плагина другим; собирайте зависимости в пресете. Отдельного `scripts/architecture-check.mjs` в текущем дереве нет: прежнее упоминание автоматической проверки удалено.
+
+## Браузер и доступность
+
+Клиентские модули находятся в `public/client/plugins/`. Ввод с клавиатуры, сенсорных кнопок, iPhone-жестов и геймпада объединяется в одно игровое состояние. Отдельные плагины отвечают за меню и карту, сетевое соединение, сглаживание снимков, пространственный звук, наборы звуков, навигацию, озвучку и учебного ведущего.
+
+Интерфейс игры задаётся в `public/index.html` и обновляется клиентскими модулями. Если меняется клавиша, жест или механика, необходимо проверить не только игровой ввод, но и `tutorial-guide.js`, `accessible-menus.js`, `announcer.js`, встроенную справку и руководство игрока. Кнопки выбора цели старого интерфейса скрываются модулем меню; доступный игроку путь сейчас — через Карту.
+
+## Сетевое состояние
+
+Сервер авторитетен для движения, попаданий, добычи, транспорта и исходов матча. `MatchRoom` отправляет снимки с учётом игрока через `snapshotFor` и отдельно пересылает важные события. На клиенте `snapshot-smoothing` отвечает за плавность отображения, но не должен изменять серверные результаты. Проверяйте, что исчезнувшие цели, автомобили и мёртвые боты не остаются в навигации и звуковых уведомлениях.
+
+Новая система должна одинаково вести себя после переподключения, выгрузки вкладки и медленного получения сетевых сообщений. Проверяйте отдельно реальный звук и VoiceOver, поскольку серверный Engine Control не умеет слышать клиентский аудиовывод.
+
+## Связанные документы
+
+[Игроку](PLAYER_GUIDE.md) · [Разработка](DEVELOPMENT.md) · [Аудио](AUDIO.md) · [Проверка механики](ENGINE_CONTROL_TESTING.md) · [Engine Lab](ENGINE_LAB.md).
