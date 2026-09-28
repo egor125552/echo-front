@@ -162,6 +162,7 @@ export async function setup(ctx) {
   const vehicles = ctx.services.get("vehicles");
   const parachute = ctx.services.get("parachute");
   const map = ctx.services.get("map");
+  const isBotDriver = (playerId) => Boolean(ctx.components.get(playerId, "Bot"));
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
   const originalStep = matchApi.step.bind(matchApi);
@@ -283,6 +284,7 @@ export async function setup(ctx) {
   }
 
   function guidedVehicleInput(playerId, raw = {}) {
+    if (isBotDriver(playerId)) return raw;
     const postArrival = postArrivalInput(playerId, raw);
     if (postArrival) return postArrival;
     if (humanInputDepth > MANUAL_INPUT_DEPTH_NONE) return raw;
@@ -508,7 +510,7 @@ export async function setup(ctx) {
     const seen = new Set();
     for (const vehicle of vehicles.snapshot?.() ?? []) {
       const playerId = vehicle?.driverId;
-      if (!playerId || seen.has(playerId)) continue;
+      if (!playerId || seen.has(playerId) || isBotDriver(playerId)) continue;
       seen.add(playerId);
       monitorVehicleRoute(playerId, vehicle, now);
     }

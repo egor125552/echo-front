@@ -148,6 +148,7 @@ export async function setup(ctx) {
   const lastAppliedRagdoll = new Map();
   const parkourBodies = new Map();
   const recentBodies = [];
+  const catalogDeliveries = new Map();
   let parkourSpinMultiplier = 1;
   let parachuteTuning = {
     canopyGlideMultiplier: 1,
@@ -540,6 +541,7 @@ export async function setup(ctx) {
   ctx.events.on("entity:removed", ({ entityId }) => {
     lastAppliedRagdoll.delete(entityId);
     parkourBodies.delete(entityId);
+    catalogDeliveries.delete(entityId);
   });
 
   function execute(playerId, command = {}) {
@@ -680,6 +682,11 @@ export async function setup(ctx) {
     matchApi.snapshotFor = (playerId, now = Date.now()) => {
       const base = originalSnapshotFor(playerId, now);
       if (!social.isHost(playerId)) return base;
+      const delivered = catalogDeliveries.get(playerId);
+      const includeCatalog = !delivered
+        || delivered.revision !== revision
+        || now - delivered.at >= 5_000;
+      if (includeCatalog) catalogDeliveries.set(playerId, { revision, at: now });
       return {
         ...base,
         developerSettings: {
@@ -687,7 +694,7 @@ export async function setup(ctx) {
           revision,
           message: lastMessage,
           error: lastError,
-          catalog: catalog(playerId),
+          ...(includeCatalog ? { catalog: catalog(playerId) } : {}),
           appliedRagdoll: appliedRagdollFor(playerId),
           ragdollStability: ragdollStabilitySnapshot(),
           parachute: parachuteSnapshotFor(playerId),
