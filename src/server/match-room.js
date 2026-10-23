@@ -11,6 +11,7 @@ import {
 } from "./room-lifecycle.js";
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
 import { summarizePerformanceSamples } from "./performance-samples.js";
+import { encodeSnapshotMessage } from "../../public/client/snapshot-delta.js";
 
 const HOT_RECONNECT_KEEPALIVE_MS = 8000;
 const LAST_RUNTIME_ERROR_KEY = "last-runtime-error-v1";
@@ -63,6 +64,7 @@ export class MatchRoom extends DurableObject {
     this.diagnosticsStats = freshDiagnosticsStats();
     this.inputSamples = [];
     this.lastRuntimeError = null;
+    this.snapshotStreams = new WeakMap();
 
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
@@ -328,6 +330,7 @@ export class MatchRoom extends DurableObject {
 
     const mode = normalizeGameMode(requestUrl.searchParams.get("mode"));
     const tutorial = requestUrl.searchParams.get("tutorial") === "1";
+    const snapshotProtocol = requestUrl.searchParams.get("snapshotProtocol") === "delta-v1" ? "delta-v1" : null;
     let phase = "delete-alarm";
     let playerId = null;
     let server = null;
@@ -349,7 +352,7 @@ export class MatchRoom extends DurableObject {
       const client = pair[0];
       server = pair[1];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ playerId, mode, tutorial });
+      server.serializeAttachment({ playerId, mode, tutorial, snapshotProtocol });
       this.disconnectedHumans.delete(playerId);
 
       phase = "connect-human";
@@ -369,6 +372,10 @@ export class MatchRoom extends DurableObject {
         snapshot: initialSnapshot,
       }));
 
+      if (snapshotProtocol === "delta-v1") {
+        this.snapshotStreams.set(server, { previous: initialSnapshot, sequence: 0 });
+      }
+
       phase = "replace-old-sockets";
       for (const oldSocket of previousSockets) {
         try { oldSocket.close(4001, "Reconnected"); } catch {}
@@ -376,8 +383,9 @@ export class MatchRoom extends DurableObject {
 
       phase = "start-game-loop";
       this.startGameLoop();
-      phase = "initial-broadcast";
-      this.broadcastSnapshot(true);
+      // The welcome already includes a complete snapshot for this socket.
+      // Everyone else receives the new player on the next regular tick.
+      // Re-broadcasting to all sockets after every join has quadratic cost.
       phase = "complete";
       this.clearRuntimeError();
       return new Response(null, { status: 101, webSocket: client });
@@ -425,6 +433,7 @@ export class MatchRoom extends DurableObject {
   }
 
   markSocketDisconnected(ws) {
+    this.snapshotStreams.delete(ws);
     const playerId = ws.deserializeAttachment()?.playerId;
     if (!playerId || !this.game) return;
     if (this.socketsForPlayer(playerId, ws).length) return;
@@ -483,6 +492,7 @@ export class MatchRoom extends DurableObject {
     this.lab = null;
     this.tutorial = false;
     this.disconnectedHumans.clear();
+    this.snapshotStreams = new WeakMap();
     this.hotReconnectUntil = 0;
     this.lastStepAt = Date.now();
     this.lastSnapshotAt = 0;
@@ -560,13 +570,40 @@ export class MatchRoom extends DurableObject {
       return;
     }
 
+    // Pool semantically identical rows across personalized snapshots. Every
+    // player still gets their own map, navigation and other private state.
+    // This allows the lossless patcher to reuse entity deltas for 50+ viewers.
+    const sharedEntities = new Map();
+    const deltaMemo = new WeakMap();
     for (const socket of this.ctx.getWebSockets()) {
       try {
         const playerId = socket.deserializeAttachment()?.playerId;
-        const message = JSON.stringify({
-          type: "snapshot",
-          snapshot: this.game.api.snapshotFor(playerId, now),
-        });
+        const snapshot = this.game.api.snapshotFor(playerId, now);
+        if (Array.isArray(snapshot.entities)) {
+          snapshot.entities = snapshot.entities.map(entity => {
+            if (!entity || typeof entity.id !== "string") return entity;
+            const json = JSON.stringify(entity);
+            const entry = sharedEntities.get(entity.id);
+            if (entry?.json === json) return entry.entity;
+            sharedEntities.set(entity.id, { json, entity });
+            return entity;
+          });
+        }
+        const attachment = socket.deserializeAttachment();
+        let message;
+        if (attachment?.snapshotProtocol === "delta-v1") {
+          const previous = this.snapshotStreams.get(socket);
+          const encoded = encodeSnapshotMessage(
+            snapshot, previous?.previous, previous?.sequence ?? 0, previous?.fullSize ?? 0,
+            deltaMemo,
+          );
+          this.snapshotStreams.set(socket, {
+            previous: encoded.next, sequence: encoded.sequence, fullSize: encoded.fullSize,
+          });
+          message = encoded.message;
+        } else {
+          message = JSON.stringify({ type: "snapshot", snapshot });
+        }
         socket.send(message);
         if (performanceSample) {
           performanceSample.snapshotsSent += 1;

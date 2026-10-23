@@ -1,3 +1,5 @@
+import { decodeSnapshotMessage } from "../snapshot-delta.js";
+
 export const manifest = {
   id: "cloudflare-session",
   requires: ["keyboard-input"],
@@ -61,6 +63,8 @@ export async function setup(ctx) {
   let desiredTutorial = false;
   let reconnectTimer = null;
   let reconnectAttempt = 0;
+  let latestSnapshot = null;
+  let latestSequence = 0;
   let frameStats = {
     snapshots: 0, maxSnapshotGapMs: 0, lastSnapshotAt: 0,
     maxParseMs: 0, maxDispatchMs: 0, receivedCharacters: 0,
@@ -150,7 +154,7 @@ export async function setup(ctx) {
     const mode = desiredMode;
     const tutorial = desiredTutorial;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}&tutorial=${tutorial ? "1" : "0"}`;
+    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}&tutorial=${tutorial ? "1" : "0"}&snapshotProtocol=delta-v1`;
     let ws;
     try {
       ws = new WebSocket(url);
@@ -210,7 +214,7 @@ export async function setup(ctx) {
       }
       frameStats.maxParseMs = Math.max(frameStats.maxParseMs, parsedAt - arrivedAt);
       frameStats.receivedCharacters += event.data.length;
-      if (data.type === "welcome" || data.type === "snapshot") {
+      if (data.type === "welcome" || data.type === "snapshot" || data.type === "snapshot-delta") {
         if (frameStats.lastSnapshotAt > 0) {
           frameStats.maxSnapshotGapMs = Math.max(
             frameStats.maxSnapshotGapMs, arrivedAt - frameStats.lastSnapshotAt,
@@ -232,9 +236,23 @@ export async function setup(ctx) {
             resumed: data.resumed === true,
           });
         }
+        latestSnapshot = data.snapshot ?? null;
+        latestSequence = 0;
         if (data.snapshot) emitSnapshot(data.snapshot);
-      } else if (data.type === "snapshot") {
-        emitSnapshot(data.snapshot);
+      } else if (data.type === "snapshot" || data.type === "snapshot-delta") {
+        try {
+          const decoded = decodeSnapshotMessage(data, latestSnapshot, latestSequence);
+          latestSnapshot = decoded.snapshot;
+          latestSequence = decoded.sequence;
+          emitSnapshot(latestSnapshot);
+        } catch (error) {
+          ctx.events.emit("network:error", {
+            room, mode: desiredMode, phase: "snapshot-delta",
+            endpoint: "/api/play", message: String(error?.message ?? error),
+          });
+          ws.close(4002, "Snapshot stream lost synchronization");
+          return;
+        }
       } else if (data.type === "event") {
         emitGamePacket(data);
       } else if (data.type === "events") {
@@ -253,6 +271,8 @@ export async function setup(ctx) {
     ws.addEventListener("close", (event) => {
       if (socket !== ws) return;
       socket = null;
+      latestSnapshot = null;
+      latestSequence = 0;
       input.disable();
       ctx.events.emit("network:disconnected", {
         room,

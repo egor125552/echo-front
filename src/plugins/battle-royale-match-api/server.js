@@ -257,13 +257,15 @@ export async function setup(ctx) {
     healthRegeneration?.tick(dt, now);
   }
 
+  // Snapshot is read-only. Using ComponentRegistry.snapshot() here would
+  // structuredClone *every* component, for every visible entity, for
+  // every recipient. Only the fields used by the network view are needed.
   function entitySnapshot(entity) {
-    const components = ctx.components.snapshot(entity.id);
-    const transform = components.Transform ?? null;
-    const health = components.Health ?? null;
-    const armor = components.Armor ?? null;
+    const transform = ctx.components.get(entity.id, "Transform") ?? null;
+    const health = ctx.components.get(entity.id, "Health") ?? null;
+    const armor = ctx.components.get(entity.id, "Armor") ?? null;
     const armorDescription = armorService?.describe(entity.id) ?? null;
-    const inventory = components.Weapons ?? null;
+    const inventory = ctx.components.get(entity.id, "Weapons") ?? null;
     const selected = inventory?.items?.[inventory.selected] ?? null;
     const position = {
       x: transform?.x ?? 0,
@@ -274,12 +276,12 @@ export async function setup(ctx) {
     const semanticPosition = drivenVehicle
       ? { x: drivenVehicle.x, y: 0, z: drivenVehicle.z }
       : position;
-    return {
+    const view = {
       id: entity.id,
       name: entity.name,
       bot: entity.bot,
       alive: entity.alive,
-      team: components.Team?.id ?? 0,
+      team: ctx.components.get(entity.id, "Team")?.id ?? 0,
       x: position.x,
       y: position.y,
       z: position.z,
@@ -302,6 +304,7 @@ export async function setup(ctx) {
       ammo: selected?.ammo ?? null,
       reserve: selected?.reserve ?? null,
     };
+    return view;
   }
 
   function mapSnapshot(listener = null) {
@@ -327,7 +330,7 @@ export async function setup(ctx) {
       mode: "battle-royale",
       map: mapSnapshot(),
       match: battleRoyale.status(now),
-      entities: entities.all().map(entitySnapshot),
+      entities: entities.all().map(entity => entitySnapshot(entity, now)),
     };
   }
 
@@ -341,14 +344,14 @@ export async function setup(ctx) {
     const visible = [];
     for (const entity of entities.all()) {
       if (entity.id === playerId || entity.id === spectatorTarget?.id) {
-        visible.push(entitySnapshot(entity));
+        visible.push(entitySnapshot(entity, now));
         continue;
       }
       if (!listenerTransform) continue;
       const transform = ctx.components.get(entity.id, "Transform");
       if (!transform) continue;
       const radius = entity.alive ? ENTITY_INTEREST_RADIUS : 30;
-      if (distance2(listenerTransform, transform) <= radius) visible.push(entitySnapshot(entity));
+      if (distance2(listenerTransform, transform) <= radius) visible.push(entitySnapshot(entity, now));
     }
     const tutorialState = tutorial?.describe?.(playerId) ?? null;
     return {
