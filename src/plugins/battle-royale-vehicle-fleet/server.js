@@ -485,6 +485,40 @@ export async function setup(ctx) {
     return result;
   }
 
+  // The traffic AI reads movement and occupancy, never wheel telemetry,
+  // suspension forces or audio tuning. Build those exact fields directly
+  // from the same live Rapier state instead of polling 4 wheels x 76 cars.
+  function trafficSnapshot() {
+    const result = originalSnapshot().map(enrichPrimary).filter(Boolean);
+    for (const entry of extras.values()) {
+      const body = bodyState(entry);
+      if (!body) continue;
+      const speed = speedMetersPerSecond(entry, body);
+      const forward = forwardVector(body.rotation);
+      result.push({
+        id: entry.id,
+        kind: entry.tuning.kind,
+        x: body.x, y: body.y, z: body.z,
+        angle: headingFromRotation(body.rotation),
+        linvel: body.linvel,
+        speed,
+        forwardSpeed: body.linvel.x * forward.x
+          + body.linvel.y * forward.y + body.linvel.z * forward.z,
+        driverId: entry.driverId,
+        occupied: Boolean(entry.driverId),
+      });
+    }
+    return result;
+  }
+
+  function fleetCount() {
+    let count = physics.dynamicBody(primaryId) ? 1 : 0;
+    for (const entry of extras.values()) {
+      if (physics.dynamicBody(entry.id)) count += 1;
+    }
+    return count;
+  }
+
   function snapshot() {
     const primary = originalSnapshot().map(enrichPrimary).filter(Boolean);
     const additional = [...extras.values()].map(extraState).filter(Boolean);
@@ -1155,6 +1189,8 @@ export async function setup(ctx) {
     stateFor,
     vehicleForDriver,
     snapshot,
+    trafficSnapshot,
+    fleetCount,
     networkSnapshot,
     summary,
     assertFleet,

@@ -169,7 +169,7 @@ export async function setup(ctx) {
 
   function driverLimit() {
     const liveBots = bots.all().filter(bot => bot.alive).length;
-    const fleetCapacity = Math.max(0, vehicles.snapshot().length - BOT_RESERVED_VEHICLES);
+    const fleetCapacity = Math.max(0, (vehicles.fleetCount?.() ?? vehicles.snapshot().length) - BOT_RESERVED_VEHICLES);
     return Math.min(fleetCapacity, Math.ceil(liveBots * BOT_DRIVER_SHARE));
   }
 
@@ -1252,7 +1252,7 @@ export async function setup(ctx) {
     if (drivingDue) samplePedestrianMotion(now);
     // Traffic is not only AI traffic. A human crawling along in front of a bot
     // must be followed like a real lead car instead of being mistaken for a wall.
-    const trafficCars = drivingDue ? vehicles.snapshot() : [];
+    const trafficCars = drivingDue ? (vehicles.trafficSnapshot?.() ?? vehicles.snapshot()) : [];
     for (const { id, state, controlDt } of due) {
       counters.controlUpdates++;
       if (state.phase === "approach") approach(id, state, now);
@@ -1440,7 +1440,7 @@ export async function setup(ctx) {
         active: states.size, driving, liveBots, drivingShare: liveBots ? driving / liveBots : 0,
         approaching: phaseCounts.approach ?? 0, approachStats, phaseCounts: { ...phaseCounts },
         uniqueAssigned: everAssigned.size, uniqueDrivers: everDrivers.size,
-        targetDrivers: driverLimit(), fleetSize: vehicles.snapshot().length,
+        targetDrivers: driverLimit(), fleetSize: vehicles.fleetCount?.() ?? vehicles.snapshot().length,
         recentFailures: structuredClone(recentFailures),
         recentCrashes: structuredClone(recentCrashes),
         vehicleCooldowns: [...vehicleCooldowns].map(([vehicleId, until]) => ({ vehicleId, until })),

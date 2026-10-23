@@ -66,3 +66,41 @@ WebSocket. Приветствие `welcome` содержит полный сни
 под предельной нагрузкой. Не уменьшайте физический тик и не пропускайте
 пространственные звуки ради увеличения этого числа без проверки игровых
 последствий.
+
+
+## CPU performance: one human, 95 bots, clustered vehicles
+
+Run `npm run profile:bot-car-pileup` on an isolated Linux clone to
+reproduce one human, 95 live bots, 35 real Rapier cars gathered at a single
+location, and up to 28 AI drivers. The fixture initially boards bots at
+their original car spawn points so nearby combat does not cancel the
+approach phase, then moves the real physical chassis into a deliberate
+traffic pileup. It measures game-step time, actual Rapier collision and
+query calls, and how many bots continue to drive. This is an intentionally
+extreme fixture, not an artificially simplified collision model or a
+production admin endpoint.
+
+`CPU_BASELINE_TRAFFIC=1 npm run profile:bot-car-pileup` forces the former
+full-vehicle-state path for an A/B comparison on the same build, without
+changing physics or the bot decisions.
+
+Optimization rules:
+- The warehouse doorway override does **not** need a visibility scan for
+  bots outside the warehouse; these bots cannot enter that override.
+- Battle-royale awareness orders candidates by the same exact score,
+  performs real Rapier sight tests, and stops only when enough visible
+  candidates have been obtained.
+- The raycast character broad-phase skips a collider only when a
+  conservative capsule-enclosing sphere mathematically cannot touch the
+  ray. Actual intersections still use the same Rapier collider cast.
+- Vehicle traffic AI uses exactly the same positions, velocities, angles,
+  speeds and driver occupancy as full snapshots; it no longer reads each
+  wheel's telemetry for all cars. Full vehicle snapshots and physical
+  wheel controllers remain intact.
+- Driver-limit counting reads existing chassis IDs directly instead of
+  producing full wheel states.
+
+Run `npm run check:bot-car-cpu` to compare the traffic fields and bot
+target priority/occlusion against the old complete implementations and
+verify broad-phase rejection against native Rapier intersections.
+Never interpret a single fast timing as guaranteed 20 Hz under all loads.

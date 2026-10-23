@@ -161,17 +161,20 @@ export async function setup(ctx) {
     const input = ctx.components.get(bot.id, "Input");
     if (!input) return;
 
+    // This override can only act at the warehouse door or eastern wall.
+    // Avoid 95 bots performing full Rapier sight tests across the whole
+    // map for a branch that cannot modify their input.
+    const doorDistance = distance2(transform, door);
+    const atDoor = doorDistance <= WAREHOUSE_DOOR_COMBAT_RADIUS;
+    const atWall = nearEastWall(transform);
+    if (!atDoor && !atWall) return;
+
     const visible = perception.visibleEnemies?.(bot.id, 28, { now, limit: 1 }) ?? [];
     const target = visible[0] ?? null;
     const threat = brain.threatFor?.(bot.id, now) ?? null;
     if (!target && !threat) return;
 
     const decision = brain.commitmentFor?.(bot.id) ?? null;
-    const doorDistance = distance2(transform, door);
-    const atDoor = doorDistance <= WAREHOUSE_DOOR_COMBAT_RADIUS;
-    const atWall = nearEastWall(transform);
-    if (!atDoor && !atWall) return;
-
     const evading = decision?.goal === "evade";
     if (atDoor) {
       counters.doorCombatFrames += 1;

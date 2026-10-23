@@ -92,7 +92,6 @@ export async function setup(ctx) {
       // Characters do not blind each other here; only real Rapier world geometry
       // blocks awareness. The larger vertical reach lets an exposed enemy on the
       // stairs be seen while concrete floors and walls still block the ray.
-      if (!worldLineOfSight(transform, entry.transform)) continue;
       candidates.push({
         entityId: enemy.id,
         entity: enemy,
@@ -102,8 +101,17 @@ export async function setup(ctx) {
       });
     }
 
+    // Sorting first is equivalent to filtering all visible candidates then
+    // sorting, but only the requested top-N require expensive Rapier casts.
+    // Failed LOS candidates are skipped and later candidates still checked.
     candidates.sort((a, b) => a.score - b.score || a.distance - b.distance);
-    return candidates.slice(0, requestedLimit);
+    const visible = [];
+    for (const candidate of candidates) {
+      if (!worldLineOfSight(transform, candidate.transform)) continue;
+      visible.push(candidate);
+      if (visible.length >= requestedLimit) break;
+    }
+    return visible;
   }
 
   perception.visibleEnemies = visibleEnemies;

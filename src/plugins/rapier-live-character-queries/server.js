@@ -1,3 +1,5 @@
+import { CHARACTER_HALF_HEIGHT, CHARACTER_RADIUS } from "../rapier-physics/server.js";
+
 export const manifest = {
   id: "rapier-live-character-queries",
   version: "1.0.0",
@@ -48,6 +50,26 @@ export async function setup(ctx) {
     );
   }
 
+  // Character colliders are upright capsules (half-height at most 0.45 m,
+  // radius 0.32 m). The enclosing sphere cannot intersect a ray segment if
+  // its closest-point distance is greater than 0.77 m. Skip expensive native
+  // Collider.castRay calls in that case; the actual hit still uses Rapier.
+  // Include a generous epsilon for floating point and collider pose reads.
+  const MAX_CHARACTER_BOUND_SQUARED = (CHARACTER_HALF_HEIGHT + CHARACTER_RADIUS + 0.02) ** 2;
+
+  function capsuleCanIntersectRay(ray, maxDistance, collider) {
+    const center = collider.translation();
+    const dx = center.x - ray.origin.x;
+    const dy = center.y - ray.origin.y;
+    const dz = center.z - ray.origin.z;
+    const projection = dx * ray.dir.x + dy * ray.dir.y + dz * ray.dir.z;
+    const t = Math.max(0, Math.min(maxDistance, projection));
+    const x = dx - ray.dir.x * t;
+    const y = dy - ray.dir.y * t;
+    const z = dz - ray.dir.z * t;
+    return x * x + y * y + z * z <= MAX_CHARACTER_BOUND_SQUARED;
+  }
+
   function currentCharacterHit(ray, maxDistance, excludeEntityId = null) {
     let best = null;
     const maximum = Math.max(0, Number(maxDistance) || 0);
@@ -56,6 +78,7 @@ export async function setup(ctx) {
       try {
         if (typeof collider.isValid === "function" && !collider.isValid()) continue;
         if (typeof collider.isEnabled === "function" && !collider.isEnabled()) continue;
+        if (!capsuleCanIntersectRay(ray, maximum, collider)) continue;
         const distance = Number(collider.castRay(ray, maximum, true));
         if (!Number.isFinite(distance) || distance < 0 || distance > maximum) continue;
         if (best && distance >= best.distance) continue;
