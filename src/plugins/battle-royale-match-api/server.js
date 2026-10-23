@@ -260,7 +260,23 @@ export async function setup(ctx) {
   // Snapshot is read-only. Using ComponentRegistry.snapshot() here would
   // structuredClone *every* component, for every visible entity, for
   // every recipient. Only the fields used by the network view are needed.
+  // A network broadcast observes one synchronous, unchanging world frame.
+  // Share base entity descriptions across listeners inside that frame only.
+  // Direct Engine Control queries and normal snapshots never use this cache.
+  let networkFrameEntities = null;
+  function withSnapshotBatch(callback) {
+    const previous = networkFrameEntities;
+    networkFrameEntities = new Map();
+    try {
+      return callback();
+    } finally {
+      networkFrameEntities = previous;
+    }
+  }
+
   function entitySnapshot(entity) {
+    const cached = networkFrameEntities?.get(entity.id);
+    if (cached) return { ...cached };
     const transform = ctx.components.get(entity.id, "Transform") ?? null;
     const health = ctx.components.get(entity.id, "Health") ?? null;
     const armor = ctx.components.get(entity.id, "Armor") ?? null;
@@ -304,6 +320,7 @@ export async function setup(ctx) {
       ammo: selected?.ammo ?? null,
       reserve: selected?.reserve ?? null,
     };
+    if (networkFrameEntities) networkFrameEntities.set(entity.id, view);
     return view;
   }
 
@@ -421,6 +438,7 @@ export async function setup(ctx) {
   }
 
   ctx.services.provide("match-api", {
+    withSnapshotBatch,
     mode: "battle-royale",
     snapshotIntervalMs: SNAPSHOT_INTERVAL_MS,
     connectHuman,

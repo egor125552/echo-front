@@ -575,49 +575,76 @@ export class MatchRoom extends DurableObject {
     // This allows the lossless patcher to reuse entity deltas for 50+ viewers.
     const sharedEntities = new Map();
     const deltaMemo = new WeakMap();
-    for (const socket of this.ctx.getWebSockets()) {
-      try {
-        const playerId = socket.deserializeAttachment()?.playerId;
-        const snapshot = this.game.api.snapshotFor(playerId, now);
-        if (Array.isArray(snapshot.entities)) {
-          snapshot.entities = snapshot.entities.map(entity => {
-            if (!entity || typeof entity.id !== "string") return entity;
-            const json = JSON.stringify(entity);
-            const entry = sharedEntities.get(entity.id);
-            if (entry?.json === json) return entry.entity;
-            sharedEntities.set(entity.id, { json, entity });
-            return entity;
-          });
+    const fleet = this.game.host.services.has("vehicles")
+      ? this.game.host.services.get("vehicles") : null;
+    const originalFleetSnapshot = typeof fleet?.snapshot === "function" ? fleet.snapshot : null;
+    let cachedFleetSnapshot;
+    if (originalFleetSnapshot) {
+      // Network snapshots are built synchronously from one unchanged world.
+      // Cache the full vehicle fleet for this broadcast ONLY. Game simulation,
+      // collision, AI and interactions still read fresh vehicle state.
+      fleet.snapshot = (...args) => {
+        if (args.length) return originalFleetSnapshot.apply(fleet, args);
+        if (cachedFleetSnapshot === undefined) {
+          cachedFleetSnapshot = originalFleetSnapshot.call(fleet);
         }
-        const attachment = socket.deserializeAttachment();
-        let message;
-        if (attachment?.snapshotProtocol === "delta-v1") {
-          const previous = this.snapshotStreams.get(socket);
-          const encoded = encodeSnapshotMessage(
-            snapshot, previous?.previous, previous?.sequence ?? 0, previous?.fullSize ?? 0,
-            deltaMemo,
-          );
-          this.snapshotStreams.set(socket, {
-            previous: encoded.next, sequence: encoded.sequence, fullSize: encoded.fullSize,
-          });
-          message = encoded.message;
-        } else {
-          message = JSON.stringify({ type: "snapshot", snapshot });
+        return cachedFleetSnapshot;
+      };
+    }
+    try {
+      const sendSnapshots = () => {
+        for (const socket of this.ctx.getWebSockets()) {
+          try {
+            const playerId = socket.deserializeAttachment()?.playerId;
+            const snapshot = this.game.api.snapshotFor(playerId, now);
+            if (Array.isArray(snapshot.entities)) {
+              snapshot.entities = snapshot.entities.map(entity => {
+                if (!entity || typeof entity.id !== "string") return entity;
+                const json = JSON.stringify(entity);
+                const entry = sharedEntities.get(entity.id);
+                if (entry?.json === json) return entry.entity;
+                sharedEntities.set(entity.id, { json, entity });
+                return entity;
+              });
+            }
+            const attachment = socket.deserializeAttachment();
+            let message;
+            if (attachment?.snapshotProtocol === "delta-v1") {
+              const previous = this.snapshotStreams.get(socket);
+              const encoded = encodeSnapshotMessage(
+                snapshot, previous?.previous, previous?.sequence ?? 0, previous?.fullSize ?? 0,
+                deltaMemo,
+              );
+              this.snapshotStreams.set(socket, {
+                previous: encoded.next, sequence: encoded.sequence, fullSize: encoded.fullSize,
+              });
+              message = encoded.message;
+            } else {
+              message = JSON.stringify({ type: "snapshot", snapshot });
+            }
+            socket.send(message);
+            if (performanceSample) {
+              performanceSample.snapshotsSent += 1;
+              performanceSample.snapshotCharacters += message.length;
+            }
+          } catch (error) {
+            let playerId = null;
+            try { playerId = socket.deserializeAttachment()?.playerId ?? null; } catch {}
+            this.reportRuntimeError(error, {
+              phase: "personal-snapshot",
+              mode: this.mode,
+              playerId,
+            }, socket);
+          }
         }
-        socket.send(message);
-        if (performanceSample) {
-          performanceSample.snapshotsSent += 1;
-          performanceSample.snapshotCharacters += message.length;
-        }
-      } catch (error) {
-        let playerId = null;
-        try { playerId = socket.deserializeAttachment()?.playerId ?? null; } catch {}
-        this.reportRuntimeError(error, {
-          phase: "personal-snapshot",
-          mode: this.mode,
-          playerId,
-        }, socket);
+      };
+      if (typeof this.game.api.withSnapshotBatch === "function") {
+        this.game.api.withSnapshotBatch(sendSnapshots);
+      } else {
+        sendSnapshots();
       }
+    } finally {
+      if (originalFleetSnapshot) fleet.snapshot = originalFleetSnapshot;
     }
   }
 }

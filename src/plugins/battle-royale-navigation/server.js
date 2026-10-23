@@ -199,8 +199,7 @@ export async function setup(ctx) {
     return ctx.components.get(playerId, "Transform") ?? null;
   }
 
-  function zoneRisk(target, now = Date.now()) {
-    const zone = battleRoyale.status?.(now)?.zone ?? null;
+  function zoneRisk(target, zone) {
     if (!zone || !Number.isFinite(Number(zone.radius))) return false;
     return Math.hypot(
       finite(target?.position?.x) - finite(zone.x),
@@ -266,6 +265,10 @@ export async function setup(ctx) {
       }
     }
 
+    // Every target in the same list uses the same zone. Computing the
+    // battle-royale status per target caused hundreds of redundant full
+    // alive-player scans for every client navigation snapshot.
+    const zone = battleRoyale.status?.()?.zone ?? null;
     for (const target of targets) {
       if (driving && target.kind === "building") {
         const footPosition = copyPoint(target.position);
@@ -281,7 +284,7 @@ export async function setup(ctx) {
         }
       }
       target.distance = transform ? distance3(transform, target.position) : Infinity;
-      target.outsideSafeZone = zoneRisk(target);
+      target.outsideSafeZone = zoneRisk(target, zone);
     }
 
     const currentVehicleId = vehicles.vehicleForDriver?.(playerId)?.id ?? null;

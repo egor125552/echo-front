@@ -11,7 +11,7 @@
     "check:space-parachute": "node scripts/check-space-parachute-input.mjs",
     "test": "npm run check:network-snapshot && npm run check:input-wrappers && npm run check:physical-input && npm run check:space-parachute && npm run check:engine-lab-tutorial",
     "check:engine-lab-tutorial": "node scripts/check-engine-lab-tutorial-first-early-loot.mjs && node scripts/check-engine-lab-tutorial-early-loot.mjs && node scripts/check-engine-lab-tutorial-navigation.mjs && node scripts/check-engine-lab-tutorial-loot.mjs && node scripts/check-engine-lab-tutorial-stolen-crate.mjs && node scripts/check-engine-lab-tutorial-second-stolen-crate.mjs && node scripts/check-engine-lab-tutorial-route-cancel.mjs && node scripts/check-engine-lab-tutorial-route-replacement.mjs && node scripts/check-engine-lab-tutorial-stale-arrival.mjs && node scripts/check-engine-lab-tutorial-demo-bot-survival.mjs && node scripts/check-engine-lab-tutorial-bot-isolation.mjs",
-    "check:network-snapshot": "node scripts/check-snapshot-delta-codec.mjs",
+    "check:network-snapshot": "node scripts/check-snapshot-delta-codec.mjs && node scripts/check-snapshot-batch.mjs",
     "check:input-wrappers": "node scripts/check-input-wrapper-impulses.mjs",
     "check:physical-input": "node --test scripts/check-physical-input-client-pipeline.mjs"
   },
