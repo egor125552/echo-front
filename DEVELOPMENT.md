@@ -104,3 +104,36 @@ Run `npm run check:bot-car-cpu` to compare the traffic fields and bot
 target priority/occlusion against the old complete implementations and
 verify broad-phase rejection against native Rapier intersections.
 Never interpret a single fast timing as guaranteed 20 Hz under all loads.
+
+## Cloudflare Engine Lab car-pileup load test
+
+Engine Lab now supports `scenario.pileup` for isolated, authenticated Battle
+Royale rooms. It uses the **real** game engine and Rapier world. It connects
+one human (leaving 95 bots), assigns 28 bots to cars, simulates their entry
+(typically 27 actual drivers), then clusters 35 of 76 real car chassis.
+`scenario.pileup-summary` reports live nearby chassis, current bot drivers,
+traffic events and release reasons after each experiment.
+
+Call `scenario.create`, `scenario.pileup` with `oldTraffic: false` or `true`,
+`scenario.start`, `scenario.advance` in chunks, and finally
+`scenario.pileup-summary`. The `oldTraffic: true` A/B branch disables *only*
+the two car-traffic CPU optimizations in that test room. Physics frequency,
+Rapier collision shapes, driver AI and live wheel controllers remain the same.
+`scenario.pileup` rejects non-Battle-Royale modes and rooms whose scenario
+has already started. The existing `/api/engine-lab` token gate and isolated
+Durable Object room selection still apply. Do not enable the lab without its
+strong private token, and do not use the public game room for stress testing.
+
+Run `npm run check:engine-lab-car-pileup` to verify both test variants locally.
+For actual Cloudflare measurements, use a dedicated Worker deployment with
+`ENGINE_LAB_TOKEN` configured privately, then run:
+
+`node scripts/cloud-pileup-engine-lab.mjs https://YOUR-LAB.workers.dev /path/to/private-token-file 30`
+
+Every round performs 10 game steps at the existing 50 ms simulation delta.
+The script alternates cases and reports observed vehicle counts, driver
+release reasons, failures, and end-to-end request time. For actual CPU time
+on Cloudflare, inspect Durable Object invocation `cpuTime` through Wrangler
+real-time logs or Workers observability; network response time is **not**
+a substitute for CPU time and Worker JS wall-clock timers are frozen during
+synchronous execution.

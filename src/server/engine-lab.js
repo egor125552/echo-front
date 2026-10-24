@@ -228,6 +228,77 @@ export class EngineLab {
     };
   }
 
+  preparePileup({ oldTraffic = false } = {}) {
+    if (this.phase !== "preparing" || this.mode !== "battle-royale") {
+      throw new Error("Pileup preparation requires an unstarted Battle Royale Engine Lab");
+    }
+    const services = this.game.host.services, components = this.game.host.components;
+    const entities = services.get("entities");
+    const physics = services.get("physics");
+    const vehicles = services.get("vehicles");
+    const botVehicles = services.get("bot-vehicles");
+    const movement = services.get("movement");
+    const human = "cloud-pileup-human";
+    const now0 = Date.now();
+    this.game.api.connectHuman(human);
+    const bots = entities.all().filter(entity => entity.bot);
+    if (bots.length !== 95) throw new Error("Expected exactly 95 bots, found " + bots.length);
+    const fleet = vehicles.snapshot();
+    if (fleet.length < 35) throw new Error("Expected 35 actual vehicles");
+    const selected = fleet.slice(0, 35);
+    let assigned = 0;
+    for (const [index, car] of selected.slice(0, 28).entries()) {
+      const bot = bots[index];
+      const parachute = components.get(bot.id, "Parachute");
+      if (parachute) Object.assign(parachute, { phase: "landed", airborne: false });
+      movement.teleport(bot.id, { x: car.x + 2.1, y: 0, z: car.z + 1.5 });
+      if (botVehicles.assign(bot.id, car.id, { x: 320, y: 0, z: 320 }, now0,
+        { maxDistance: 125 })) assigned++;
+    }
+    for (const bot of bots.slice(28)) {
+      const parachute = components.get(bot.id, "Parachute");
+      if (parachute) Object.assign(parachute, { phase: "landed", airborne: false });
+    }
+    const humanParachute = components.get(human, "Parachute");
+    if (humanParachute) Object.assign(humanParachute, { phase: "landed", airborne: false });
+    movement.teleport(human, { x: 160, y: 0, z: 160 });
+    this.game.host.events.emit("parachute:landed", { entityId: human, now: now0 });
+    this.game.api.step(.05, now0 + 50);
+    const driversAtStart = botVehicles.summary().driving;
+    const base = { x: -25, z: -15 };
+    for (const [index, car] of selected.entries()) {
+      physics.setDynamicBodyTranslation(car.id, {
+        x: base.x + (index % 7) * 3.55, y: 1.45,
+        z: base.z + Math.floor(index / 7) * 5.3,
+      });
+      physics.setDynamicBodyLinearVelocity(car.id, { x: 0, y: 0, z: 0 });
+    }
+    if (oldTraffic) {
+      delete vehicles.trafficSnapshot;
+      delete vehicles.fleetCount;
+    }
+    this.pileup = { oldTraffic: Boolean(oldTraffic), human, selectedIds: selected.map(c => c.id),
+      center: base, assigned, driversAtStart, fleetSize: fleet.length, bots: bots.length };
+    return this.pileupSummary();
+  }
+
+  pileupSummary() {
+    if (!this.pileup) throw new Error("Pileup was not prepared");
+    const { selectedIds, center, ...setup } = this.pileup;
+    const services = this.game.host.services;
+    const cars = services.get("vehicles");
+    const botDrivers = services.get("bot-vehicles").summary();
+    const states = selectedIds.map(id => cars.stateFor(id)).filter(Boolean);
+    return {
+      ...this.status(), setup, foundVehicles: states.length,
+      carsNear: states.filter(car => Math.hypot(car.x - center.x - 10, car.z - center.z - 10) < 45).length,
+      driversNow: botDrivers.driving, trafficYields: botDrivers.trafficYields,
+      controlUpdates: botDrivers.controlUpdates,
+      releaseReasons: botDrivers.releaseReasons,
+      botCarsActive: botDrivers.active,
+    };
+  }
+
   async prepare(commands) {
     if (this.phase !== "preparing") throw new Error("Scenario preparation is closed");
     if (!Array.isArray(commands) || commands.length > 24) throw new Error("Supply at most 24 commands");
@@ -786,6 +857,8 @@ export async function handleEngineLabRequest(room, request) {
         result = { ...lab.status(), subject: lab.captureEntity(entityId) };
         break;
       }
+      case "scenario.pileup": result = lab.preparePileup(body); break;
+      case "scenario.pileup-summary": result = lab.pileupSummary(); break;
       case "scenario.prepare": result = await lab.prepare(body.commands); break;
       case "scenario.start": result = lab.start(); break;
       case "scenario.advance": result = await lab.advance(body); break;
