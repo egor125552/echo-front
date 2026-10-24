@@ -443,3 +443,37 @@ html[data-touch-mode="gestures"][data-game-active="true"] #accessible-game-menu:
 }
 #touch-control-mode { min-height: 3rem; width: 100%; font: inherit; }
 #quick-speech-test { margin-top: 0.7rem; }
+
+
+/* Game menus must be visible and actionable on every phone control mode. */
+#accessible-game-menu:not([hidden]) {
+  display: block;
+  position: fixed;
+  z-index: 50;
+  inset: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  margin: 0;
+  padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-radius: 0;
+  background: #101820;
+}
+#accessible-game-menu-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.7rem 0 1rem;
+}
+#accessible-game-menu-list li {
+  margin: 0.45rem 0;
+}
+#accessible-game-menu-list button {
+  width: 100%;
+}
+#accessible-game-menu-resume {
+  background: #8fd3ff;
+  color: #061018;
+}

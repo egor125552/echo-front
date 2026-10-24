@@ -46,8 +46,9 @@ function createMenuUi() {
   section.setAttribute("aria-labelledby", "accessible-game-menu-title");
   section.innerHTML = `
     <h2 id="accessible-game-menu-title">Меню</h2>
-    <p id="accessible-game-menu-help">Стрелки вверх и вниз — выбрать пункт. Enter — открыть или подтвердить. Escape — назад.</p>
-    <ul id="accessible-game-menu-list" role="listbox"></ul>
+    <p id="accessible-game-menu-help">Каждый пункт меню — кнопка. Можно нажать пальцем или двойным касанием VoiceOver. Стрелки вверх и вниз выбирают пункт, Enter подтверждает, Escape возвращает назад. В режиме жестов проведите вправо по пустому месту меню, чтобы вернуться к игре.</p>
+    <button id="accessible-game-menu-resume" type="button">Вернуться в игру</button>
+    <ul id="accessible-game-menu-list"></ul>
     <p id="accessible-game-menu-status" role="status" aria-live="assertive" aria-atomic="true"></p>
   `;
   document.body.append(section);
@@ -55,6 +56,7 @@ function createMenuUi() {
     section,
     title: section.querySelector("#accessible-game-menu-title"),
     list: section.querySelector("#accessible-game-menu-list"),
+    resume: section.querySelector("#accessible-game-menu-resume"),
     status: section.querySelector("#accessible-game-menu-status"),
   };
 }
@@ -104,6 +106,8 @@ export async function setup(ctx) {
   let previousPadButtons = new Map();
   let twoFingerTimer = null;
   let twoFingerStart = null;
+  let focusBeforeMenu = null;
+  let menuSwipeStart = null;
 
   function announce(text, { interrupt = true } = {}) {
     const value = String(text ?? "").trim();
@@ -135,13 +139,21 @@ export async function setup(ctx) {
     ui.list.replaceChildren();
     items.forEach((item, itemIndex) => {
       const li = document.createElement("li");
-      li.id = `accessible-menu-item-${itemIndex}`;
-      li.setAttribute("role", "option");
-      li.setAttribute("aria-selected", itemIndex === index ? "true" : "false");
-      li.textContent = item.label;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = item.label;
+      button.dataset.menuIndex = String(itemIndex);
+      button.addEventListener("focus", () => { index = itemIndex; });
+      button.addEventListener("click", () => {
+        index = itemIndex;
+        void item.action?.();
+      });
+      li.append(button);
       ui.list.append(li);
     });
-    ui.list.setAttribute("aria-activedescendant", items.length ? `accessible-menu-item-${index}` : "");
+    // Each menu entry is a native button, so both taps and VoiceOver activation
+    // execute the action rather than merely changing a listbox selection.
+    ui.list.querySelector(`[data-menu-index="${index}"]`)?.focus({ preventScroll: true });
     if (announceTitle) {
       announce(items.length ? `${screen.title}. ${itemSpeech()}` : `${screen.title}. Список пуст.`);
     } else if (items.length) {
@@ -153,12 +165,20 @@ export async function setup(ctx) {
     const next = Boolean(value);
     if (open === next) return;
     open = next;
+    if (open) focusBeforeMenu = document.activeElement;
     ui.section.hidden = !open;
+    const page = document.querySelector("main");
+    if (page) page.inert = open;
     if (open) {
       input.disable();
       ctx.events.emit("input:gamepad-turn", { turn: 0, reason: "menu-open" });
-    } else if (network.connected) {
-      input.enable();
+    } else {
+      if (network.connected) input.enable();
+      if (focusBeforeMenu?.isConnected && typeof focusBeforeMenu.focus === "function") {
+        try { focusBeforeMenu.focus({ preventScroll: true }); }
+        catch { focusBeforeMenu.focus(); }
+      }
+      focusBeforeMenu = null;
     }
     ctx.events.emit("ui:menu", { open, id: screen?.id ?? null });
   }
@@ -168,6 +188,7 @@ export async function setup(ctx) {
     screen = null;
     stack = [];
     index = 0;
+    menuSwipeStart = null;
     setModal(false);
     if (announceClose) announce("Меню закрыто.");
   }
@@ -224,7 +245,7 @@ export async function setup(ctx) {
     if (isRoomHost()) {
       items.push({ label: "Настройки комнаты", action: () => show(roomSettingsScreen(), { push: true }) });
     }
-    items.push({ label: "Продолжить игру", action: () => closeMenu() });
+    items.unshift({ label: "Продолжить игру", action: () => closeMenu() });
     return {
       id: "main",
       title: "Главное меню",
@@ -454,6 +475,28 @@ export async function setup(ctx) {
 
   mobile.menu?.addEventListener("click", () => open ? closeMenu() : openMain());
   mobile.map?.addEventListener("click", openMap);
+  ui.resume.addEventListener("click", closeMenu);
+
+  // A horizontal swipe on empty menu space also resumes fullscreen gesture play.
+  // Button/list interactions and the screen-reader's own gestures are left alone.
+  ui.section.addEventListener("touchstart", (event) => {
+    menuSwipeStart = null;
+    if (!open || document.documentElement.dataset.touchMode !== "gestures"
+      || event.touches.length !== 1 || event.target?.closest?.("button, a, input, select, textarea, summary")) return;
+    const touch = event.touches[0];
+    menuSwipeStart = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+  }, { passive: true });
+  ui.section.addEventListener("touchend", (event) => {
+    if (!menuSwipeStart || !open) return;
+    const touch = [...event.changedTouches].find(item => item.identifier === menuSwipeStart.id);
+    if (touch && touch.clientX - menuSwipeStart.x >= 90
+      && Math.abs(touch.clientY - menuSwipeStart.y) <= 65) {
+      event.preventDefault();
+      closeMenu();
+    }
+    menuSwipeStart = null;
+  }, { passive: false });
+  ui.section.addEventListener("touchcancel", () => { menuSwipeStart = null; }, { passive: true });
 
   function padButton(gamepad, buttonIndex) {
     return Boolean(gamepad?.buttons?.[buttonIndex]?.pressed || (Number(gamepad?.buttons?.[buttonIndex]?.value) || 0) >= 0.5);
