@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Echo Front</title>
   <link rel="stylesheet" href="/styles.css">
 </head>
@@ -19,6 +19,7 @@
         <button id="play-button" type="button">Командный бой</button>
         <button id="battle-royale-button" type="button">Королевская битва</button>
       </div>
+      <button id="quick-speech-test" type="button" class="secondary-action">Проверить звук и голос</button>
     </header>
 
     <section id="game-panel" class="game-panel" aria-labelledby="game-title" hidden>
@@ -26,33 +27,18 @@
         <h2 id="game-title">Матч</h2>
         <p id="connection-status" class="connection-status" role="status">Подготовка</p>
       </div>
+      <div id="gesture-stage" class="gesture-stage" aria-hidden="true" hidden></div>
+      <div id="gesture-toolbar" class="gesture-toolbar" role="group" aria-label="Быстрые действия в режиме жестов" hidden>
+        <button type="button" id="gesture-main-menu">Меню</button>
+        <button type="button" id="gesture-map">Карта</button>
+        <button type="button" id="gesture-buttons-mode">Кнопки</button>
+        <button type="button" id="gesture-speech-test">Звук</button>
+      </div>
       <p id="tutorial-status" class="tutorial-status" role="status" aria-live="assertive" aria-atomic="true" hidden></p>
-
-      <dl class="hud hud-primary" aria-label="Основные показатели">
-        <div><dt>Режим</dt><dd id="mode-value">-</dd></div>
-        <div><dt>Локация</dt><dd id="location-value">-</dd></div>
-        <div><dt>Оружие</dt><dd id="weapon-value">-</dd></div>
-        <div><dt>Патроны</dt><dd id="ammo-value">-</dd></div>
-        <div><dt>Здоровье</dt><dd id="health-value">-</dd></div>
-        <div><dt>Броня</dt><dd id="armor-value">-</dd></div>
-      </dl>
-
-      <details id="match-details" class="inline-details">
-        <summary>Подробности матча</summary>
-        <dl class="hud hud-secondary">
-          <div><dt>Команда</dt><dd id="team-value">-</dd></div>
-          <div><dt>Счёт</dt><dd id="score-value">-</dd></div>
-          <div><dt>Осталось игроков</dt><dd id="remaining-value">-</dd></div>
-          <div><dt>Безопасная зона</dt><dd id="zone-value">-</dd></div>
-          <div><dt>Место</dt><dd id="placement-value">-</dd></div>
-          <div><dt>Наблюдение</dt><dd id="spectator-value">нет</dd></div>
-          <div><dt>Состояние</dt><dd id="injury-value">-</dd></div>
-          <div><dt>Стимуляторы</dt><dd id="stimulants-value">-</dd></div>
-        </dl>
-      </details>
 
       <div id="touch-controls" class="touch-controls" aria-labelledby="touch-controls-title">
         <h3 id="touch-controls-title">Сенсорное управление</h3>
+        <button id="touch-switch-to-gestures" type="button">Переключиться на жесты на весь экран</button>
         <p class="touch-help">С VoiceOver двойное касание включает или выключает направление. Кнопка Стоп прекращает движение. Для маршрута откройте Карту и активируйте цель: маршрут включится сразу.</p>
         <div class="touch-grid" role="group" aria-label="Движение">
           <button class="touch-forward" type="button" data-touch-control="forward" aria-pressed="false">Вперёд</button>
@@ -80,18 +66,49 @@
           <button type="button" data-touch-action="weapon-next">Следующее оружие</button>
         </div>
       </div>
+
+      <dl class="hud hud-primary" aria-label="Основные показатели">
+        <div><dt>Режим</dt><dd id="mode-value">-</dd></div>
+        <div><dt>Локация</dt><dd id="location-value">-</dd></div>
+        <div><dt>Оружие</dt><dd id="weapon-value">-</dd></div>
+        <div><dt>Патроны</dt><dd id="ammo-value">-</dd></div>
+        <div><dt>Здоровье</dt><dd id="health-value">-</dd></div>
+        <div><dt>Броня</dt><dd id="armor-value">-</dd></div>
+      </dl>
+
+      <details id="match-details" class="inline-details">
+        <summary>Подробности матча</summary>
+        <dl class="hud hud-secondary">
+          <div><dt>Команда</dt><dd id="team-value">-</dd></div>
+          <div><dt>Счёт</dt><dd id="score-value">-</dd></div>
+          <div><dt>Осталось игроков</dt><dd id="remaining-value">-</dd></div>
+          <div><dt>Безопасная зона</dt><dd id="zone-value">-</dd></div>
+          <div><dt>Место</dt><dd id="placement-value">-</dd></div>
+          <div><dt>Наблюдение</dt><dd id="spectator-value">нет</dd></div>
+          <div><dt>Состояние</dt><dd id="injury-value">-</dd></div>
+          <div><dt>Стимуляторы</dt><dd id="stimulants-value">-</dd></div>
+        </dl>
+      </details>
+
     </section>
 
     <details id="settings-panel">
-      <summary>Настройки озвучки</summary>
+      <summary>Настройки звука и управления</summary>
       <div class="settings-grid">
+        <label class="setting-row" for="touch-control-mode"><span>Управление на iPhone</span>
+          <select id="touch-control-mode">
+            <option value="buttons">Кнопки (рекомендуется для VoiceOver)</option>
+            <option value="gestures">Жесты на весь экран</option>
+          </select>
+        </label>
+        <p id="touch-mode-status" role="status" aria-live="polite"></p>
         <label class="setting-row"><span>Игровая озвучка</span><input id="speech-enabled" type="checkbox" checked></label>
         <label class="setting-row setting-range" for="speech-rate">
           <span>Скорость речи</span>
           <input id="speech-rate" type="range" min="0.7" max="2.5" step="0.1" value="1.7">
           <output id="speech-rate-value" for="speech-rate">1.7×</output>
         </label>
-        <button id="speech-test" type="button">Проверить озвучку</button>
+        <button id="speech-test" type="button">Проверить игровой голос</button>
       </div>
     </details>
     <p id="speech-status" role="status" aria-live="assertive" aria-atomic="true"></p>

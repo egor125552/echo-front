@@ -369,19 +369,20 @@ export async function setup(ctx) {
       return startRequest(spokenText, rateOverride, requestGeneration);
     }
 
+    const previouslyBusy = busy();
     const requestGeneration = ++generation;
     clearTimers();
     activeUtterance = null;
-    try { synth.cancel(); } catch {}
+    // An unconditional cancel() on a cold Safari synthesizer followed by an
+    // invisible primer could consume the one actual gesture without speaking.
+    // The real first utterance must be submitted synchronously from the click.
+    if (previouslyBusy) {
+      try { synth.cancel(); } catch {}
+    }
     try { synth.resume?.(); } catch {}
-
-    // On iOS/WebKit the first speak must be tied to a real user gesture.
-    // Starting immediately here preserves that gesture instead of losing it in setTimeout.
-    if (userGestureActive()) {
-      primeFromGesture("say");
+    if (!previouslyBusy || userGestureActive()) {
       return startRequest(spokenText, rateOverride, requestGeneration);
     }
-
     pendingRestart = setTimeout(() => {
       pendingRestart = null;
       startRequest(spokenText, rateOverride, requestGeneration);
@@ -399,12 +400,11 @@ export async function setup(ctx) {
     enabled = Boolean(enabledInput.checked);
     localStorage.setItem(ENABLED_KEY, String(enabled));
     if (!enabled) stop();
-    else if (userGestureActive()) primeFromGesture("enabled");
+    else say("Игровая озвучка включена", { interrupt: true });
     syncUi();
   });
 
   testButton?.addEventListener("click", () => {
-    primeFromGesture("test-button");
     say("Проверка игровой озвучки. Скорость речи настроена.", { interrupt: true });
   });
 
@@ -418,13 +418,6 @@ export async function setup(ctx) {
     setTimeout(() => refreshVoices(`timer-${delay}`), delay);
   }
 
-  const prime = (reason) => {
-    if (userGestureActive()) primeFromGesture(reason);
-  };
-  window.addEventListener("pointerdown", () => prime("pointerdown"), { capture: true, passive: true });
-  window.addEventListener("touchstart", () => prime("touchstart"), { capture: true, passive: true });
-  window.addEventListener("keydown", () => prime("keydown"), { capture: true });
-  window.addEventListener("click", () => prime("click"), { capture: true, passive: true });
   window.addEventListener("pageshow", () => refreshVoices("pageshow"));
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") refreshVoices("visible");

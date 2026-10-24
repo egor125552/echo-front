@@ -310,16 +310,21 @@ async function start(mode, { tutorial = false } = {}) {
   connection.textContent = "Подготовка";
   if (modeValue) modeValue.textContent = modeLabel;
   gamePanel.hidden = false;
+  document.documentElement.dataset.gameActive = "true";
+  document.querySelector("#gesture-stage").hidden = false;
+  document.querySelector("#gesture-toolbar").hidden = false;
 
   try {
     const speech = host.services.get("speech");
-    speech?.prime?.("game-start");
-    await host.services.get("audio").resume();
-
+    // Safari grants speech playback only within a real user action. Speak before
+    // the first await, or the original click can lose its WebKit activation.
     const loadingText = "Загрузка звуков, пожалуйста подождите";
     if (startupStatus) startupStatus.textContent = loadingText;
-    connection.textContent = loadingText;
+    // Begin both WebAudio and speech under this same synchronous button click.
+    const audioResume = host.services.get("audio").resume();
     speech?.say?.(loadingText, { interrupt: true });
+    await audioResume;
+    connection.textContent = loadingText;
 
     await host.services.get("sound-pack").warmEssential();
 
@@ -340,6 +345,42 @@ async function start(mode, { tutorial = false } = {}) {
     setButtonsDisabled(false);
   }
 }
+
+async function checkAudioFromClick() {
+  // Both starts happen synchronously under the button's user activation.
+  const audio = host.services.get("audio");
+  const speech = host.services.get("speech");
+  if (startupStatus) startupStatus.textContent = "Проверка звука и голоса";
+  let resumed;
+  try { resumed = audio.resume(); } catch (error) { resumed = Promise.reject(error); }
+  if (!speech.enabled && startupStatus) startupStatus.textContent = "Игровая речь выключена в настройках; проверяю звуковые эффекты";
+  speech.say("Звук включён. Проверка игровой озвучки.", { interrupt: true });
+  try {
+    await resumed;
+    await audio.playCentered("/assets/audio/core/pistol-shot.mp3", {
+      gain: 0.6, channel: "audio-test", replace: true,
+    });
+    if (startupStatus) startupStatus.textContent = "Тестовый звук отправлен на воспроизведение";
+  } catch (error) {
+    reportError("Не удалось воспроизвести тестовый звук", error, { phase: "audio-test" });
+  }
+}
+
+document.querySelector("#quick-speech-test")?.addEventListener("click", () => { void checkAudioFromClick(); });
+document.querySelector("#gesture-speech-test")?.addEventListener("click", () => { void checkAudioFromClick(); });
+document.querySelector("#gesture-main-menu")?.addEventListener("click", () => {
+  document.querySelector('[data-accessible-menu="main"]')?.click();
+});
+document.querySelector("#gesture-map")?.addEventListener("click", () => {
+  document.querySelector('[data-accessible-menu="map"]')?.click();
+});
+document.querySelector("#touch-switch-to-gestures")?.addEventListener("click", () => {
+  host.services.get("touch-control-settings").setMode("gestures");
+});
+document.querySelector("#gesture-buttons-mode")?.addEventListener("click", () => {
+  host.services.get("touch-control-settings").setMode("buttons");
+  document.querySelector("#touch-control-mode")?.focus();
+});
 
 tutorialButton?.addEventListener("click", () => start("tdm", { tutorial: true }));
 playButton?.addEventListener("click", () => start("tdm"));
@@ -364,6 +405,9 @@ host.events.on("tutorial:battle-royale-section-complete", () => {
     tutorialStatus.textContent = "";
   }
   if (gamePanel) gamePanel.hidden = true;
+  document.documentElement.dataset.gameActive = "false";
+  document.querySelector("#gesture-stage").hidden = true;
+  document.querySelector("#gesture-toolbar").hidden = true;
 });
 
 host.events.on("network:server-error", ({ error, room, mode, endpoint } = {}) => {

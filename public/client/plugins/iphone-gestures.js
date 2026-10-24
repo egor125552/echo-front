@@ -1,6 +1,6 @@
 export const manifest = {
   id: "iphone-gestures",
-  requires: ["keyboard-input"],
+  requires: ["keyboard-input", "touch-control-settings"],
 };
 
 // Match the proven Archipelago feel: a short drag walks and a long drag runs.
@@ -22,6 +22,7 @@ function interactiveTarget(target) {
 
 export async function setup(ctx) {
   const input = ctx.services.get("input");
+  const controlSettings = ctx.services.get("touch-control-settings");
   const panel = document.getElementById("game-panel");
   if (!panel) return;
 
@@ -39,7 +40,8 @@ export async function setup(ctx) {
   let pendingTap = null;
 
   function gameActive() {
-    return !panel.hidden;
+    return !panel.hidden && controlSettings.mode === "gestures"
+      && document.getElementById("accessible-game-menu")?.hidden !== false;
   }
 
   function prevent(event) {
@@ -280,6 +282,8 @@ export async function setup(ctx) {
     multiTouchUsed = false;
   }
 
+  ctx.events.on("touch-control:mode-changed", reset);
+  ctx.events.on("ui:menu", ({ open } = {}) => { if (open) reset(); });
   window.addEventListener("blur", reset);
   window.addEventListener("pagehide", reset);
   document.addEventListener("visibilitychange", () => {

@@ -63,7 +63,7 @@ function createMobileButtons() {
   const controls = document.querySelector("#touch-controls");
   if (!controls) return {};
   const row = document.createElement("div");
-  row.className = "touch-actions";
+  row.className = "touch-actions touch-menu-actions";
   row.setAttribute("role", "group");
   row.setAttribute("aria-label", "Меню и карта");
   const menu = document.createElement("button");
@@ -506,7 +506,8 @@ export async function setup(ctx) {
   }
 
   document.addEventListener("touchstart", (event) => {
-    if (open || event.touches.length !== 2) return;
+    if (open || event.touches.length !== 2
+      || document.documentElement.dataset.touchMode !== "gestures") return;
     if (Array.from(event.touches).some((touch) => isTypingTarget(touch.target))) return;
     const points = Array.from(event.touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
     twoFingerStart = points;
