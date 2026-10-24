@@ -1,3 +1,8 @@
+export const manifest = {
+  id: "touch-control-settings",
+  requires: [],
+};
+
 export const TOUCH_MODE_KEY = "echo-front.touch-control-mode";
 export const DEFAULT_TOUCH_MODE = "buttons";
 

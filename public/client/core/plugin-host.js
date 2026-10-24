@@ -1,6 +1,11 @@
 import { EventBus } from "./event-bus.js";
 
 function sortPlugins(plugins) {
+  for (const [index, plugin] of plugins.entries()) {
+    if (!plugin?.manifest?.id || typeof plugin.manifest.id !== "string") {
+      throw new Error(`Invalid client plugin at index ${index}: missing manifest.id`);
+    }
+  }
   const byId = new Map(plugins.map((plugin) => [plugin.manifest.id, plugin]));
   if (byId.size !== plugins.length) throw new Error("Duplicate client plugin id");
   const done = new Set();
