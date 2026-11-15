@@ -44,11 +44,32 @@ export async function setup(ctx) {
   let worldSpawnCursor = 0;
   const worldWideSpawns = buildWorldWideSpawns(map.halfSize);
 
+  let lastSquadAnchor = null;
+
+  function squadSlot(serialNumber) {
+    const pairIndex = Math.floor((serialNumber - 1) / 2);
+    const colStride = pairIndex * 2;
+    const row = Math.floor(colStride / BOT_START_COLUMNS) % BOT_START_ROWS;
+    const col = (colStride + (row % 2)) % BOT_START_COLUMNS;
+    const anchor = worldWideSpawns[(row * BOT_START_COLUMNS + col) % worldWideSpawns.length];
+    if (serialNumber % 2 === 1) {
+      lastSquadAnchor = { ...anchor };
+      return { ...anchor };
+    }
+    const base = lastSquadAnchor ?? anchor;
+    return {
+      x: base.x + 14,
+      y: base.y,
+      z: base.z + 6,
+      angle: base.angle,
+    };
+  }
+
   function spawnBot(position = null) {
     serial += 1;
-    const team = serial;
+    const team = Math.ceil(serial / 2);
     const spec = loadouts.create(serial, team);
-    const spawn = position ?? { ...worldWideSpawns[worldSpawnCursor++ % worldWideSpawns.length] };
+    const spawn = position ?? squadSlot(serial);
     entities.spawn({ ...spec, position: spawn });
     return spec.id;
   }

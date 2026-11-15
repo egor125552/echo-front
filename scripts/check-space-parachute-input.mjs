@@ -86,3 +86,40 @@ test('Space on the ground remains a jump and does not deploy the parachute', () 
   assert.equal(parachute.stateFor(PLAYER)?.deployed, false);
   assert.equal(parachute.stateFor(PLAYER)?.phase, 'landed');
 }));
+
+test('Space after ejecting from a moving vehicle deploys the parachute mid-air even below 8m', () => scenario((game, services) => {
+  const movement = services.get('movement');
+  const parachute = services.get('parachute');
+  const ragdoll = services.get('ragdoll');
+  const vehicles = services.get('vehicles');
+  const physics = services.get('physics');
+  const flight = game.host.components.get(PLAYER, 'Parachute');
+
+  Object.assign(flight, { phase: 'landed', airborne: false, deployed: false });
+  const car = vehicles.snapshot()[0];
+  assert.ok(car, 'Expected a Battle Royale vehicle');
+  movement.teleport(PLAYER, { x: car.x, y: 0, z: car.z + 2.2 });
+
+  const now = Date.now();
+  assert.equal(vehicles.enter(PLAYER, now, car.id), true);
+  physics.setDynamicBodyLinearVelocity(car.id, { x: 22, y: 0, z: 0 });
+  game.api.step(0.05, now + 50);
+
+  // Jump out of the speeding car
+  game.api.handleInput(PLAYER, { interactPressed: true }, now + 60);
+  assert.equal(ragdoll.stateFor(PLAYER)?.reason, 'vehicle-eject');
+
+  // Step 150ms into the ejection arc (altitude is ~1.5-2.5m, well below old 8m limit)
+  game.api.step(0.05, now + 110);
+  game.api.step(0.05, now + 160);
+  game.api.step(0.05, now + 210);
+
+  // Press Space to deploy parachute while flying out of the car
+  game.api.handleInput(PLAYER, { parachutePressed: true }, now + 220);
+  assert.equal(ragdoll.isActive(PLAYER), false, 'Ragdoll must hand off to parachute on vehicle-eject Space press');
+  const chute = parachute.stateFor(PLAYER);
+  assert.equal(chute?.phase, 'deployed');
+  assert.equal(chute?.deployed, true);
+  assert.ok(chute?.glideSpeed > 1.5, 'Emergency vehicle-eject parachute must preserve forward glide momentum');
+}));
+

@@ -1,0 +1,5 @@
+{
+  "name": "Echo Front",
+  "description": "Сетевой пространственный аудиошутер с командным боем, королевской битвой и поддержкой VoiceOver.",
+  "requestFramePermissions": []
+}

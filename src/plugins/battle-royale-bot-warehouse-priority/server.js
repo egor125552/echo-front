@@ -1,11 +1,11 @@
 export const WAREHOUSE_NEAR_PRIORITY_RADIUS = 25;
-export const WAREHOUSE_NEAR_PRIORITY_CAP = 2;
-export const WAREHOUSE_NEAR_PRIORITY_VISIT_MS = 24_000;
+export const WAREHOUSE_NEAR_PRIORITY_CAP = 4;
+export const WAREHOUSE_NEAR_PRIORITY_VISIT_MS = 34_000;
 export const WAREHOUSE_NEAR_PRIORITY_REACHED = 2.5;
 
 export const manifest = {
   id: "battle-royale-bot-warehouse-priority",
-  version: "1.0.0",
+  version: "1.1.0",
   requires: ["battle-royale-bot-interest", "map-test-arena"],
   capabilities: ["services.consume", "services.provide", "events.on"],
 };
@@ -44,16 +44,21 @@ export async function setup(ctx) {
     return visits.size;
   }
 
-  function groundPoints(transform) {
-    return (interest.points ?? [])
-      .filter((point) => point?.group === map.building?.id && Math.abs(Number(point.y) || 0) < 0.2)
+  function warehousePoints(transform) {
+    const all = (interest.points ?? []).filter((point) => point?.group === map.building?.id);
+    const ground = all
+      .filter((point) => Math.abs(Number(point.y) || 0) < 0.2)
       .sort((a, b) => distance3(transform, a) - distance3(transform, b));
+    const upper = all
+      .filter((point) => Number(point.y) >= 1.5)
+      .sort((a, b) => distance3(transform, a) - distance3(transform, b));
+    return [...ground.slice(0, 2), ...upper.slice(0, 2), ...ground.slice(2)];
   }
 
   function beginVisit(botId, transform, now) {
     if (distanceToBuilding(transform, map.building) > WAREHOUSE_NEAR_PRIORITY_RADIUS) return null;
     if (activeCount(now) >= WAREHOUSE_NEAR_PRIORITY_CAP) return null;
-    const points = groundPoints(transform);
+    const points = warehousePoints(transform);
     if (!points.length) return null;
     const visit = {
       points: points.map((point) => ({ ...point })),
@@ -96,7 +101,7 @@ export async function setup(ctx) {
 
   interest.targetFor = function targetForWithNearWarehousePriority(botId, transform, now = Date.now()) {
     const base = originalTargetFor(botId, transform, now);
-    if (base?.kind === "sound-interest" || base?.kind === "poi-interest") {
+    if (base?.kind === "sound-interest") {
       visits.delete(botId);
       return base;
     }

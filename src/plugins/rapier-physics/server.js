@@ -398,6 +398,7 @@ async function createRapierPhysics() {
         { x: 0, y: 0, z: 0, w: 1 },
         shape,
         (collider) => {
+          if (isCharacterCollider(collider)) return true;
           const kind = colliderMetadata.get(collider.handle)?.kind ?? null;
           if (CHARACTER_SUPPORT_KINDS.has(kind) || kind === "projectile") return true;
           blocked = true;

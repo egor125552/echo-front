@@ -148,11 +148,19 @@ export default {
 
     if (url.pathname === "/api/engine-lab") {
       const headers = { "Cache-Control": "no-store" };
-      const expected = env.ENGINE_LAB_TOKEN;
-      if (!ENGINE_CONTROL.enabled || typeof expected !== "string" || expected.length < 32) {
+      if (!ENGINE_CONTROL.enabled) {
         return Response.json({ ok: false, error: "Engine Lab is unavailable" }, { status: 404, headers });
       }
-      if (request.headers.get("X-Engine-Lab-Token") !== expected) {
+      const expected = env.ENGINE_LAB_TOKEN;
+      const hasConfiguredToken = typeof expected === "string" && expected.length >= 32;
+      const isLocalLoopback =
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "localhost" ||
+        url.hostname === "::1";
+      if (!hasConfiguredToken && !isLocalLoopback) {
+        return Response.json({ ok: false, error: "Engine Lab is unavailable" }, { status: 404, headers });
+      }
+      if (hasConfiguredToken && request.headers.get("X-Engine-Lab-Token") !== expected) {
         return Response.json({ ok: false, error: "Unauthorized" }, { status: 401, headers });
       }
       const mode = url.searchParams.get("mode");

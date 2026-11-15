@@ -47,7 +47,7 @@ export function sampleInputState(pressed, touch = {}, flags = {}) {
     ...keyboard,
     forward: clampAxis(keyboard.forward + (touch.forward ? 1 : 0) - (touch.back ? 1 : 0)),
     strafe: clampAxis(keyboard.strafe + (touch.right ? 1 : 0) - (touch.left ? 1 : 0)),
-    turn: 0,
+    turn: clampAxis((Number(keyboard.turn) || 0) + (Number(touch.turn) || 0)),
     sprint: keyboard.sprint || Boolean(touch.sprint),
     fireHeld: keyboard.fireHeld || Boolean(touch.fireHeld),
   };
@@ -56,7 +56,16 @@ export function sampleInputState(pressed, touch = {}, flags = {}) {
 export async function setup(ctx) {
   const pressed = new Set();
   const touch = { forward: false, back: false, left: false, right: false, sprint: false, fireHeld: false };
-  const virtual = { forward: false, back: false, left: false, right: false, sprint: false, fireHeld: false };
+  const virtual = {
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+    sprint: false,
+    fireHeld: false,
+    turn: 0,
+    interactHold: false,
+  };
   let enabled = false;
   let firePressed = false;
   let reload = false;
@@ -151,6 +160,27 @@ export async function setup(ctx) {
     return true;
   }
 
+  function setVirtualTurn(value) {
+    if (!enabled) return false;
+    const next = clampAxis(Number(value) || 0);
+    if (Math.abs(virtual.turn - next) < 0.01) return true;
+    virtual.turn = next;
+    emitTouch("turn", next !== 0);
+    notifyChanged(`virtual:turn:${next.toFixed(2)}`);
+    return true;
+  }
+
+  function setVirtualInteractHold(down) {
+    if (!enabled) return false;
+    const next = Boolean(down);
+    if (virtual.interactHold === next) return true;
+    virtual.interactHold = next;
+    if (next) interactPressed = true;
+    emitTouch("interact-hold", next);
+    notifyChanged(`virtual:interact-hold:${next ? "down" : "up"}`);
+    return true;
+  }
+
   function triggerVirtualAction(action) {
     if (!enabled) return false;
     if (action === "reload") reload = true;
@@ -159,7 +189,20 @@ export async function setup(ctx) {
     else if (action === "armor-plate") platePressed = true;
     else if (action === "stimulant") stimulantPressed = true;
     else if (action === "interact") interactPressed = true;
-    else return false;
+    else if (action === "parachute") parachutePressed = true;
+    else if (
+      action === "parkour-pose"
+      || action === "parachute-status"
+      || action === "navigation-face"
+      || action === "map"
+      || action === "menu"
+    ) {
+      emitTouch(action, true);
+      if (action !== "parachute-status" && action !== "map" && action !== "menu") {
+        notifyChanged(`virtual:${action}`);
+      }
+      return true;
+    } else return false;
     emitTouch(action, true);
     notifyChanged(`virtual:${action}`);
     return true;
@@ -187,6 +230,11 @@ export async function setup(ctx) {
       emitTouch(control, false);
       changed = true;
     }
+    if (Math.abs(virtual.turn) >= 0.01) {
+      virtual.turn = 0;
+      emitTouch("turn", false);
+      changed = true;
+    }
     if (changed) notifyChanged("virtual:stop");
     return changed;
   }
@@ -202,11 +250,13 @@ export async function setup(ctx) {
   }
 
   function resetPressed(reason) {
-    const hadState = pressed.size > 0 || Object.values(touch).some(Boolean) || Object.values(virtual).some(Boolean);
+    const hadState = pressed.size > 0
+      || Object.values(touch).some(Boolean)
+      || Object.values(virtual).some((v) => Boolean(v));
     stopFireIfNeeded();
     pressed.clear();
     for (const key of Object.keys(touch)) touch[key] = false;
-    for (const key of Object.keys(virtual)) virtual[key] = false;
+    for (const key of Object.keys(virtual)) virtual[key] = key === "turn" ? 0 : false;
     firePressed = false;
     reload = false;
     selectDelta = 0;
@@ -379,6 +429,8 @@ export async function setup(ctx) {
       if (control in opposite) return setVirtualDirection(control, down);
       if (control === "fire") return setVirtualFire(down);
       if (control === "sprint") return setVirtualSprint(down);
+      if (control === "turn") return setVirtualTurn(down);
+      if (control === "interact-hold") return setVirtualInteractHold(down);
       return false;
     },
     clearVirtualMovement,
@@ -391,6 +443,7 @@ export async function setup(ctx) {
         right: touch.right || virtual.right,
         sprint: touch.sprint || virtual.sprint,
         fireHeld: touch.fireHeld || virtual.fireHeld,
+        turn: virtual.turn,
       };
       const sample = sampleInputState(pressed, mergedTouch, {
         firePressed, reload, selectDelta, platePressed, stimulantPressed, parachutePressed, interactPressed,

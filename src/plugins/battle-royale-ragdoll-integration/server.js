@@ -16,12 +16,12 @@ function clamp(value, minimum, maximum) {
 }
 
 const EJECTION_PROFILE = Object.freeze([
-  Object.freeze({ speedKph: 0, upward: 3.0, outward: 1.5 }),
-  Object.freeze({ speedKph: 15, upward: 4.0, outward: 2.0 }),
-  Object.freeze({ speedKph: 30, upward: 5.5, outward: 3.0 }),
-  Object.freeze({ speedKph: 50, upward: 7.0, outward: 4.5 }),
-  Object.freeze({ speedKph: 70, upward: 9.0, outward: 6.0 }),
-  Object.freeze({ speedKph: 100, upward: 12.0, outward: 8.0 }),
+  Object.freeze({ speedKph: 0, upward: 1.0, outward: 1.8 }),
+  Object.freeze({ speedKph: 15, upward: 1.35, outward: 2.5 }),
+  Object.freeze({ speedKph: 30, upward: 1.85, outward: 3.4 }),
+  Object.freeze({ speedKph: 50, upward: 2.8, outward: 4.6 }),
+  Object.freeze({ speedKph: 70, upward: 8.5, outward: 6.2 }),
+  Object.freeze({ speedKph: 100, upward: 12.0, outward: 8.2 }),
   Object.freeze({ speedKph: 150, upward: 16.0, outward: 11.0 }),
   Object.freeze({ speedKph: 200, upward: 20.0, outward: 14.0 }),
 ]);
@@ -93,9 +93,11 @@ export async function setup(ctx) {
         z: (Number(linvel.z) || 0) + velocityDelta.z * spread,
       };
       const transform = ctx.components.get(entityId, "Transform");
+      const speedKph = speed * 3.6;
+      const verticalSpawnOffset = speedKph < 55 ? 0.04 : 0.12;
       const activated = ragdoll.activate(entityId, {
         reason: "vehicle-eject",
-        position: transform ? { x: transform.x, y: transform.y + 0.12, z: transform.z } : undefined,
+        position: transform ? { x: transform.x, y: transform.y + verticalSpawnOffset, z: transform.z } : undefined,
         angle,
         velocity: launchVelocity,
       }, now);
@@ -107,7 +109,7 @@ export async function setup(ctx) {
         passenger: passengerIndex != null || (isPassenger && entityId === playerId),
         passengerIndex,
         speed,
-        speedKph: speed * 3.6,
+        speedKph,
         inheritedVelocity: {
           x: Number(linvel.x) || 0,
           y: Number(linvel.y) || 0,
@@ -118,6 +120,17 @@ export async function setup(ctx) {
         outwardDelta: Math.hypot(velocityDelta.x, velocityDelta.z) * spread,
         now,
       });
+      if (transform) {
+        ctx.events.emit("sound:spatial", {
+          entityId,
+          key: "ragdoll.eject.launch",
+          intensity: clamp(speedKph / 95, 0.45, 1.35),
+          x: transform.x,
+          y: transform.y,
+          z: transform.z,
+          radius: 32,
+        });
+      }
       return true;
     }
 
@@ -134,7 +147,14 @@ export async function setup(ctx) {
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     if (ragdoll.isActive(playerId)) {
       movement.setInput(playerId, {});
-      if (input.parachutePressed && ragdoll.deployParachute(playerId, now)) return;
+      if (input.parachutePressed) {
+        if (ragdoll.deployParachute(playerId, now)) return;
+        ctx.events.emit("parachute:deploy-blocked", {
+          entityId: playerId,
+          reason: "insufficient-clearance",
+          now,
+        });
+      }
       ragdoll.setInput(playerId, input);
       return;
     }

@@ -158,9 +158,12 @@ export async function setup(ctx) {
     if (!transform || !input) return;
 
     const decision = brain.commitmentFor?.(bot.id, now) ?? null;
-    if (!decision || decision.goal === "engage" || decision.goal === "evade") return;
+    if (!decision || decision.goal === "evade") return;
     const target = targetFromDecision(decision);
     if (!target || typeof map.navigationWaypoint !== "function") return;
+    const crossFloorEngage = (decision.goal === "engage" || decision.goal === "defend")
+      && Math.abs(finite(target.y) - finite(transform.y)) > 1.1;
+    if ((decision.goal === "engage" || decision.goal === "defend") && !crossFloorEngage) return;
     const route = map.navigationWaypoint(transform, target);
     if (route?.kind !== "stair" || !route.buildingId) return;
 

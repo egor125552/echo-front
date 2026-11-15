@@ -441,7 +441,8 @@ html[data-touch-mode="gestures"][data-game-active="true"] #accessible-game-menu:
   max-height: 100dvh;
   padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
 }
-#touch-control-mode { min-height: 3rem; width: 100%; font: inherit; }
+#touch-control-mode,
+#haptics-test-pattern { min-height: 3rem; width: 100%; font: inherit; }
 #quick-speech-test { margin-top: 0.7rem; }
 
 

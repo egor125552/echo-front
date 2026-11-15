@@ -302,8 +302,10 @@ export async function setup(ctx) {
     const other = typeof world.getCollider === "function" ? world.getCollider(otherHandle) : null;
     let targetId = physics.entityIdForCollider?.(other ?? otherHandle) ?? null;
     if (!targetId && other) targetId = fallbackRagdollOwner(other);
+    if (targetId && targetId === slot.shooterId) return;
     const vehicleHit = !targetId ? vehicleOccupantForCollider(slot, otherHandle) : null;
     if (vehicleHit?.targetId) targetId = vehicleHit.targetId;
+    if (targetId === slot.shooterId && !vehicleHit?.vehicleId) return;
     const target = targetId ? entities.get(targetId) : null;
     const sameTeam = targetId
       ? teams.teamOf(slot.shooterId) === teams.teamOf(targetId)

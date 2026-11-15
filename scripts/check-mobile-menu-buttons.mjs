@@ -105,6 +105,16 @@ test("tap and VoiceOver-style click on native Continue game button actually clos
     assert.equal(enabled,2);
 
     menus.openMain();
+    // Swipe down selects "Друзья" (index 1), tap activates it, swipe left goes back to "main"
+    ui.dispatch("touchstart", { touches: [{ identifier: 11, clientX: 100, clientY: 100 }], target: ui });
+    ui.dispatch("touchend", { changedTouches: [{ identifier: 11, clientX: 100, clientY: 170 }], preventDefault() {} });
+    ui.dispatch("touchstart", { touches: [{ identifier: 12, clientX: 100, clientY: 100 }], target: ui });
+    ui.dispatch("touchend", { changedTouches: [{ identifier: 12, clientX: 102, clientY: 102 }], preventDefault() {} });
+    assert.equal(menus.screen, "friends", "swipe down + tap on blank menu should navigate into Friends");
+    ui.dispatch("touchstart", { touches: [{ identifier: 13, clientX: 180, clientY: 100 }], target: ui });
+    ui.dispatch("touchend", { changedTouches: [{ identifier: 13, clientX: 80, clientY: 100 }], preventDefault() {} });
+    assert.equal(menus.screen, "main", "left swipe on blank menu should go back to previous screen");
+
     const start={identifier:10,clientX:30,clientY:220};
     const end={identifier:10,clientX:155,clientY:230};
     let prevented=false;

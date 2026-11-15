@@ -5,8 +5,27 @@ export const manifest = {
   requires: ["cloudflare-session", "spatial-audio-web", "speech-settings", "low-health-audio"],
 };
 
-export function injuryMessage(event, p = {}) {
+export function injuryMessage(event, p = {}, selfId = null) {
   if (event === "injury:downed") return "Ты тяжело ранен. Можно только ползти. Используй стимулятор: клавиша N на клавиатуре или кнопка Стимулятор на сенсорном экране. Без помощи ты истечёшь кровью.";
+  if (event === "injury:downed-teammate-nearby") {
+    return "Лежащий напарник рядом. Можно поднять клавишей E.";
+  }
+  if (event === "injury:team-revive-started") {
+    return selfId && p.reviverId === selfId && p.entityId !== selfId
+      ? "Поднимаешь напарника."
+      : "Напарник поднимает тебя.";
+  }
+  if (event === "injury:team-revive-paused") {
+    if (p.reason === "target-died" || p.reason === "removed" || p.reason === "disconnect") return "";
+    return selfId && p.reviverId === selfId && p.entityId !== selfId
+      ? "Подъём напарника приостановлен. Таймер сохранён."
+      : "Подъём приостановлен. Таймер сохранён.";
+  }
+  if (event === "injury:team-revive-completed") {
+    return selfId && p.reviverId === selfId && p.entityId !== selfId
+      ? "Напарник поднят."
+      : "Ты снова на ногах.";
+  }
   if (event === "injury:stim-picked") return p.quantity > 0
     ? `Стимулятор подобран. В запасе ${p.stimulants} из 2. Используй клавишу N или кнопку Стимулятор на сенсорном экране.`
     : "Запас стимуляторов полон: 2 из 2.";
@@ -87,15 +106,22 @@ export async function setup(ctx) {
         : audio.playSpatial(`${ROOT}crawl.mp3`, p, { gain: 0.65, radius: 12, occlusion: p.occlusion ?? 0 });
       void promise.catch(error => console.error("Crawling sound", error));
     }
-    if (p.entityId !== network.playerId || !packet.event.startsWith("injury:")) return;
-    if (packet.event === "injury:downed" && IMPACT_DOWN_WEAPONS.has(String(p.weaponId ?? ""))) {
+    const involvesSelf = p.entityId === network.playerId || p.reviverId === network.playerId;
+    if (!involvesSelf || !packet.event.startsWith("injury:")) return;
+    if (packet.event === "injury:downed" && p.entityId === network.playerId && IMPACT_DOWN_WEAPONS.has(String(p.weaponId ?? ""))) {
       void lowHealth.playWoundedCue();
     }
-    const text = injuryMessage(packet.event, p);
+    const text = injuryMessage(packet.event, p, network.playerId);
     if (text && !network.tutorial) speech.say(text, { interrupt: true });
-    if (packet.event === "injury:stim-started") void play("stim-start.mp3", "injury-stim");
-    if (packet.event === "injury:stim-cancelled") audio.stopChannel("injury-stim");
-    if (packet.event === "injury:stim-completed") void play("stim-complete.mp3", "injury-stim");
+    if (packet.event === "injury:stim-started" || packet.event === "injury:team-revive-started") {
+      void play("stim-start.mp3", "injury-stim");
+    }
+    if (packet.event === "injury:stim-cancelled" || packet.event === "injury:team-revive-paused") {
+      audio.stopChannel("injury-stim");
+    }
+    if (packet.event === "injury:stim-completed" || packet.event === "injury:team-revive-completed") {
+      void play("stim-complete.mp3", "injury-stim");
+    }
   });
   ctx.events.on("network:disconnected", () => {
     downed = false; stopHeartbeat();

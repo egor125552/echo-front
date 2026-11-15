@@ -38,14 +38,14 @@ export async function setup(ctx) {
     ctx.events.emit("match:started", { startedAt: roundStartedAt, roundNumber });
   }
 
-  ctx.events.on("entity:died", ({ entityId, killerId }) => {
+  ctx.events.on("entity:died", ({ entityId, killerId, now = Date.now() }) => {
     if (endedUntil || !killerId || killerId === entityId) return;
     const killerTeam = teams.teamOf(killerId);
     const victimTeam = teams.teamOf(entityId);
     if (!killerTeam || killerTeam === victimTeam) return;
     score[killerTeam] += 1;
     ctx.events.emit("match:score", { score: { ...score }, roundNumber });
-    if (score[killerTeam] >= targetScore) endRound(Date.now(), killerTeam);
+    if (score[killerTeam] >= targetScore) endRound(Number(now) || Date.now(), killerTeam);
   });
 
   ctx.services.provide("tdm", {

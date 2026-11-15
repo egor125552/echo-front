@@ -477,22 +477,54 @@ export async function setup(ctx) {
   mobile.map?.addEventListener("click", openMap);
   ui.resume.addEventListener("click", closeMenu);
 
-  // A horizontal swipe on empty menu space also resumes fullscreen gesture play.
-  // Button/list interactions and the screen-reader's own gestures are left alone.
+  ctx.events.on("input:touch", ({ control, down } = {}) => {
+    if (!down) return;
+    if (control === "map") openMap();
+    else if (control === "menu") openMain();
+  });
+  ctx.events.on("gesture:action", ({ action } = {}) => {
+    if (action === "map") openMap();
+    else if (action === "menu") openMain();
+  });
+
+  // Gestures on empty menu space allow full navigation in fullscreen gesture mode:
+  // swipe up/down moves selection, tap activates, swipe left goes back, swipe right closes.
   ui.section.addEventListener("touchstart", (event) => {
     menuSwipeStart = null;
     if (!open || document.documentElement.dataset.touchMode !== "gestures"
       || event.touches.length !== 1 || event.target?.closest?.("button, a, input, select, textarea, summary")) return;
     const touch = event.touches[0];
-    menuSwipeStart = { id: touch.identifier, x: touch.clientX, y: touch.clientY };
+    menuSwipeStart = {
+      id: touch.identifier,
+      x: touch.clientX,
+      y: touch.clientY,
+      time: typeof performance !== "undefined" ? performance.now() : Date.now(),
+    };
   }, { passive: true });
   ui.section.addEventListener("touchend", (event) => {
     if (!menuSwipeStart || !open) return;
-    const touch = [...event.changedTouches].find(item => item.identifier === menuSwipeStart.id);
-    if (touch && touch.clientX - menuSwipeStart.x >= 90
-      && Math.abs(touch.clientY - menuSwipeStart.y) <= 65) {
-      event.preventDefault();
-      closeMenu();
+    const touch = [...(event.changedTouches ?? [])].find((item) => item.identifier === menuSwipeStart.id);
+    if (touch) {
+      const dx = touch.clientX - menuSwipeStart.x;
+      const dy = touch.clientY - menuSwipeStart.y;
+      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+      const duration = Math.max(0, now - (menuSwipeStart.time ?? now));
+      if (dx >= 90 && Math.abs(dy) <= 65) {
+        event.preventDefault?.();
+        closeMenu();
+      } else if (dx <= -70 && Math.abs(dy) <= 65) {
+        event.preventDefault?.();
+        goBack();
+      } else if (dy <= -45 && Math.abs(dx) <= 65) {
+        event.preventDefault?.();
+        move(-1);
+      } else if (dy >= 45 && Math.abs(dx) <= 65) {
+        event.preventDefault?.();
+        move(1);
+      } else if (Math.hypot(dx, dy) <= 20 && duration <= 280) {
+        event.preventDefault?.();
+        activate();
+      }
     }
     menuSwipeStart = null;
   }, { passive: false });

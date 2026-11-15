@@ -1,12 +1,13 @@
 import fs from 'node:fs';
-const base=process.argv[2]??'http://127.0.0.1:8793';
-const tokenFile=process.argv[3];
-if(!tokenFile)throw new Error('Usage: node scripts/engine-lab-battle-royale-agent.mjs <local-url> <private-token-file>');
-const token=fs.readFileSync(tokenFile,'utf8').trim();
+const base=process.argv[2]??'http://127.0.0.1:3000';
+const tokenFile=process.argv[3]&&!Number.isFinite(Number(process.argv[3]))?process.argv[3]:null;
+const token=tokenFile&&fs.existsSync(tokenFile)?fs.readFileSync(tokenFile,'utf8').trim():'';
 const room='autonomous-br-'+crypto.randomUUID().slice(0,12);
 const url=new URL('/api/engine-lab?mode=battle-royale&room='+room,base);
 async function call(action,params={}) {
- const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json','X-Engine-Lab-Token':token},body:JSON.stringify({action,...params}),signal:AbortSignal.timeout(95000)});
+ const headers={'Content-Type':'application/json'};
+ if(token)headers['X-Engine-Lab-Token']=token;
+ const r=await fetch(url,{method:'POST',headers,body:JSON.stringify({action,...params}),signal:AbortSignal.timeout(95000)});
  const j=await r.json();if(!r.ok||!j.ok)throw Error(action+' '+JSON.stringify(j).slice(0,700));return j.result??j;
 }
 const PID='human-agent',log=[],started=Date.now();

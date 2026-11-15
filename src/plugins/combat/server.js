@@ -1,14 +1,15 @@
 export const manifest = {
   id: "combat",
-  version: "1.4.0",
+  version: "1.5.0",
   requires: ["health"],
-  optional: ["social"],
+  optional: ["social", "teams"],
   capabilities: ["services.consume", "services.provide", "events.emit"],
 };
 
 export async function setup(ctx) {
   const health = ctx.services.get("health");
   const social = ctx.services.has("social") ? ctx.services.get("social") : null;
+  const teams = ctx.services.has("teams") ? ctx.services.get("teams") : null;
   let armorVariant = 0;
 
   function emitFeedback(recipientId, key) {
@@ -20,12 +21,22 @@ export async function setup(ctx) {
     damage(targetId, amount, source = {}) {
       const attackerId = source.attackerId ?? null;
       const now = source.now ?? Date.now();
+      const weaponId = source.weaponId ?? null;
+      const sameTeam = Boolean(
+        attackerId
+        && targetId
+        && attackerId !== targetId
+        && weaponId !== "bleed-out"
+        && weaponId !== "zone"
+        && (teams?.teamOf?.(attackerId) ?? 0) > 0
+        && teams.teamOf(attackerId) === teams.teamOf(targetId),
+      );
 
-      if (attackerId && social?.protectsFriendlyFire?.(attackerId, targetId)) {
+      if (sameTeam || (attackerId && social?.protectsFriendlyFire?.(attackerId, targetId))) {
         ctx.events.emit("combat:friend-protected", {
           attackerId,
           targetId,
-          weaponId: source.weaponId ?? null,
+          weaponId,
           requested: amount,
           now,
         });

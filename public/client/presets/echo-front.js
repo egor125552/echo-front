@@ -8,6 +8,7 @@ import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as touchControlSettings from "../plugins/touch-control-settings.js";
 import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
+import * as hapticFeedback from "../plugins/haptic-feedback.js";
 import * as gamepadHaptics from "../plugins/gamepad-haptics.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as socialProfile from "../plugins/social-profile.js";
@@ -55,6 +56,7 @@ export const echoFrontClientPreset = [
   iphoneGestures,
   journal,
   smoothing,
+  hapticFeedback,
   gamepadHaptics,
   speechSettings,
   socialProfile,

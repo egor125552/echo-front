@@ -55,6 +55,17 @@ export async function setup(ctx) {
     }
   });
 
+  ctx.events.on("input:touch", ({ control, down } = {}) => {
+    if (control !== "interact-hold") return;
+    if (down) {
+      interactHeld = true;
+      interactReleased = false;
+    } else {
+      interactHeld = false;
+      interactReleased = true;
+    }
+  });
+
   ctx.events.on("input:reset", () => {
     if (interactHeld) interactReleased = true;
     interactHeld = false;

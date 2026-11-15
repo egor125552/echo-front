@@ -119,15 +119,38 @@ export async function setup(ctx) {
     previousAlive = alive;
   }
 
+  function dissolveLastSquad() {
+    if (phase !== "active") return;
+    const survivors = aliveEntities();
+    if (survivors.length !== 2) return;
+    if (survivors.some((entity) => !entity.bot && entity.kind === "human")) return;
+    const teamA = ctx.components.get(survivors[0].id, "Team");
+    const teamB = ctx.components.get(survivors[1].id, "Team");
+    if (!teamA || !teamB || teamA.id !== teamB.id || teamA.id === 0) return;
+    teamA.id = 200_001;
+    teamB.id = 200_002;
+    survivors[0].team = 200_001;
+    survivors[1].team = 200_002;
+  }
+
   function finish(now = Date.now()) {
     if (phase === "ended") return;
     const survivors = aliveEntities();
-    if (survivors.length > 1) return;
+    if (survivors.length > 1) {
+      const firstTeam = Number(ctx.components.get(survivors[0].id, "Team")?.id) || 0;
+      const sameHumanSquad = firstTeam >= 100_000
+        && survivors.some((entity) => !entity.bot && entity.kind === "human")
+        && survivors.every((entity) => (Number(ctx.components.get(entity.id, "Team")?.id) || 0) === firstTeam);
+      if (!sameHumanSquad) return;
+    }
     phase = "ended";
     endedAt = now;
     deploymentInProgress = false;
-    winnerId = survivors[0]?.id ?? null;
-    if (winnerId) placements.set(winnerId, 1);
+    const humanWinner = survivors.find((entity) => !entity.bot && entity.kind === "human");
+    winnerId = humanWinner?.id ?? survivors[0]?.id ?? null;
+    for (const survivor of survivors) {
+      placements.set(survivor.id, 1);
+    }
     ctx.events.emit("battle-royale:ended", {
       winnerId,
       alive: survivors.length,
@@ -146,6 +169,7 @@ export async function setup(ctx) {
     });
     emitRemaining(alive);
     if (deploymentInProgress) completeDeployment(now);
+    dissolveLastSquad();
     finish(now);
     return true;
   }
@@ -244,7 +268,10 @@ export async function setup(ctx) {
       });
     }
     applyZone(now);
-    if (phase === "active") finish(now);
+    if (phase === "active") {
+      dissolveLastSquad();
+      finish(now);
+    }
   }
 
   ctx.events.on("parachute:landed", ({ entityId, now }) => {

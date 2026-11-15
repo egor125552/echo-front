@@ -261,7 +261,10 @@ export async function setup(ctx) {
     if (!isHuman(entityId)) return null;
     const transform = ctx.components.get(entityId, "Transform");
     if (!transform) return null;
-    const altitude = Math.max(8, Number(options.altitude) || PARACHUTE_LAUNCH_ALTITUDE);
+    const requestedAltitude = Number(options.altitude);
+    const altitude = Number.isFinite(requestedAltitude) && requestedAltitude > 0
+      ? Math.max(2.0, requestedAltitude)
+      : PARACHUTE_LAUNCH_ALTITUDE;
     const x = Number.isFinite(Number(options.x)) ? Number(options.x) : transform.x;
     const z = Number.isFinite(Number(options.z)) ? Number(options.z) : transform.z;
     const angle = Number.isFinite(Number(options.angle)) ? Number(options.angle) : transform.angle;
@@ -317,7 +320,7 @@ export async function setup(ctx) {
     return stateFor(entityId);
   }
 
-  function deploy(entityId, now = Date.now(), { automatic = false } = {}) {
+  function deploy(entityId, now = Date.now(), { automatic = false, initialGlideSpeed = 0 } = {}) {
     const state = ensureState(entityId);
     const transform = ctx.components.get(entityId, "Transform");
     if (!isHuman(entityId) || !transform || !state.airborne || state.phase === "deployed") return false;
@@ -333,7 +336,10 @@ export async function setup(ctx) {
     state.landingApproachAnnounced = false;
     state.inflation = 0;
     state.brake = 0;
-    state.glideSpeed = Math.min(Number(state.glideSpeed) || 0, 1.2);
+    const requestedGlide = Math.max(0, Number(initialGlideSpeed) || 0);
+    state.glideSpeed = requestedGlide > 0
+      ? clamp(requestedGlide, 1.2, PARACHUTE_MAX_GLIDE_SPEED)
+      : Math.min(Number(state.glideSpeed) || 0, 1.2);
     state.simulatedVerticalVelocity = Math.min(-0.5, Number(transform.verticalVelocity) || -0.5);
     ctx.events.emit("parachute:deployed", {
       entityId,

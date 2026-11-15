@@ -49,7 +49,7 @@ const PARTS = Object.freeze([
   { name: "right-foot", shape: "cuboid", side: 0.11, y: 0.05, forward: 0.08, hx: 0.08, hy: 0.05, hz: 0.16, mass: 1.0, impact: 0.35 },
 ]);
 
-const SOUND_COOLDOWN_SECONDS = 0.11;
+const SOUND_COOLDOWN_SECONDS = 0.06;
 const DAMAGE_COOLDOWN_SECONDS = 0.22;
 const RECOVER_STABLE_SECONDS = 0.55;
 const RECOVER_MIN_ACTIVE_SECONDS = 0.90;
@@ -61,13 +61,20 @@ const RECOVER_SUPPORT_PROBE_DISTANCE = 3.5;
 const RECOVERY_CORE_PARTS = new Set([
   "pelvis", "abdomen", "chest", "head", "left-upper-leg", "right-upper-leg",
 ]);
-const IMPACT_SOUND_THRESHOLD = 1.35;
+const IMPACT_SOUND_THRESHOLD = 0.95;
 const IMPACT_DAMAGE_THRESHOLD = 4.0;
 const CONTROL_CHEST_TORQUE = 5.2;
 const CONTROL_PELVIS_TORQUE = 3.0;
 const MAX_ACTIVE_RAGDOLLS = 8;
 const VEHICLE_PEDESTRIAN_HIT_SPEED = 3.0;
-const PARACHUTE_HANDOFF_MIN_ALTITUDE = 8;
+const PARACHUTE_HANDOFF_MIN_ALTITUDE = 1.5;
+const TUMBLE_IMPACT_KEYS = Object.freeze([
+  "ragdoll.impact.1",
+  "ragdoll.impact.2",
+  "ragdoll.impact.body",
+  "ragdoll.impact.thump",
+  "ragdoll.impact.gear",
+]);
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, Number(value) || 0));
@@ -339,7 +346,7 @@ export async function setup(ctx) {
       }
       : capturedMovementVelocity(entityId, transform);
     const reason = String(options.reason ?? "impact");
-    const tumble = reason === "vehicle-eject" ? 1.8 : reason === "high-fall" ? 0.9 : 0.55;
+    const tumble = reason === "vehicle-eject" ? 2.4 : reason === "vehicle-crash" ? 2.2 : reason === "high-fall" ? 0.9 : 0.55;
 
     movement.setInput(entityId, {});
     physics.setCharacterEnabled(entityId, false);
@@ -356,6 +363,7 @@ export async function setup(ctx) {
       elapsed: 0,
       stableSeconds: 0,
       soundCooldown: 0,
+      soundSequence: 0,
       damageCooldown: 0,
       lastImpact: 0,
       lastImpactPart: null,
@@ -638,18 +646,21 @@ export async function setup(ctx) {
     });
 
     if (entry.soundCooldown <= 0) {
-      const key = impact.severity >= 3.2
-        ? (Math.random() < 0.5 ? "ragdoll.impact.1" : "ragdoll.impact.2")
-        : "ragdoll.impact.soft";
+      let key = "ragdoll.impact.soft";
+      if (impact.severity >= 2.2) {
+        const index = entry.soundSequence % TUMBLE_IMPACT_KEYS.length;
+        key = TUMBLE_IMPACT_KEYS[index];
+        entry.soundSequence += 1;
+      }
       ctx.events.emit("sound:spatial", {
         entityId: entry.entityId,
         key,
         ragdollPart: impact.part,
-        intensity: clamp(impact.severity / 7, 0.35, 1.25),
+        intensity: clamp(impact.severity / 6.2, 0.38, 1.3),
         x: impact.x,
         y: impact.y,
         z: impact.z,
-        radius: impact.severity >= 3.2 ? 36 : 25,
+        radius: impact.severity >= 2.8 ? 36 : 25,
       });
       entry.soundCooldown = SOUND_COOLDOWN_SECONDS;
     }
@@ -696,12 +707,18 @@ export async function setup(ctx) {
     const p = pelvis.translation();
     const velocity = pelvis.linvel();
     const targetY = Number(p.y) - 0.91;
-    if (!Number.isFinite(targetY) || targetY < PARACHUTE_HANDOFF_MIN_ALTITUDE) return false;
+    if (!Number.isFinite(targetY)) return false;
+
+    const horizontalSpeed = Math.hypot(Number(velocity.x) || 0, Number(velocity.z) || 0);
+    const verticalVelocity = Number(velocity.y) || 0;
+    const isVehicleLaunch = entry.reason === "vehicle-eject"
+      || entry.reason === "vehicle-crash"
+      || entry.reason === "vehicle-hit";
 
     const probeLift = 0.12;
     const probeDistance = Math.max(20, Number(parachute.constants?.groundProbeDistance) || 700);
     const support = physics.raycastSupportWorld(
-      { x: p.x, y: targetY + probeLift, z: p.z },
+      { x: p.x, y: Math.max(0.2, targetY) + probeLift, z: p.z },
       { x: 0, y: -1, z: 0 },
       probeDistance,
     );
@@ -709,10 +726,33 @@ export async function setup(ctx) {
       ? Math.max(0, Number(support.distance) - probeLift)
       : Infinity;
     const minimumClearance = Math.max(0, Number(parachute.constants?.minimumDeployClearance) || 3.2);
-    if (clearance < minimumClearance) return false;
 
-    const target = { x: p.x, y: targetY, z: p.z, angle: entry.angle };
-    const verticalVelocity = Number(velocity.y) || 0;
+    const hasVehicleAirMomentum = isVehicleLaunch && (
+      clearance >= 0.85
+      || verticalVelocity >= 0.85
+      || (horizontalSpeed >= 6.0 && !entry.hadExternalContact)
+      || (horizontalSpeed >= 9.0 && entry.elapsed <= 1.2)
+    );
+
+    if (!hasVehicleAirMomentum) {
+      if (targetY < PARACHUTE_HANDOFF_MIN_ALTITUDE) return false;
+      if (clearance < minimumClearance) return false;
+    }
+
+    const canopyPopup = hasVehicleAirMomentum
+      ? clamp(Math.max(0, verticalVelocity) * 0.42 + horizontalSpeed * 0.22, 1.8, 5.5)
+      : 0;
+    const launchAltitude = hasVehicleAirMomentum
+      ? Math.max(targetY + canopyPopup, minimumClearance + 0.85, 4.1)
+      : targetY;
+    const glideAngle = horizontalSpeed > 2.0
+      ? Math.atan2(Number(velocity.x) || 0, -(Number(velocity.z) || 0))
+      : entry.angle;
+    const initialGlideSpeed = hasVehicleAirMomentum
+      ? clamp(horizontalSpeed * 0.45, 1.8, 5.4)
+      : 0;
+
+    const target = { x: p.x, y: launchAltitude, z: p.z, angle: glideAngle };
     const duration = entry.elapsed;
     const ragdollReason = entry.reason;
 
@@ -755,7 +795,7 @@ export async function setup(ctx) {
     // an absurd upward solver-explosion velocity.
     transform.verticalVelocity = verticalVelocity;
     transform.grounded = false;
-    const deployed = parachute.deploy(entityId, now);
+    const deployed = parachute.deploy(entityId, now, { initialGlideSpeed });
 
     ctx.events.emit("ragdoll:ended", {
       entityId,

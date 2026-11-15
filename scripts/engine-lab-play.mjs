@@ -8,12 +8,14 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-const base = process.argv[2] ?? "http://127.0.0.1:8789";
-const tokenFile = process.argv[3];
-const seconds = Math.max(5, Math.min(600, Math.floor(Number(process.argv[4]) || 300)));
-if (!tokenFile) throw new Error("Token file path is required");
-const token = fs.readFileSync(tokenFile, "utf8").trim();
-if (token.length < 32) throw new Error("Invalid private Engine Lab token");
+const base = process.argv[2] ?? "http://127.0.0.1:3000";
+const rawArg3 = process.argv[3];
+const tokenFile = rawArg3 && !Number.isFinite(Number(rawArg3)) ? rawArg3 : null;
+const seconds = Math.max(
+  5,
+  Math.min(600, Math.floor(Number(tokenFile ? process.argv[4] : rawArg3) || 300)),
+);
+const token = tokenFile && fs.existsSync(tokenFile) ? fs.readFileSync(tokenFile, "utf8").trim() : "";
 const room = "autoplay-" + randomUUID().slice(0, 12);
 const endpoint = new URL("/api/engine-lab?mode=tdm&room=" + room, base);
 const playerId = "lab-player";
@@ -21,9 +23,11 @@ const wallStart = Date.now();
 const log = { room, mode: "tdm", targetSimulatedSeconds: seconds, actions: [], observations: [], discovered: [] };
 
 async function action(name, extra = {}) {
+  const headers = { "Content-Type": "application/json" };
+  if (token) headers["X-Engine-Lab-Token"] = token;
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-Engine-Lab-Token": token },
+    headers,
     body: JSON.stringify({ action: name, ...extra }),
     signal: AbortSignal.timeout(90000),
   });

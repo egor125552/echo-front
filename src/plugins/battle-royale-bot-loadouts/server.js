@@ -6,15 +6,17 @@ export const manifest = {
   capabilities: ["services.consume", "services.provide"],
 };
 
-const ARMOR_LEVELS = [0, 50, 100, 150];
+const ARMOR_LEVELS = [50, 100, 100, 150];
+const RESERVE_LEVELS = [1, 2, 2, 3];
 
 export async function setup(ctx) {
   ctx.services.get("entities");
 
   ctx.services.provide("bot-loadouts", {
     create(serial, team) {
-      const rifle = serial % 3 === 0;
+      const rifle = serial % 2 === 0;
       const armorCurrent = ARMOR_LEVELS[serial % ARMOR_LEVELS.length];
+      const armorReserve = RESERVE_LEVELS[serial % RESERVE_LEVELS.length];
       return {
         id: `br-bot-${serial}`,
         kind: "bot",
@@ -25,7 +27,7 @@ export async function setup(ctx) {
         armorPlates: 3,
         armorPlateValue: 50,
         armorCurrent,
-        armorReserve: 0,
+        armorReserve,
         weapons: rifle ? ["rifle"] : ["pistol"],
       };
     },

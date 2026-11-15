@@ -132,4 +132,10 @@ export async function setup(ctx) {
     event.preventDefault();
     announce(flightStatusText());
   });
+
+  ctx.events.on("input:touch", ({ control, down } = {}) => {
+    if (!down) return;
+    if (control === "parachute-status") announce(flightStatusText());
+    else if (control === "parkour-pose" && latestParachute?.airborne) announce(flightStatusText());
+  });
 }

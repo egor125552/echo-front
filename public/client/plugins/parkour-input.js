@@ -35,4 +35,8 @@ export async function setup(ctx) {
     event.preventDefault();
     trigger("touch:parkour-pose");
   });
+
+  ctx.events.on("input:touch", ({ control, down } = {}) => {
+    if (down && control === "parkour-pose") trigger("gesture:parkour-pose");
+  });
 }

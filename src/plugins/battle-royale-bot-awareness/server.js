@@ -26,6 +26,31 @@ export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const attackerLocks = new Map();
 
+  function squadPairFor(botId) {
+    const match = /^br-bot-(\d+)$/.exec(String(botId ?? ""));
+    if (!match) return null;
+    const index = Number(match[1]);
+    if (!Number.isFinite(index) || index < 1) return null;
+    return `br-bot-${index % 2 === 1 ? index + 1 : index - 1}`;
+  }
+
+  function areSquadmates(botId, otherId) {
+    if (!botId || !otherId || botId === otherId) return false;
+    const selfEntity = entities.get(botId);
+    const otherEntity = entities.get(otherId);
+    const sameExplicitSquad = Boolean(selfEntity?.squadId && selfEntity.squadId === otherEntity?.squadId);
+    const sameTeam = teams.teamOf(botId) > 0 && teams.teamOf(botId) === teams.teamOf(otherId);
+    if (!sameExplicitSquad && !sameTeam) return false;
+    let livingOutsideSquad = 0;
+    for (const entry of entities.all()) {
+      if (!entry?.alive) continue;
+      if (entry.id !== botId && entry.id !== otherId) {
+        livingOutsideSquad += 1;
+      }
+    }
+    return livingOutsideSquad >= 1;
+  }
+
   function activeAttacker(botId, now = Date.now()) {
     const lock = attackerLocks.get(botId);
     if (!lock) return null;
@@ -34,7 +59,7 @@ export async function setup(ctx) {
       return null;
     }
     const attacker = entities.get(lock.attackerId);
-    if (!attacker?.alive || teams.teamOf(attacker.id) === teams.teamOf(botId)) {
+    if (!attacker?.alive || teams.teamOf(attacker.id) === teams.teamOf(botId) || areSquadmates(botId, attacker.id)) {
       attackerLocks.delete(botId);
       return null;
     }
@@ -82,6 +107,7 @@ export async function setup(ctx) {
     for (const entry of grid.query(transform, maxDistance, now)) {
       const enemy = entry.entity;
       if (!enemy?.alive || enemy.id === botId || teams.teamOf(enemy.id) === ownTeam) continue;
+      if (areSquadmates(botId, enemy.id)) continue;
       const vertical = Math.abs((Number(entry.transform.y) || 0) - (Number(transform.y) || 0));
       if (vertical > BOT_VERTICAL_SIGHT_TOLERANCE) continue;
       const distance = Math.hypot(
@@ -89,9 +115,6 @@ export async function setup(ctx) {
         (Number(entry.transform.z) || 0) - (Number(transform.z) || 0),
       );
       if (distance > maxDistance) continue;
-      // Characters do not blind each other here; only real Rapier world geometry
-      // blocks awareness. The larger vertical reach lets an exposed enemy on the
-      // stairs be seen while concrete floors and walls still block the ray.
       candidates.push({
         entityId: enemy.id,
         entity: enemy,
@@ -114,10 +137,19 @@ export async function setup(ctx) {
     return visible;
   }
 
+  function squadRoleFor(botId) {
+    const match = /^br-bot-(\d+)$/.exec(String(botId ?? ""));
+    if (!match) return "solo";
+    return Number(match[1]) % 2 === 1 ? "breacher" : "flanker";
+  }
+
   perception.visibleEnemies = visibleEnemies;
   perception.nearestVisibleEnemy = (botId, maxDistance = BOT_LONG_SIGHT_DISTANCE, options = {}) => (
     visibleEnemies(botId, maxDistance, { ...options, limit: 1 })[0] ?? null
   );
+  perception.areSquadmates = areSquadmates;
+  perception.squadPartnerId = squadPairFor;
+  perception.squadRoleFor = squadRoleFor;
 
   const originalDecide = brain.decide.bind(brain);
   brain.decide = (botId, context = {}, now = Date.now()) => {

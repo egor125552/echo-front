@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --ip 0.0.0.0 --port 3000 --show-interactive-dev-session=false",
+    "start": "wrangler dev --ip 0.0.0.0 --port 3000 --show-interactive-dev-session=false",
+    "build": "wrangler deploy --dry-run --outdir=dist",
+    "lint": "node --test scripts/check-client-plugin-bootstrap.mjs",
     "deploy": "wrangler deploy",
     "check:vehicle-crashes": "node scripts/check-vehicle-crash-model.mjs",
     "check:bot-car-cpu": "node scripts/check-bot-car-cpu-equivalence.mjs && node scripts/check-character-ray-prefilter.mjs",

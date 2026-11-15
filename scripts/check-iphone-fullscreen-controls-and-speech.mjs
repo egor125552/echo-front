@@ -25,6 +25,7 @@ test("iPhone defaults to accessible buttons and gestures only work when selected
   const hint = { textContent: "" }, panel = { hidden: false }, menu = { hidden: true };
   const modes = new Map();
   const virtualActions = [];
+  const triggeredActions = [];
   globalThis.Element = class Element { closest() { return null; } };
   globalThis.localStorage = {
     getItem(key) { return modes.get(key) ?? null; },
@@ -41,20 +42,23 @@ test("iPhone defaults to accessible buttons and gestures only work when selected
   globalThis.window = { addEventListener() {} };
   const events = new EventBus();
   const s = services();
-  s.map.set("input", { setVirtualControl(...args) { virtualActions.push(args); },
-    triggerVirtualAction() {} });
+  s.map.set("input", {
+    setVirtualControl(...args) { virtualActions.push(args); },
+    triggerVirtualAction(action) { triggeredActions.push(action); },
+  });
   try {
     await touchSettings.setup({ events, services: s.api });
     await iphoneGestures.setup({ events, services: s.api });
     const mode = s.map.get("touch-control-settings");
     assert.equal(mode.mode, "buttons");
     assert.equal(picker.value, "buttons");
-    const finger = (x, y) => ({ identifier: 1, clientX: x, clientY: y,
+    const finger = (x, y, id = 1) => ({ identifier: id, clientX: x, clientY: y,
       target: new globalThis.Element() });
-    const dispatch = (kind, touch) => {
+    const dispatch = (kind, touches) => {
+      const list = Array.isArray(touches) ? touches : [touches];
       let prevented = false;
       for (const listener of handlers.get(kind) ?? []) {
-        listener({ changedTouches: [touch], cancelable: true,
+        listener({ changedTouches: list, cancelable: true,
           preventDefault() { prevented = true; } });
       }
       return prevented;
@@ -73,8 +77,54 @@ test("iPhone defaults to accessible buttons and gestures only work when selected
     assert(virtualActions.some(([name, down]) => name === "forward" && down === false),
       "changing control mode must release all held movement");
     assert.equal(dispatch("touchstart", finger(80, 120)), false);
-    assert.equal(virtualActions.at(-1)[1], false);
     mode.setMode("gestures");
+
+    // 2-finger horizontal drag turns camera
+    virtualActions.length = 0;
+    dispatch("touchstart", [finger(100, 100, 1), finger(140, 100, 2)]);
+    dispatch("touchmove", [finger(160, 100, 1), finger(200, 100, 2)]);
+    assert(virtualActions.some(([name, val]) => name === "turn" && val > 0),
+      "two-finger horizontal drag must turn camera right");
+    dispatch("touchend", [finger(160, 100, 1), finger(200, 100, 2)]);
+    assert(virtualActions.some(([name, val]) => name === "turn" && val === 0),
+      "lifting two fingers must reset camera turn to 0");
+
+    // 2-finger swipe up switches weapon, swipe down opens map
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(100, 160, 1), finger(140, 160, 2)]);
+    dispatch("touchmove", [finger(100, 90, 1), finger(140, 90, 2)]);
+    dispatch("touchend", [finger(100, 90, 1), finger(140, 90, 2)]);
+    assert(triggeredActions.includes("weapon-next"), "two-finger swipe up must switch weapon");
+
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(100, 90, 1), finger(140, 90, 2)]);
+    dispatch("touchmove", [finger(100, 160, 1), finger(140, 160, 2)]);
+    dispatch("touchend", [finger(100, 160, 1), finger(140, 160, 2)]);
+    assert(triggeredActions.includes("map"), "two-finger swipe down must open map");
+
+    // 2-finger triple tap immediately triggers stimulant
+    triggeredActions.length = 0;
+    for (let i = 0; i < 3; i++) {
+      dispatch("touchstart", [finger(100, 100, 1), finger(140, 100, 2)]);
+      dispatch("touchend", [finger(100, 100, 1), finger(140, 100, 2)]);
+    }
+    assert(triggeredActions.includes("stimulant"), "two-finger triple tap must trigger stimulant");
+
+    // 1-finger triple tap jumps on tap 2 and triggers parkour-pose on tap 3
+    triggeredActions.length = 0;
+    for (let i = 0; i < 3; i++) {
+      dispatch("touchstart", finger(100, 100, 1));
+      dispatch("touchend", finger(100, 100, 1));
+    }
+    assert(triggeredActions.includes("parachute"), "double tap must trigger jump/parachute");
+    assert(triggeredActions.includes("parkour-pose"), "triple tap must trigger parkour-pose");
+
+    // 4-finger tap toggles navigation-face
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(80, 100, 1), finger(110, 100, 2), finger(140, 100, 3), finger(170, 100, 4)]);
+    dispatch("touchend", [finger(80, 100, 1), finger(110, 100, 2), finger(140, 100, 3), finger(170, 100, 4)]);
+    assert(triggeredActions.includes("navigation-face"), "four-finger tap must toggle auto-guidance");
+
     menu.hidden = false;
     assert.equal(dispatch("touchstart", finger(90, 120)), false,
       "a screen-reader menu should not trigger game gestures");

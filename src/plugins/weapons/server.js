@@ -166,10 +166,30 @@ export async function setup(ctx) {
         };
     const direction = resolved?.direction ?? baseDirection;
 
+    const input = ctx.components.get(entityId, "Input");
+    const baseSpeed = Number.isFinite(transform.movementSpeed)
+      ? Math.max(0, transform.movementSpeed)
+      : (input?.sprint ? 5.4 : 3.25);
+    const rawForward = Number(input?.forward) || 0;
+    const strafeFactor = entity.bot ? 0.7 : 1;
+    const rawStrafe = (Number(input?.strafe) || 0) * strafeFactor;
+    const inputLen = Math.hypot(rawForward, rawStrafe);
+    const moveScale = inputLen > 1 ? 1 / inputLen : 1;
+    const shooterVx = (
+      Math.sin(transform.angle) * rawForward * moveScale +
+      Math.cos(transform.angle) * rawStrafe * moveScale
+    ) * baseSpeed;
+    const shooterVz = (
+      -Math.cos(transform.angle) * rawForward * moveScale +
+      Math.sin(transform.angle) * rawStrafe * moveScale
+    ) * baseSpeed;
+    const forwardMove = Math.max(0, shooterVx * direction.x + shooterVz * direction.z);
+    const spawnOffset = 0.76 + forwardMove * 0.055;
+
     const origin = {
-      x: transform.x + direction.x * 0.55,
+      x: transform.x + direction.x * spawnOffset,
       y: (Number(transform.y) || 0) + 1,
-      z: transform.z + direction.z * 0.55,
+      z: transform.z + direction.z * spawnOffset,
     };
     const projectileId = projectiles.spawn({
       shooterId: entityId,

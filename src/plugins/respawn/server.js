@@ -37,8 +37,8 @@ export async function setup(ctx) {
     return true;
   }
 
-  ctx.events.on("entity:died", ({ entityId }) => {
-    pending.set(entityId, Date.now() + 3000);
+  ctx.events.on("entity:died", ({ entityId, now = Date.now() }) => {
+    pending.set(entityId, (Number(now) || Date.now()) + 3000);
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => pending.delete(entityId));

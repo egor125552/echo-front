@@ -10,24 +10,24 @@ export async function setup(ctx) {
   const protectedUntil = new Map();
   const defaultDurationMs = Math.max(0, Number(ctx.config.durationMs) || 2200);
 
-  function protect(entityId, durationMs = defaultDurationMs) {
+  function protect(entityId, durationMs = defaultDurationMs, now = Date.now()) {
     if (!entityId || durationMs <= 0) return;
-    protectedUntil.set(entityId, Date.now() + durationMs);
+    protectedUntil.set(entityId, now + durationMs);
   }
 
-  function protectHuman(entityId) {
+  function protectHuman(entityId, now = Date.now()) {
     const entity = entities.get(entityId);
-    if (entity && !entity.bot) protect(entityId);
+    if (entity && !entity.bot) protect(entityId, defaultDurationMs, now);
   }
 
-  ctx.events.on("entity:spawned", ({ entityId, spec }) => {
+  ctx.events.on("entity:spawned", ({ entityId, spec, now = Date.now() }) => {
     if (spec?.bot) return;
     const durationMs = Number(spec?.spawnProtectionMs) || defaultDurationMs;
-    protect(entityId, durationMs);
+    protect(entityId, durationMs, now);
   });
 
-  ctx.events.on("respawn:before", ({ entityId }) => {
-    protectHuman(entityId);
+  ctx.events.on("respawn:before", ({ entityId, now = Date.now() }) => {
+    protectHuman(entityId, now);
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
@@ -35,8 +35,9 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("combat:damage:before", (packet) => {
+    const now = Number(packet?.now) || Date.now();
     const until = protectedUntil.get(packet.targetId) ?? 0;
-    if (until <= Date.now()) {
+    if (until <= now) {
       if (until) protectedUntil.delete(packet.targetId);
       return;
     }

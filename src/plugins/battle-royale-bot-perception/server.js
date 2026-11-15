@@ -7,10 +7,44 @@ export const manifest = {
 
 export const BOT_VISIBLE_VERTICAL_REACH = 5.2;
 
+export function squadPartnerId(botId) {
+  const match = /^br-bot-(\d+)$/.exec(String(botId ?? ""));
+  if (!match) return null;
+  const index = Number(match[1]);
+  if (!Number.isFinite(index) || index < 1) return null;
+  const partnerIndex = index % 2 === 1 ? index + 1 : index - 1;
+  return `br-bot-${partnerIndex}`;
+}
+
+export function squadRoleFor(botId) {
+  const match = /^br-bot-(\d+)$/.exec(String(botId ?? ""));
+  if (!match) return "solo";
+  return Number(match[1]) % 2 === 1 ? "breacher" : "flanker";
+}
+
 export async function setup(ctx) {
   const teams = ctx.services.get("teams");
   const physics = ctx.services.get("physics");
   const grid = ctx.services.get("spatial-grid");
+  const entities = ctx.services.has?.("entities") ? ctx.services.get("entities") : null;
+
+  function areSquadmates(botId, otherId) {
+    if (!botId || !otherId || botId === otherId) return false;
+    const selfEntity = entities?.get?.(botId) ?? null;
+    const otherEntity = entities?.get?.(otherId) ?? null;
+    const sameExplicitSquad = Boolean(selfEntity?.squadId && selfEntity.squadId === otherEntity?.squadId);
+    const sameTeam = teams.teamOf(botId) > 0 && teams.teamOf(botId) === teams.teamOf(otherId);
+    if (!sameExplicitSquad && !sameTeam) return false;
+    if (!entities?.all) return sameTeam || sameExplicitSquad;
+    let livingOutsideSquad = 0;
+    for (const entry of entities.all()) {
+      if (!entry?.alive) continue;
+      if (entry.id !== botId && entry.id !== otherId) {
+        livingOutsideSquad += 1;
+      }
+    }
+    return livingOutsideSquad >= 1;
+  }
 
   function nearestEnemy(botId, maxDistance = Infinity, { humanPriority = 1, now = Date.now() } = {}) {
     const transform = ctx.components.get(botId, "Transform");
@@ -21,7 +55,7 @@ export async function setup(ctx) {
     for (const entry of grid.query(transform, searchDistance, now)) {
       const enemy = entry.entity;
       if (enemy.id === botId || !enemy.alive) continue;
-      if (teams.teamOf(enemy.id) === ownTeam) continue;
+      if (teams.teamOf(enemy.id) === ownTeam || areSquadmates(botId, enemy.id)) continue;
       const vertical = Math.abs((entry.transform.y ?? 0) - (transform.y ?? 0));
       if (vertical > BOT_VISIBLE_VERTICAL_REACH) continue;
       const distance = Math.hypot(entry.transform.x - transform.x, entry.transform.z - transform.z);
@@ -45,6 +79,7 @@ export async function setup(ctx) {
     for (const entry of grid.query(transform, maxDistance, now)) {
       const enemy = entry.entity;
       if (enemy.id === botId || !enemy.alive || teams.teamOf(enemy.id) === ownTeam) continue;
+      if (areSquadmates(botId, enemy.id)) continue;
       const vertical = Math.abs((entry.transform.y ?? 0) - (transform.y ?? 0));
       if (vertical > BOT_VISIBLE_VERTICAL_REACH) continue;
       const distance = Math.hypot(entry.transform.x - transform.x, entry.transform.z - transform.z);
@@ -75,5 +110,12 @@ export async function setup(ctx) {
     return visibleEnemies(botId, maxDistance, { ...options, limit: 1 })[0] ?? null;
   }
 
-  ctx.services.provide("bot-perception", { nearestEnemy, nearestVisibleEnemy, visibleEnemies });
+  ctx.services.provide("bot-perception", {
+    nearestEnemy,
+    nearestVisibleEnemy,
+    visibleEnemies,
+    squadPartnerId,
+    squadRoleFor,
+    areSquadmates,
+  });
 }

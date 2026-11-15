@@ -6,13 +6,26 @@ export const manifest = {
 // Match the proven Archipelago feel: a short drag walks and a long drag runs.
 const MOVE_DEAD_ZONE_PX = 26;
 const RUN_THRESHOLD_PX = 125;
+const TURN_MAX_OFFSET_PX = 110;
+const SWIPE_MIN_DISTANCE_PX = 46;
 const TAP_MAX_MOVE_PX = 20;
 const TAP_MAX_DURATION_MS = 260;
 const DOUBLE_TAP_WINDOW_MS = 300;
 const DOUBLE_TAP_DISTANCE_PX = 90;
+const SINGLE_HOLD_MS = 500;
 
 function distance(x1, y1, x2, y2) {
   return Math.hypot(x2 - x1, y2 - y1);
+}
+
+function clampTurn(value) {
+  return Math.max(-1, Math.min(1, Number(value) || 0));
+}
+
+function nowMs() {
+  return typeof performance !== "undefined" && typeof performance.now === "function"
+    ? performance.now()
+    : Date.now();
 }
 
 function interactiveTarget(target) {
@@ -31,13 +44,24 @@ export async function setup(ctx) {
   let currentDirection = null;
   let sprintHeld = false;
   let fireHeld = false;
+  let turnValue = 0;
+  let interactHoldActive = false;
   let sessionStartedAt = 0;
   let sessionStartX = 0;
   let sessionStartY = 0;
   let sessionMaxMove = 0;
+  let sessionMaxTouches = 0;
   let multiTouchUsed = false;
+  let twoFingerSwipeTriggered = false;
+  let fourFingerSwipeTriggered = false;
+  let singleHoldTimer = null;
+  let singleHoldTriggered = false;
   let pendingTapTimer = null;
   let pendingTap = null;
+  let lastDoubleTap = null;
+  let pendingTwoFingerTapTimer = null;
+  let twoFingerTapCount = 0;
+  let lastTwoFingerTapAt = 0;
 
   function gameActive() {
     return !panel.hidden && controlSettings.mode === "gestures"
@@ -56,6 +80,18 @@ export async function setup(ctx) {
     if (pendingTapTimer != null) clearTimeout(pendingTapTimer);
     pendingTapTimer = null;
     pendingTap = null;
+  }
+
+  function cancelPendingTwoFingerTap() {
+    if (pendingTwoFingerTapTimer != null) clearTimeout(pendingTwoFingerTapTimer);
+    pendingTwoFingerTapTimer = null;
+    twoFingerTapCount = 0;
+    lastTwoFingerTapAt = 0;
+  }
+
+  function cancelSingleHold() {
+    if (singleHoldTimer != null) clearTimeout(singleHoldTimer);
+    singleHoldTimer = null;
   }
 
   function setDirection(next) {
@@ -79,9 +115,24 @@ export async function setup(ctx) {
     input.setVirtualControl?.("fire", value);
   }
 
+  function setTurn(next) {
+    const value = clampTurn(next);
+    if (Math.abs(turnValue - value) < 0.01) return;
+    turnValue = value;
+    input.setVirtualControl?.("turn", value);
+  }
+
+  function setInteractHold(next) {
+    const value = Boolean(next);
+    if (interactHoldActive === value) return;
+    interactHoldActive = value;
+    input.setVirtualControl?.("interact-hold", value);
+  }
+
   function releaseMovement() {
     setDirection(null);
     setSprint(false);
+    setTurn(0);
   }
 
   function choosePrimary() {
@@ -94,52 +145,45 @@ export async function setup(ctx) {
     }
   }
 
-  function updateMovement() {
-    const primary = primaryId == null ? null : tracked.get(primaryId);
-    if (!primary) {
-      releaseMovement();
-      return;
-    }
-
-    const dx = primary.x - primary.originX;
-    const dy = primary.y - primary.originY;
-    const move = Math.hypot(dx, dy);
-    sessionMaxMove = Math.max(sessionMaxMove, distance(sessionStartX, sessionStartY, primary.x, primary.y));
-
-    if (move < MOVE_DEAD_ZONE_PX) {
-      releaseMovement();
-      return;
-    }
-
-    if (Math.abs(dy) >= Math.abs(dx)) setDirection(dy < 0 ? "forward" : "back");
-    else setDirection(dx < 0 ? "left" : "right");
-
-    setSprint(move >= RUN_THRESHOLD_PX);
-  }
-
   function dispatchJump() {
-    const down = new KeyboardEvent("keydown", {
-      code: "Space",
-      key: " ",
-      bubbles: true,
-      cancelable: true,
-    });
-    const up = new KeyboardEvent("keyup", {
-      code: "Space",
-      key: " ",
-      bubbles: true,
-      cancelable: true,
-    });
-    window.dispatchEvent(down);
-    window.dispatchEvent(up);
+    input.triggerVirtualAction?.("parachute");
+    if (typeof KeyboardEvent === "function" && typeof window?.dispatchEvent === "function") {
+      const down = new KeyboardEvent("keydown", {
+        code: "Space",
+        key: " ",
+        bubbles: true,
+        cancelable: true,
+      });
+      const up = new KeyboardEvent("keyup", {
+        code: "Space",
+        key: " ",
+        bubbles: true,
+        cancelable: true,
+      });
+      window.dispatchEvent(down);
+      window.dispatchEvent(up);
+    }
     ctx.events.emit("gesture:jump", { gesture: "double-tap" });
   }
 
-  function handleTap(x, y, now) {
+  function handleSingleFingerTap(x, y, now) {
+    // Triple tap within the double-tap window enters parkour pose (or announces
+    // parachute flight status if currently airborne).
+    if (lastDoubleTap
+      && now - lastDoubleTap.time <= DOUBLE_TAP_WINDOW_MS
+      && distance(lastDoubleTap.x, lastDoubleTap.y, x, y) <= DOUBLE_TAP_DISTANCE_PX) {
+      lastDoubleTap = null;
+      cancelPendingTap();
+      input.triggerVirtualAction?.("parkour-pose");
+      ctx.events.emit("gesture:action", { gesture: "triple-tap", action: "parkour-pose" });
+      return;
+    }
+
     if (pendingTap
       && now - pendingTap.time <= DOUBLE_TAP_WINDOW_MS
       && distance(pendingTap.x, pendingTap.y, x, y) <= DOUBLE_TAP_DISTANCE_PX) {
       cancelPendingTap();
+      lastDoubleTap = { x, y, time: now };
       dispatchJump();
       return;
     }
@@ -154,31 +198,219 @@ export async function setup(ctx) {
     }, DOUBLE_TAP_WINDOW_MS);
   }
 
+  function commitTwoFingerTap(count) {
+    cancelPendingTwoFingerTap();
+    if (count === 1) {
+      input.triggerVirtualAction?.("reload");
+      ctx.events.emit("gesture:action", { gesture: "two-finger-tap", action: "reload" });
+    } else if (count === 2) {
+      input.triggerVirtualAction?.("armor-plate");
+      ctx.events.emit("gesture:action", { gesture: "two-finger-double-tap", action: "armor-plate" });
+    } else if (count >= 3) {
+      input.triggerVirtualAction?.("stimulant");
+      ctx.events.emit("gesture:action", { gesture: "two-finger-triple-tap", action: "stimulant" });
+    }
+  }
+
+  function handleTwoFingerTap(now) {
+    if (twoFingerTapCount > 0 && now - lastTwoFingerTapAt <= DOUBLE_TAP_WINDOW_MS) {
+      twoFingerTapCount += 1;
+    } else {
+      twoFingerTapCount = 1;
+    }
+    lastTwoFingerTapAt = now;
+
+    if (pendingTwoFingerTapTimer != null) clearTimeout(pendingTwoFingerTapTimer);
+    if (twoFingerTapCount >= 3) {
+      commitTwoFingerTap(3);
+      return;
+    }
+    const countSnapshot = twoFingerTapCount;
+    pendingTwoFingerTapTimer = setTimeout(() => {
+      pendingTwoFingerTapTimer = null;
+      commitTwoFingerTap(countSnapshot);
+    }, DOUBLE_TAP_WINDOW_MS);
+  }
+
+  function updateSingleFingerMovement(primary) {
+    const dx = primary.x - primary.originX;
+    const dy = primary.y - primary.originY;
+    const move = Math.hypot(dx, dy);
+
+    if (move < MOVE_DEAD_ZONE_PX) {
+      setDirection(null);
+      setSprint(false);
+      return;
+    }
+
+    cancelSingleHold();
+    if (Math.abs(dy) >= Math.abs(dx)) setDirection(dy < 0 ? "forward" : "back");
+    else setDirection(dx < 0 ? "left" : "right");
+
+    setSprint(move >= RUN_THRESHOLD_PX);
+  }
+
+  function updateTwoFingerGesture(points) {
+    const [first, second] = points;
+    const primary = (primaryId != null && tracked.get(primaryId)) || first;
+    const secondary = primary === first ? second : first;
+
+    // If the player was already moving with the primary finger before placing
+    // the second finger, keep walking/running with the primary finger and let
+    // the second finger smoothly turn the camera left/right.
+    if (currentDirection != null && secondary) {
+      updateSingleFingerMovement(primary);
+      const dx2 = secondary.x - secondary.originX;
+      if (Math.abs(dx2) >= MOVE_DEAD_ZONE_PX) {
+        const signed = Math.sign(dx2) * Math.max(0.35, (Math.abs(dx2) - MOVE_DEAD_ZONE_PX) / TURN_MAX_OFFSET_PX);
+        setTurn(signed);
+      } else {
+        setTurn(0);
+      }
+      return;
+    }
+
+    const avgDx = ((first.x - first.originX) + (second.x - second.originX)) * 0.5;
+    const avgDy = ((first.y - first.originY) + (second.y - second.originY)) * 0.5;
+
+    // Vertical two-finger swipes: up switches weapon, down opens the Map.
+    if (!twoFingerSwipeTriggered
+      && Math.abs(avgDy) >= SWIPE_MIN_DISTANCE_PX
+      && Math.abs(avgDy) > Math.abs(avgDx) * 1.15) {
+      twoFingerSwipeTriggered = true;
+      setTurn(0);
+      if (avgDy < 0) {
+        const action = avgDx < -28 ? "weapon-prev" : "weapon-next";
+        input.triggerVirtualAction?.(action);
+        ctx.events.emit("gesture:action", { gesture: "two-finger-swipe-up", action });
+      } else {
+        input.triggerVirtualAction?.("map");
+        ctx.events.emit("gesture:action", { gesture: "two-finger-swipe-down", action: "map" });
+      }
+      return;
+    }
+
+    // Horizontal two-finger drag rotates the camera/facing direction.
+    if (Math.abs(avgDx) >= MOVE_DEAD_ZONE_PX && Math.abs(avgDx) >= Math.abs(avgDy)) {
+      const signed = Math.sign(avgDx) * Math.max(0.35, (Math.abs(avgDx) - MOVE_DEAD_ZONE_PX) / TURN_MAX_OFFSET_PX);
+      setTurn(signed);
+    } else {
+      setTurn(0);
+    }
+  }
+
+  function updateMovement() {
+    const count = tracked.size;
+    if (!count) {
+      releaseMovement();
+      return;
+    }
+
+    if (count === 1) {
+      setTurn(0);
+      const primary = (primaryId != null && tracked.get(primaryId)) ?? tracked.values().next().value;
+      if (!primary) {
+        releaseMovement();
+        return;
+      }
+      updateSingleFingerMovement(primary);
+      return;
+    }
+
+    const points = [...tracked.values()];
+    if (count === 2) {
+      updateTwoFingerGesture(points);
+      return;
+    }
+
+    if (count === 3) {
+      // While firing with 3 fingers, allow the primary finger to steer movement
+      // and the second finger to turn the camera.
+      const primary = (primaryId != null && tracked.get(primaryId)) ?? points[0];
+      updateSingleFingerMovement(primary);
+      const secondary = points.find((p) => p !== primary);
+      if (secondary) {
+        const dx2 = secondary.x - secondary.originX;
+        if (Math.abs(dx2) >= MOVE_DEAD_ZONE_PX) {
+          const signed = Math.sign(dx2) * Math.max(0.35, (Math.abs(dx2) - MOVE_DEAD_ZONE_PX) / TURN_MAX_OFFSET_PX);
+          setTurn(signed);
+        } else {
+          setTurn(0);
+        }
+      }
+      return;
+    }
+
+    // 4+ fingers: check for vertical swipe down to announce parachute status.
+    if (count >= 4 && !fourFingerSwipeTriggered) {
+      const avgDy = points.reduce((sum, p) => sum + (p.y - p.originY), 0) / points.length;
+      if (avgDy >= SWIPE_MIN_DISTANCE_PX) {
+        fourFingerSwipeTriggered = true;
+        input.triggerVirtualAction?.("parachute-status");
+        ctx.events.emit("gesture:action", { gesture: "four-finger-swipe-down", action: "parachute-status" });
+      }
+    }
+  }
+
   function startSession(touch, now) {
     sessionStartedAt = now;
     sessionStartX = touch.clientX;
     sessionStartY = touch.clientY;
     sessionMaxMove = 0;
+    sessionMaxTouches = 1;
     multiTouchUsed = false;
+    twoFingerSwipeTriggered = false;
+    fourFingerSwipeTriggered = false;
+    singleHoldTriggered = false;
+    cancelSingleHold();
+    singleHoldTimer = setTimeout(() => {
+      singleHoldTimer = null;
+      if (tracked.size !== 1 || multiTouchUsed || sessionMaxMove > TAP_MAX_MOVE_PX) return;
+      singleHoldTriggered = true;
+      setInteractHold(true);
+      ctx.events.emit("gesture:hold", { gesture: "single-hold" });
+    }, SINGLE_HOLD_MS);
   }
 
   function finishSession(x, y, now) {
+    cancelSingleHold();
+    const hadSingleHold = singleHoldTriggered;
+    const maxMove = sessionMaxMove;
+    const maxTouches = sessionMaxTouches;
+    const duration = Math.max(0, now - sessionStartedAt);
+
     releaseMovement();
     setFire(false);
-    const duration = now - sessionStartedAt;
-    if (!multiTouchUsed
-      && duration <= TAP_MAX_DURATION_MS
-      && sessionMaxMove <= TAP_MAX_MOVE_PX) {
-      handleTap(x, y, now);
+    setInteractHold(false);
+
+    if (hadSingleHold) {
+      // Stationary 1-finger hold without dragging toggles route auto-guidance (Y).
+      if (maxMove <= TAP_MAX_MOVE_PX) {
+        input.triggerVirtualAction?.("navigation-face");
+        ctx.events.emit("gesture:action", { gesture: "single-hold", action: "navigation-face" });
+      }
+    } else if (!multiTouchUsed && duration <= TAP_MAX_DURATION_MS && maxMove <= TAP_MAX_MOVE_PX) {
+      handleSingleFingerTap(x, y, now);
+    } else if (maxTouches === 2 && !twoFingerSwipeTriggered && duration <= TAP_MAX_DURATION_MS && maxMove <= TAP_MAX_MOVE_PX) {
+      handleTwoFingerTap(now);
+    } else if (maxTouches >= 4 && !fourFingerSwipeTriggered && duration <= 320 && maxMove <= 30) {
+      input.triggerVirtualAction?.("navigation-face");
+      ctx.events.emit("gesture:action", { gesture: "four-finger-tap", action: "navigation-face" });
     }
+
     primaryId = null;
     sessionStartedAt = 0;
     sessionMaxMove = 0;
+    sessionMaxTouches = 0;
     multiTouchUsed = false;
+    twoFingerSwipeTriggered = false;
+    fourFingerSwipeTriggered = false;
+    singleHoldTriggered = false;
   }
 
   function addChangedTouches(event) {
     let accepted = false;
+    const now = nowMs();
     for (const touch of Array.from(event.changedTouches ?? [])) {
       // Controls are never part of a gesture. This stays true even when another
       // finger is already steering, so buttons remain usable during movement.
@@ -187,16 +419,20 @@ export async function setup(ctx) {
         id: touch.identifier,
         x: touch.clientX,
         y: touch.clientY,
+        startX: touch.clientX,
+        startY: touch.clientY,
         originX: touch.clientX,
         originY: touch.clientY,
+        startedAt: now,
       };
       tracked.set(touch.identifier, point);
       accepted = true;
       if (primaryId == null) {
         primaryId = touch.identifier;
-        startSession(touch, performance.now());
+        startSession(touch, now);
       }
     }
+    sessionMaxTouches = Math.max(sessionMaxTouches, tracked.size);
     return accepted;
   }
 
@@ -206,12 +442,8 @@ export async function setup(ctx) {
       if (!point) continue;
       point.x = touch.clientX;
       point.y = touch.clientY;
-      if (touch.identifier === primaryId) {
-        sessionMaxMove = Math.max(
-          sessionMaxMove,
-          distance(sessionStartX, sessionStartY, touch.clientX, touch.clientY),
-        );
-      }
+      const moved = distance(point.startX, point.startY, touch.clientX, touch.clientY);
+      sessionMaxMove = Math.max(sessionMaxMove, moved);
     }
   }
 
@@ -241,8 +473,10 @@ export async function setup(ctx) {
     if (tracked.size > 1) {
       multiTouchUsed = true;
       cancelPendingTap();
+      cancelSingleHold();
     }
-    if (tracked.size >= 3) setFire(true);
+    if (tracked.size === 3) setFire(true);
+    else if (tracked.size >= 4) setFire(false);
     updateMovement();
   }, { capture: true, passive: false });
 
@@ -259,9 +493,9 @@ export async function setup(ctx) {
     updateChangedTouches(event);
     const { lastX, lastY, primaryEnded } = removeChangedTouches(event);
 
-    if (tracked.size < 3) setFire(false);
+    if (tracked.size !== 3) setFire(false);
     if (!tracked.size) {
-      finishSession(lastX, lastY, performance.now());
+      finishSession(lastX, lastY, nowMs());
       return;
     }
     if (primaryEnded) choosePrimary();
@@ -274,12 +508,20 @@ export async function setup(ctx) {
   function reset() {
     tracked.clear();
     primaryId = null;
+    cancelSingleHold();
     releaseMovement();
     setFire(false);
+    setInteractHold(false);
     cancelPendingTap();
+    cancelPendingTwoFingerTap();
+    lastDoubleTap = null;
     sessionStartedAt = 0;
     sessionMaxMove = 0;
+    sessionMaxTouches = 0;
     multiTouchUsed = false;
+    twoFingerSwipeTriggered = false;
+    fourFingerSwipeTriggered = false;
+    singleHoldTriggered = false;
   }
 
   ctx.events.on("touch-control:mode-changed", reset);

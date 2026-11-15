@@ -136,6 +136,10 @@ export async function setup(ctx) {
     });
   }
 
+  ctx.events.on("input:touch", ({ control, down } = {}) => {
+    if (down && control === "navigation-face") trigger("face");
+  });
+
   ctx.events.on("network:connected", () => { connected = true; });
   ctx.events.on("network:reconnected", () => { connected = true; });
   ctx.events.on("network:disconnected", () => {

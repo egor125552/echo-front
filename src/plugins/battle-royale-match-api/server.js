@@ -95,6 +95,59 @@ export async function setup(ctx) {
     }
   });
 
+  ctx.events.on("parachute:landed", ({ entityId }) => {
+    const human = entities.get(entityId);
+    if (!human?.alive || human.bot || human.kind !== "human") return;
+    const humanTransform = ctx.components.get(entityId, "Transform");
+    const ownTeam = Number(teams.teamOf(entityId)) || 0;
+    const botParachutes = ctx.services.has("bot-parachutes") ? ctx.services.get("bot-parachutes") : null;
+    if (!humanTransform || ownTeam <= 0 || !botParachutes?.retarget) return;
+    const mates = entities.all().filter((e) => (
+      e.alive && e.bot && (Number(teams.teamOf(e.id)) || 0) === ownTeam
+    ));
+    mates.forEach((mate, idx) => {
+      const angle = (idx * Math.PI * 2) / Math.max(1, mates.length);
+      botParachutes.retarget(mate.id, {
+        x: (Number(humanTransform.x) || 0) + Math.cos(angle) * 10,
+        y: 0,
+        z: (Number(humanTransform.z) || 0) + Math.sin(angle) * 10,
+        kind: "squad-drop",
+      });
+    });
+  });
+
+  function recruitHumanSquadBots(playerId, team, squadId) {
+    if (tutorial) return [];
+    const candidates = entities.all()
+      .filter((e) => e.bot && e.alive && !e.humanSquad && (Number(teams.teamOf(e.id)) || 0) < 100_000)
+      .filter((e) => {
+        const m = /^br-bot-(\d+)$/.exec(String(e.id));
+        const n = m ? Number(m[1]) : 999;
+        return n > 30 && n !== 94;
+      });
+    const chosen = candidates.slice(-3);
+    const recruited = [];
+    chosen.forEach((bot, idx) => {
+      bot.team = team;
+      bot.squadId = squadId;
+      bot.humanSquad = playerId;
+      bot.name = `Напарник ${idx + 1}`;
+      const teamComp = ctx.components.get(bot.id, "Team");
+      if (teamComp) teamComp.id = team;
+      if (idx < 2) weapons.grant(bot.id, "rifle");
+      recruited.push(bot.id);
+    });
+    return recruited;
+  }
+
+  function squadmatesFor(playerId) {
+    const ownTeam = Number(teams.teamOf(playerId)) || 0;
+    if (ownTeam <= 0) return [];
+    return entities.all()
+      .filter((e) => e.id !== playerId && e.alive && (Number(teams.teamOf(e.id)) || 0) === ownTeam)
+      .map((e) => e.id);
+  }
+
   function connectHuman(playerId) {
     const existing = entities.get(playerId);
     if (existing) {
@@ -102,9 +155,12 @@ export async function setup(ctx) {
         throw new Error(`Session id already belongs to a non-human entity: ${playerId}`);
       }
       movement.setInput(playerId, {});
+      const team = teams.teamOf(playerId);
       return {
         playerId,
-        team: teams.teamOf(playerId),
+        team,
+        squadId: existing.squadId ?? `squad:${team}`,
+        squadmates: squadmatesFor(playerId),
         resumed: true,
         mode: "battle-royale",
       };
@@ -121,12 +177,14 @@ export async function setup(ctx) {
     botFill.makeRoomForHuman();
     humanSerial += 1;
     const team = 100_000 + humanSerial;
+    const squadId = `squad:${team}`;
     entities.spawn({
       id: playerId,
       kind: "human",
       name: "Игрок",
       bot: false,
       team,
+      squadId,
       health: 200,
       armorPlates: 3,
       armorPlateValue: 50,
@@ -134,9 +192,12 @@ export async function setup(ctx) {
       armorReserve: 0,
       weapons: ["pistol"],
     });
+    const spawned = entities.get(playerId);
+    if (spawned) spawned.squadId = squadId;
+    const squadmates = recruitHumanSquadBots(playerId, team, squadId);
     tutorial?.start?.(playerId);
     battleRoyale.arm(Date.now());
-    return { playerId, team, resumed: false, mode: "battle-royale" };
+    return { playerId, team, squadId, squadmates, resumed: false, mode: "battle-royale" };
   }
 
   function suspendHuman(playerId) {
@@ -358,9 +419,13 @@ export async function setup(ctx) {
     const listenerTransform = spectatorTarget
       ? ctx.components.get(spectatorTarget.id, "Transform")
       : selfTransform;
+    const ownTeam = Number(teams.teamOf(playerId)) || 0;
     const visible = [];
     for (const entity of entities.all()) {
-      if (entity.id === playerId || entity.id === spectatorTarget?.id) {
+      const sameTeamAlive = ownTeam > 0
+        && entity.alive
+        && (Number(teams.teamOf(entity.id)) || 0) === ownTeam;
+      if (entity.id === playerId || entity.id === spectatorTarget?.id || sameTeamAlive) {
         visible.push(entitySnapshot(entity, now));
         continue;
       }
