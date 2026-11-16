@@ -1,5 +1,5 @@
 import { createStimulants } from "./stimulants.js";
-import { TEAM_AUTO_REVIVE_RANGE, TEAM_REVIVE_RANGE } from "./server.js";
+import { TEAM_REVIVE_RANGE } from "./server.js";
 
 export const DOWNED_TEAMMATE_MAP_RADIUS = 35;
 export const DOWNED_TEAMMATE_PROMPT_RANGE = 2.5;
@@ -20,7 +20,10 @@ const interrupting = (input, downed = false) => Boolean(
   || input.parachutePressed || input.jumpPressed || input.posePressed);
 
 const interruptingTeamRevive = input => Boolean(
-  input.fireHeld || input.firePressed
+  Math.abs(Number(input.forward) || 0) > 0.05
+  || Math.abs(Number(input.strafe) || 0) > 0.05
+  || input.sprint
+  || input.fireHeld || input.firePressed
   || input.reload || input.platePressed || input.stimulantPressed
   || input.parachutePressed || input.jumpPressed);
 
@@ -133,18 +136,6 @@ export async function setup(ctx) {
           reviveProgressMs: near.reviveProgressMs,
           now,
         });
-      }
-      const currentInput = ctx.components.get(entity.id, "Input") ?? {};
-      const movingOrFighting = Boolean(
-        Math.abs(Number(currentInput.forward) || 0) > 0.05
-        || Math.abs(Number(currentInput.strafe) || 0) > 0.05
-        || currentInput.sprint
-        || currentInput.fireHeld
-        || currentInput.firePressed
-        || meds.isUsing(entity.id),
-      );
-      if (!movingOrFighting && near.distance <= TEAM_AUTO_REVIVE_RANGE) {
-        injury.startTeamRevive(entity.id, near.entityId, now);
       }
     }
   }

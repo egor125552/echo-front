@@ -15,8 +15,8 @@ export const BOT_EXPLORATION_MIN_DISTANCE = 8;
 export const BOT_EXPLORATION_DISTANCE_SPREAD = 8;
 export const BOT_EXPLORATION_MIN_MS = 14_000;
 export const BOT_EXPLORATION_TIME_SPREAD_MS = 8_000;
-export const BOT_EXPLORATION_PAUSE_MIN_MS = 3_000;
-export const BOT_EXPLORATION_PAUSE_SPREAD_MS = 3_000;
+export const BOT_EXPLORATION_PAUSE_MIN_MS = 700;
+export const BOT_EXPLORATION_PAUSE_SPREAD_MS = 700;
 
 export const manifest = {
   id: "battle-royale-bot-interest",
@@ -50,12 +50,20 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function insideBuilding(position, building) {
+function insideBuilding(position, building, padding = 0) {
   return Boolean(building)
-    && Number(position?.x) >= building.minX
-    && Number(position?.x) <= building.maxX
-    && Number(position?.z) >= building.minZ
-    && Number(position?.z) <= building.maxZ;
+    && Number(position?.x) >= building.minX - padding
+    && Number(position?.x) <= building.maxX + padding
+    && Number(position?.z) >= building.minZ - padding
+    && Number(position?.z) <= building.maxZ + padding;
+}
+
+function insideAnyBuilding(position, map, padding = 0) {
+  if (insideBuilding(position, map?.building, padding)) return true;
+  for (const building of map?.navigationBuildings ?? []) {
+    if (insideBuilding(position, building?.bounds, padding)) return true;
+  }
+  return false;
 }
 
 function buildWarehouseInterestPoints(map) {
@@ -178,10 +186,10 @@ export async function setup(ctx) {
     const sequence = (previous?.sequence ?? -1) + 1;
     const halfSize = Math.max(40, Number(map?.halfSize) || 400);
     const margin = 12;
-    const fromInside = insideBuilding(transform, map?.building);
+    const fromInside = insideAnyBuilding(transform, map, 0.1);
 
     let chosen = null;
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
       const seed = stableHash(`${botId}:explore:${sequence}:${attempt}`);
       const angle = ((seed % 65536) / 65536) * Math.PI * 2;
       const distance = BOT_EXPLORATION_MIN_DISTANCE
@@ -191,7 +199,7 @@ export async function setup(ctx) {
         y: Number(transform?.y) || 0,
         z: clamp((Number(transform?.z) || 0) + Math.sin(angle) * distance, -halfSize + margin, halfSize - margin),
       };
-      if (!fromInside && insideBuilding(candidate, map?.building)) continue;
+      if (!fromInside && insideAnyBuilding(candidate, map, 1.6)) continue;
       if (distance3(transform, candidate) < BOT_EXPLORATION_MIN_DISTANCE * 0.65) continue;
       chosen = candidate;
       break;

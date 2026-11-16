@@ -118,6 +118,7 @@ export async function setup(ctx) {
 
   function recruitHumanSquadBots(playerId, team, squadId) {
     if (tutorial) return [];
+    const humanTransform = ctx.components.get(playerId, "Transform");
     const candidates = entities.all()
       .filter((e) => e.bot && e.alive && !e.humanSquad && (Number(teams.teamOf(e.id)) || 0) < 100_000)
       .filter((e) => {
@@ -131,10 +132,20 @@ export async function setup(ctx) {
       bot.team = team;
       bot.squadId = squadId;
       bot.humanSquad = playerId;
+      bot.squadSlot = idx;
       bot.name = `Напарник ${idx + 1}`;
       const teamComp = ctx.components.get(bot.id, "Team");
       if (teamComp) teamComp.id = team;
       if (idx < 2) weapons.grant(bot.id, "rifle");
+      if (humanTransform) {
+        const angle = (idx * Math.PI * 2) / Math.max(1, chosen.length);
+        movement.teleport(bot.id, {
+          x: (Number(humanTransform.x) || 0) + Math.cos(angle) * 9,
+          y: Number(humanTransform.y) || 0,
+          z: (Number(humanTransform.z) || 0) + Math.sin(angle) * 9,
+          angle: Number(humanTransform.angle) || 0,
+        });
+      }
       recruited.push(bot.id);
     });
     return recruited;
@@ -148,7 +159,7 @@ export async function setup(ctx) {
       .map((e) => e.id);
   }
 
-  function connectHuman(playerId) {
+  function connectHuman(playerId, now = Date.now()) {
     const existing = entities.get(playerId);
     if (existing) {
       if (existing.kind !== "human" || existing.bot) {
@@ -196,7 +207,7 @@ export async function setup(ctx) {
     if (spawned) spawned.squadId = squadId;
     const squadmates = recruitHumanSquadBots(playerId, team, squadId);
     tutorial?.start?.(playerId);
-    battleRoyale.arm(Date.now());
+    battleRoyale.arm(Number(now) || Date.now());
     return { playerId, team, squadId, squadmates, resumed: false, mode: "battle-royale" };
   }
 

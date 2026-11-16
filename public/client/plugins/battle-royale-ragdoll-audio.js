@@ -171,26 +171,50 @@ export async function setup(ctx) {
       : 0.48 + intensity * 0.52;
 
     try {
-      if (payload.entityId === network.playerId) {
-        await audio.playCentered(url, { gain });
-        return;
-      }
-
       const physicalOcclusion = Number(payload.occlusion);
-      await audio.playSpatial(
-        url,
-        { x: payload.x, y: payload.y ?? 0, z: payload.z },
-        {
-          radius: payload.radius ?? (heavy ? 62 : 30),
-          gain,
-          referenceDistance: heavy ? 1.7 : 1.35,
-          rolloffFactor: heavy ? 0.58 : 0.72,
-          airAbsorptionMinHz: heavy ? 3000 : 3600,
-          occlusion: Number.isFinite(physicalOcclusion)
-            ? clamp(physicalOcclusion, 0, 1)
-            : 0,
-        },
-      );
+      const occlusion = Number.isFinite(physicalOcclusion)
+        ? clamp(physicalOcclusion, 0, 1)
+        : 0;
+      const position = { x: payload.x, y: payload.y ?? 0, z: payload.z };
+      const radius = payload.radius ?? (heavy ? 62 : 30);
+
+      const playStep = (stepUrl, stepGain) => {
+        if (payload.entityId === network.playerId) {
+          return audio.playCentered(stepUrl, { gain: stepGain });
+        }
+        return audio.playSpatial(
+          stepUrl,
+          position,
+          {
+            radius,
+            gain: stepGain,
+            referenceDistance: heavy ? 1.7 : 1.35,
+            rolloffFactor: heavy ? 0.58 : 0.72,
+            airAbsorptionMinHz: heavy ? 3000 : 3600,
+            occlusion,
+          },
+        );
+      };
+
+      await playStep(url, gain);
+
+      if (payload.collapse === "downed" || payload.collapse === "death") {
+        const followups = [
+          { delayMs: 85, url: RAGDOLL_SOUNDS["ragdoll.impact.1"], gainScale: 0.84 },
+          { delayMs: 180, url: RAGDOLL_SOUNDS["ragdoll.impact.gear"], gainScale: 0.68 },
+        ];
+        for (const step of followups) {
+          const timer = setTimeout(() => {
+            void playStep(step.url, clamp(gain * step.gainScale, 0.32, 1.15)).catch(() => {});
+          }, step.delayMs);
+          tumbleTimers.push(timer);
+        }
+      } else if (payload.collapse === "death-slump") {
+        const timer = setTimeout(() => {
+          void playStep(RAGDOLL_SOUNDS["ragdoll.impact.gear"], clamp(gain * 0.64, 0.28, 0.95)).catch(() => {});
+        }, 90);
+        tumbleTimers.push(timer);
+      }
     } catch (error) {
       console.error("Echo Front ragdoll audio error", error);
     }

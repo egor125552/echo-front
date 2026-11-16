@@ -120,10 +120,12 @@ export function createDriverRoutes(physics, navigation, map) {
     const raw = escape ? [{ ...escape, escape: true }, ...anchors] : anchors;
     const points = [];
     let cursor = vehicle;
-    for (const point of raw) {
+    for (let i = 0; i < raw.length; i += 1) {
+      const point = raw[i];
+      const isFinal = i === raw.length - 1;
       const dx = point.x - cursor.x, dz = point.z - cursor.z;
       const length = Math.hypot(dx, dz);
-      const lane = !point.escape && length > 16 ? 4 : 0;
+      const lane = !point.escape && !isFinal && length > 16 ? 4 : 0;
       const rightX = length > .001 ? -dz / length : 0;
       const rightZ = length > .001 ? dx / length : 0;
       const biased = { x: point.x + rightX * lane, y: 0, z: point.z + rightZ * lane };

@@ -114,6 +114,7 @@ function orientedTransition(transition, regionId) {
   if (transition.from === regionId) {
     return {
       transition,
+      fromRegion: regionId,
       next: transition.to,
       fromPoint: transition.fromPoint,
       toPoint: transition.toPoint,
@@ -123,6 +124,7 @@ function orientedTransition(transition, regionId) {
   if (transition.to === regionId) {
     return {
       transition,
+      fromRegion: regionId,
       next: transition.from,
       fromPoint: transition.toPoint,
       toPoint: transition.fromPoint,
@@ -132,6 +134,11 @@ function orientedTransition(transition, regionId) {
   return null;
 }
 
+function isStairRegionId(regionId) {
+  const id = String(regionId ?? "");
+  return id === "stair" || id.startsWith("stair:");
+}
+
 function transitionWaypoints(oriented, buildingId) {
   const common = {
     kind: oriented.transition.kind,
@@ -139,6 +146,9 @@ function transitionWaypoints(oriented, buildingId) {
     transitionId: oriented.transition.id,
     buildingId,
     mandatory: true,
+    ...(oriented.transition.kind === "stair" && isStairRegionId(oriented.fromRegion)
+      ? { exitingStair: true }
+      : {}),
   };
   return [
     { ...point(oriented.fromPoint), ...common, transitionSide: "approach" },
@@ -184,13 +194,51 @@ function bestRegionPath(building, startRegion, endRegion, startPoint, targetPoin
   return best?.waypoints ?? null;
 }
 
-function dedupeWaypoints(start, waypoints = []) {
+export function dedupeWaypoints(start, waypoints = []) {
   const result = [];
   let cursor = start;
-  for (const waypoint of waypoints) {
+  for (let i = 0; i < waypoints.length; i += 1) {
+    const waypoint = waypoints[i];
     if (distance3(cursor, waypoint) < 0.35) {
       cursor = waypoint;
       continue;
+    }
+    const next = waypoints[i + 1];
+    const sameTransitionPair = cursor === start
+      && waypoint?.transitionSide === "approach"
+      && next?.transitionSide === "cross"
+      && waypoint?.transitionId
+      && waypoint.transitionId === next.transitionId;
+    if (sameTransitionPair && (waypoint.kind === "stair" || waypoint.kind === "door" || waypoint.kind === "passage")) {
+      const dx = finite(next.x) - finite(waypoint.x);
+      const dz = finite(next.z) - finite(waypoint.z);
+      const len = Math.hypot(dx, dz);
+      const maxDy = waypoint.kind === "stair" ? Infinity : 0.85;
+      if (len > 0.1 && Math.abs(finite(start.y) - finite(waypoint.y)) <= maxDy) {
+        const relX = finite(start.x) - finite(waypoint.x);
+        const relZ = finite(start.z) - finite(waypoint.z);
+        const t = (relX * dx + relZ * dz) / (len * len);
+        const perp = Math.abs(relX * dz - relZ * dx) / len;
+        const exitingStair = waypoint.kind === "stair"
+          && (Boolean(waypoint.exitingStair) || Math.abs(finite(start.y) - finite(waypoint.y)) > 0.12);
+        const maxPerp = waypoint.kind === "door"
+          ? 0.45
+          : waypoint.kind === "passage"
+            ? 0.65
+            : exitingStair
+              ? 1.45
+              : 0.38;
+        const minT = waypoint.kind === "door" || waypoint.kind === "passage"
+          ? -0.05
+          : exitingStair
+            ? -0.08
+            : 0;
+        const maxT = waypoint.kind === "door" || waypoint.kind === "passage" ? 1.05 : 1.25;
+        if (t >= minT && t <= maxT && perp <= maxPerp) {
+          cursor = waypoint;
+          continue;
+        }
+      }
     }
     result.push(waypoint);
     cursor = waypoint;
@@ -217,11 +265,13 @@ function stairEndpoints(stair, upperY) {
   const centerZ = (bounds.minZ + bounds.maxZ) / 2;
   const direction = String(stair.risesToward ?? "west");
   const inset = 0.5;
+  const run = Math.max(0.1, Math.abs(finite(stair.run)));
+  const insideInset = Math.min(run * 0.25, 1.05);
   if (direction === "east") {
     return {
       bottom: { x: bounds.minX - inset, y: 0, z: centerZ },
-      bottomInside: { x: bounds.minX + inset, y: 0, z: centerZ },
-      topInside: { x: bounds.maxX - inset, y: upperY, z: centerZ },
+      bottomInside: { x: bounds.minX + insideInset, y: 0, z: centerZ },
+      topInside: { x: bounds.maxX - insideInset, y: upperY, z: centerZ },
       top: { x: bounds.maxX + inset, y: upperY, z: centerZ },
       bounds,
     };
@@ -229,8 +279,8 @@ function stairEndpoints(stair, upperY) {
   if (direction === "north") {
     return {
       bottom: { x: centerX, y: 0, z: bounds.maxZ + inset },
-      bottomInside: { x: centerX, y: 0, z: bounds.maxZ - inset },
-      topInside: { x: centerX, y: upperY, z: bounds.minZ + inset },
+      bottomInside: { x: centerX, y: 0, z: bounds.maxZ - insideInset },
+      topInside: { x: centerX, y: upperY, z: bounds.minZ + insideInset },
       top: { x: centerX, y: upperY, z: bounds.minZ - inset },
       bounds,
     };
@@ -238,16 +288,16 @@ function stairEndpoints(stair, upperY) {
   if (direction === "south") {
     return {
       bottom: { x: centerX, y: 0, z: bounds.minZ - inset },
-      bottomInside: { x: centerX, y: 0, z: bounds.minZ + inset },
-      topInside: { x: centerX, y: upperY, z: bounds.maxZ - inset },
+      bottomInside: { x: centerX, y: 0, z: bounds.minZ + insideInset },
+      topInside: { x: centerX, y: upperY, z: bounds.maxZ - insideInset },
       top: { x: centerX, y: upperY, z: bounds.maxZ + inset },
       bounds,
     };
   }
   return {
     bottom: { x: bounds.maxX + inset, y: 0, z: centerZ },
-    bottomInside: { x: bounds.maxX - inset, y: 0, z: centerZ },
-    topInside: { x: bounds.minX + inset, y: upperY, z: centerZ },
+    bottomInside: { x: bounds.maxX - insideInset, y: 0, z: centerZ },
+    topInside: { x: bounds.minX + insideInset, y: upperY, z: centerZ },
     top: { x: bounds.minX - inset, y: upperY, z: centerZ },
     bounds,
   };

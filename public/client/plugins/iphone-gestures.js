@@ -147,22 +147,6 @@ export async function setup(ctx) {
 
   function dispatchJump() {
     input.triggerVirtualAction?.("parachute");
-    if (typeof KeyboardEvent === "function" && typeof window?.dispatchEvent === "function") {
-      const down = new KeyboardEvent("keydown", {
-        code: "Space",
-        key: " ",
-        bubbles: true,
-        cancelable: true,
-      });
-      const up = new KeyboardEvent("keyup", {
-        code: "Space",
-        key: " ",
-        bubbles: true,
-        cancelable: true,
-      });
-      window.dispatchEvent(down);
-      window.dispatchEvent(up);
-    }
     ctx.events.emit("gesture:jump", { gesture: "double-tap" });
   }
 

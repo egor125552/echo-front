@@ -74,8 +74,69 @@ export async function setup(ctx) {
     };
   }
 
+  function activeHumanLeader(bot) {
+    if (bot?.humanSquad) {
+      const leader = entities.get(bot.humanSquad);
+      if (leader?.alive && !leader.bot && leader.kind === "human") return leader;
+    }
+    return entities.all().find((e) => e.alive && !e.bot && e.kind === "human") ?? null;
+  }
+
+  function isTutorialActive() {
+    const tutorial = ctx.services.has("battle-royale-tutorial")
+      ? ctx.services.get("battle-royale-tutorial")
+      : null;
+    return Boolean(tutorial?.botsPassive?.() || tutorial?.stateFor);
+  }
+
+  function contestedEnemySquadDrop(bot) {
+    if (bot?.humanSquad || isTutorialActive()) return null;
+    const match = /^br-bot-(\d+)$/.exec(String(bot?.id ?? ""));
+    if (!match) return null;
+    const serial = Number(match[1]);
+    // Use bots 31..36 (teams 16, 17, 18 — 3 two-bot enemy squads) as contested drop squads near the player
+    if (serial < 31 || serial > 36) return null;
+    const human = activeHumanLeader(bot);
+    if (!human) return null;
+    const humanTransform = ctx.components.get(human.id, "Transform");
+    if (!humanTransform) return null;
+    const squadIndex = Math.floor((serial - 31) / 2); // 0, 1, 2
+    const wingmanIndex = (serial - 31) % 2; // 0 = breacher, 1 = flanker
+    const bearings = [-0.65, 0.65, 0.0];
+    const distances = [22, 28, 34];
+    const bearing = bearings[squadIndex] ?? 0;
+    const radius = distances[squadIndex] ?? 26;
+    const wingmanLateral = wingmanIndex === 0 ? -2.8 : 2.8;
+    const baseX = (Number(humanTransform.x) || 0) - 36 + Math.cos(bearing) * radius;
+    const baseZ = (Number(humanTransform.z) || 0) + Math.sin(bearing) * radius;
+    return clampToMap({
+      x: baseX - Math.sin(bearing) * wingmanLateral,
+      y: 0,
+      z: baseZ + Math.cos(bearing) * wingmanLateral,
+      kind: "contested-squad-drop",
+      squadIndex,
+      wingmanIndex,
+    });
+  }
+
   function chooseTarget(bot, transform) {
-    const seed = stableHash(`${bot.id}:drop:${generation}`);
+    if (bot?.humanSquad) {
+      const leader = activeHumanLeader(bot);
+      const leaderTransform = leader ? ctx.components.get(leader.id, "Transform") : null;
+      const slot = Number(bot.squadSlot) || 0;
+      const angle = (slot * Math.PI * 2) / 3;
+      const base = leaderTransform ?? transform;
+      return clampToMap({
+        x: (Number(base?.x) || 0) + Math.cos(angle) * 9,
+        y: 0,
+        z: (Number(base?.z) || 0) + Math.sin(angle) * 9,
+        kind: "squad-drop",
+      });
+    }
+    const contested = contestedEnemySquadDrop(bot);
+    if (contested) return contested;
+    const squadKey = bot?.team ? `team:${bot.team}` : bot.id;
+    const seed = stableHash(`${squadKey}:drop:${generation}`);
     const jitterAngle = ((seed >>> 6) % 65536) / 65536 * Math.PI * 2;
     const jitterDistance = 8 + ((seed >>> 18) % 23);
     return clampToMap({
@@ -87,7 +148,41 @@ export async function setup(ctx) {
   }
 
   function chooseLaunch(bot, target) {
-    const seed = stableHash(`${bot.id}:launch:${generation}`);
+    if (bot?.humanSquad) {
+      const leader = activeHumanLeader(bot);
+      const leaderTransform = leader ? ctx.components.get(leader.id, "Transform") : null;
+      const slot = Number(bot.squadSlot) || 0;
+      const angle = (slot * Math.PI * 2) / 3;
+      const point = clampToMap({
+        x: (Number(leaderTransform?.x ?? target.x) || 0) + Math.cos(angle) * 10,
+        y: DEFAULT_ALTITUDE,
+        z: (Number(leaderTransform?.z ?? target.z) || 0) + Math.sin(angle) * 10,
+      });
+      return {
+        ...point,
+        y: DEFAULT_ALTITUDE,
+        angle: Number.isFinite(Number(leaderTransform?.angle))
+          ? Number(leaderTransform.angle)
+          : angleTo(point, target),
+      };
+    }
+    if (target?.kind === "contested-squad-drop") {
+      const squadSeed = stableHash(`contested:${target.squadIndex}:${generation}`);
+      const direction = ((squadSeed >>> 4) % 65536) / 65536 * Math.PI * 2;
+      const offset = 28;
+      const point = clampToMap({
+        x: target.x - Math.cos(direction) * offset,
+        y: DEFAULT_ALTITUDE,
+        z: target.z - Math.sin(direction) * offset,
+      });
+      return {
+        ...point,
+        y: DEFAULT_ALTITUDE,
+        angle: angleTo(point, target),
+      };
+    }
+    const squadKey = bot?.team ? `team:${bot.team}` : bot.id;
+    const seed = stableHash(`${squadKey}:launch:${generation}`);
     const direction = ((seed >>> 4) % 65536) / 65536 * Math.PI * 2;
     const offset = MIN_LAUNCH_OFFSET + (seed % (LAUNCH_OFFSET_SPREAD + 1));
     const point = clampToMap({
@@ -103,7 +198,14 @@ export async function setup(ctx) {
   }
 
   function chooseDeployAltitude(bot, launch, target) {
-    const seed = stableHash(`${bot.id}:deploy:${generation}`);
+    if (bot?.humanSquad) {
+      return 112;
+    }
+    if (target?.kind === "contested-squad-drop") {
+      return 118;
+    }
+    const squadKey = bot?.team ? `team:${bot.team}` : bot.id;
+    const seed = stableHash(`${squadKey}:deploy:${generation}`);
     const base = MIN_DEPLOY_ALTITUDE + (seed % (DEPLOY_ALTITUDE_SPREAD + 1));
     const distance = distance2(launch, target);
     const reachFloor = distance / 1.38 + 85;
@@ -118,11 +220,13 @@ export async function setup(ctx) {
     const savedKind = bot.kind;
     bot.bot = false;
     bot.kind = "human";
+    bot.botParachutist = true;
     try {
       return callback();
     } finally {
       bot.bot = savedBot;
       bot.kind = savedKind;
+      delete bot.botParachutist;
     }
   }
 
@@ -168,14 +272,25 @@ export async function setup(ctx) {
   }
 
   function setFreefallInput(bot, transform, assignment) {
+    const distance = distance2(transform, assignment.target);
+    if (distance <= 4.5) {
+      movement.setInput(bot.id, {
+        forward: 0,
+        strafe: 0,
+        turn: 0,
+        sprint: false,
+        fireHeld: false,
+      });
+      return;
+    }
     const desired = angleTo(transform, assignment.target);
     const error = wrapAngle(desired - (Number(transform.angle) || 0));
     const aligned = Math.abs(error) < 0.3;
     movement.setInput(bot.id, {
-      forward: aligned ? 1 : 0.35,
+      forward: aligned ? (distance > 18 ? 1 : 0.45) : 0.35,
       strafe: 0,
       turn: clamp(error * 1.35, -MAX_TURN_COMMAND, MAX_TURN_COMMAND),
-      sprint: true,
+      sprint: distance > 14,
       fireHeld: false,
     });
   }
@@ -226,6 +341,33 @@ export async function setup(ctx) {
       return;
     }
 
+    if (bot.humanSquad) {
+      const leader = entities.get(bot.humanSquad);
+      const leaderTransform = leader?.alive ? ctx.components.get(leader.id, "Transform") : null;
+      const leaderParachute = leader?.alive ? ctx.components.get(leader.id, "Parachute") : null;
+      if (leaderTransform) {
+        const slot = Number(bot.squadSlot) || 0;
+        const angle = (slot * Math.PI * 2) / 3;
+        assignment.target = clampToMap({
+          x: (Number(leaderTransform.x) || 0) + Math.cos(angle) * 8.5,
+          y: 0,
+          z: (Number(leaderTransform.z) || 0) + Math.sin(angle) * 8.5,
+          kind: "squad-drop",
+        });
+      }
+      if (
+        state.phase === "freefall"
+        && leaderParachute
+        && (leaderParachute.phase === "deployed" || !leaderParachute.airborne)
+      ) {
+        if (parachute.deploy(bot.id, now)) {
+          assignment.status = "deployed";
+          assignment.deployedAt = now;
+          return;
+        }
+      }
+    }
+
     if (state.phase === "freefall") {
       assignment.status = "freefall";
       setFreefallInput(bot, transform, assignment);
@@ -233,7 +375,9 @@ export async function setup(ctx) {
         ? Number(state.groundDistance)
         : Number(transform.y) || 0;
       const distance = distance2(transform, assignment.target);
-      const reachPressure = distance > Math.max(45, clearance * 1.28);
+      const reachPressure = !bot.humanSquad
+        && assignment.target?.kind !== "contested-squad-drop"
+        && distance > Math.max(45, clearance * 1.28);
       if (clearance <= assignment.deployAltitude || reachPressure) {
         if (parachute.deploy(bot.id, now)) {
           assignment.status = "deployed";
@@ -334,6 +478,7 @@ export async function setup(ctx) {
       saved.push({ bot, botFlag: bot.bot, kind: bot.kind });
       bot.bot = false;
       bot.kind = "human";
+      bot.botParachutist = true;
     }
 
     try {
@@ -345,6 +490,7 @@ export async function setup(ctx) {
         if (!current) continue;
         current.bot = entry.botFlag;
         current.kind = entry.kind;
+        delete current.botParachutist;
       }
     }
   };

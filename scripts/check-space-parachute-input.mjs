@@ -123,3 +123,24 @@ test('Space after ejecting from a moving vehicle deploys the parachute mid-air e
   assert.ok(chute?.glideSpeed > 1.5, 'Emergency vehicle-eject parachute must preserve forward glide momentum');
 }));
 
+test('Double-tap / duplicate parachutePressed within cooldown does not immediately close a newly opened parachute', () => scenario((game, services) => {
+  const parachute = services.get('parachute');
+  const now = Date.now();
+  assert.equal(parachute.stateFor(PLAYER).phase, 'freefall');
+
+  // First impulse opens the parachute
+  game.api.handleInput(PLAYER, { parachutePressed: true }, now);
+  assert.equal(parachute.stateFor(PLAYER).phase, 'deployed');
+
+  // Immediate duplicate impulse (e.g. double-tap or bounce within < 450ms) must NOT cut the canopy
+  game.api.handleInput(PLAYER, { parachutePressed: true }, now + 10);
+  assert.equal(parachute.stateFor(PLAYER).phase, 'deployed');
+  assert.equal(parachute.stateFor(PLAYER).deployed, true);
+
+  // Deliberate second double-tap after cooldown (>= 450ms) cuts the canopy as intended
+  game.api.handleInput(PLAYER, { parachutePressed: true }, now + 500);
+  assert.equal(parachute.stateFor(PLAYER).phase, 'freefall');
+  assert.equal(parachute.stateFor(PLAYER).deployed, false);
+}));
+
+

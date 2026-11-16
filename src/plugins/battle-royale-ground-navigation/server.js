@@ -136,6 +136,28 @@ export function groundFloorBypassWaypoint(from, target, { building, stair } = {}
   return null;
 }
 
+function pointDistance2(a, b) {
+  return Math.hypot(number(a?.x) - number(b?.x), number(a?.z) - number(b?.z));
+}
+
+function allNavigationBuildings(map) {
+  const result = [];
+  const seen = new Set();
+  if (map?.building?.minX != null) {
+    const id = String(map.building.id ?? "warehouse");
+    seen.add(id);
+    result.push({ id, ...map.building });
+  }
+  for (const entry of map?.navigationBuildings ?? []) {
+    if (!entry?.bounds) continue;
+    const id = String(entry.id ?? "");
+    if (id && seen.has(id)) continue;
+    if (id) seen.add(id);
+    result.push({ id, ...entry.bounds });
+  }
+  return result;
+}
+
 export function buildingDoorBypassWaypoint(from, doorWaypoint, building) {
   if (!from || !doorWaypoint || !building || insideRect(from, building, 0.1)) return null;
   const obstacle = {
@@ -146,25 +168,65 @@ export function buildingDoorBypassWaypoint(from, doorWaypoint, building) {
   };
   if (!segmentIntersectsRect(from, doorWaypoint, obstacle)) return null;
 
+  const pad = BUILDING_BYPASS_SIDE_CLEARANCE;
+  const corners = [
+    { x: building.minX - pad, y: 0, z: building.minZ - pad },
+    { x: building.maxX + pad, y: 0, z: building.minZ - pad },
+    { x: building.maxX + pad, y: 0, z: building.maxZ + pad },
+    { x: building.minX - pad, y: 0, z: building.maxZ + pad },
+  ];
+  const wallBox = {
+    minX: building.minX - 0.35,
+    maxX: building.maxX + 0.35,
+    minZ: building.minZ - 0.35,
+    maxZ: building.maxZ + 0.35,
+  };
+
+  const startVisible = [];
+  const endVisible = [];
+  for (let i = 0; i < 4; i += 1) {
+    if (!segmentIntersectsRect(from, corners[i], wallBox)) startVisible.push(i);
+    if (!segmentIntersectsRect(corners[i], doorWaypoint, wallBox)) endVisible.push(i);
+  }
+
+  let bestWaypoint = null;
+  let bestCost = Infinity;
+  for (const startIdx of startVisible) {
+    for (const endIdx of endVisible) {
+      for (const dir of [1, -1]) {
+        const chain = [];
+        let cursor = startIdx;
+        let perimeterCost = 0;
+        chain.push(corners[cursor]);
+        while (cursor !== endIdx) {
+          const next = (cursor + dir + 4) % 4;
+          perimeterCost += pointDistance2(corners[cursor], corners[next]);
+          cursor = next;
+          chain.push(corners[cursor]);
+        }
+        const total = pointDistance2(from, corners[startIdx])
+          + perimeterCost
+          + pointDistance2(corners[endIdx], doorWaypoint);
+        if (total >= bestCost) continue;
+        bestCost = total;
+        const targetCorner = chain.length > 1 && pointDistance2(from, chain[0]) <= GROUND_BYPASS_REACHED
+          ? chain[1]
+          : chain[0];
+        bestWaypoint = {
+          ...targetCorner,
+          kind: "building-bypass",
+          stage: chain.length > 1 ? "clear-side" : "corner",
+        };
+      }
+    }
+  }
+  if (bestWaypoint) return bestWaypoint;
+
   const bypassZ = chooseBuildingBypassZ(from, doorWaypoint, building);
   const westX = building.minX - BUILDING_BYPASS_END_CLEARANCE;
   const eastX = building.maxX + BUILDING_BYPASS_END_CLEARANCE;
-  const sideClear = Math.abs(number(from.z) - bypassZ) <= GROUND_BYPASS_REACHED;
-
-  if (number(from.x) < building.minX + 0.15) {
-    if (!sideClear) {
-      return { x: westX, y: 0, z: bypassZ, kind: "building-bypass", stage: "clear-side" };
-    }
-    if (number(from.x) < eastX - GROUND_BYPASS_REACHED) {
-      return { x: eastX, y: 0, z: bypassZ, kind: "building-bypass", stage: "cross" };
-    }
-    return null;
-  }
-
-  if (number(from.x) < eastX - GROUND_BYPASS_REACHED || !sideClear) {
-    return { x: eastX, y: 0, z: bypassZ, kind: "building-bypass", stage: "corner" };
-  }
-  return null;
+  const x = Math.abs(number(from.x) - westX) <= Math.abs(number(from.x) - eastX) ? westX : eastX;
+  return { x, y: 0, z: bypassZ, kind: "building-bypass", stage: "corner" };
 }
 
 export async function setup(ctx) {
@@ -175,13 +237,23 @@ export async function setup(ctx) {
 
   function requiredWaypoints(from, target) {
     if (!from || !target) return [];
+    const buildings = allNavigationBuildings(map);
+    const stairWallsForSegment = (a, b) => (map.walls ?? []).filter((wall) => {
+      if (wall?.kind !== "building-stair") return false;
+      const stairBuilding = buildings.find((entry) => (
+        wall.buildingId ? entry.id === String(wall.buildingId) : insideRect(wall, entry, 0.1)
+      ));
+      return stairBuilding && insideRect(a, stairBuilding, 0.25) && insideRect(b, stairBuilding, 0.25);
+    });
     const required = buildingNavigation.requiredWaypoints(from, target) ?? [];
     const route = [];
     let cursor = from;
     for (const goal of [...required, target]) {
-      // A waypoint inside the low end belongs to an intentional ascent.
+      // Only route around an interior staircase when both endpoints lie inside
+      // that staircase's building; outdoor approaches must not detour to an
+      // indoor stair corner through an exterior wall.
       if (goal.kind !== "stair" || goal.transitionSide === "approach") {
-        route.push(...stairBypassPoints(cursor, goal, map.walls ?? []));
+        route.push(...stairBypassPoints(cursor, goal, stairWallsForSegment(cursor, goal)));
       }
       if (goal !== target) route.push(goal);
       cursor = goal;
@@ -189,9 +261,52 @@ export async function setup(ctx) {
     return route;
   }
 
+  function buildingBoundsForWaypoint(waypoint, buildings) {
+    if (waypoint?.buildingId) {
+      const byId = buildings.find((entry) => entry.id === String(waypoint.buildingId));
+      if (byId) return byId;
+    }
+    return buildings.find((entry) => insideRect(waypoint, entry, BUILDING_BYPASS_SIDE_CLEARANCE + 1))
+      ?? map.building
+      ?? null;
+  }
+
+  function exteriorObstacleBypass(from, target, buildings) {
+    if (!from || !target || !buildings.length) return null;
+    if (buildings.some((b) => insideRect(from, b, 0.1))) return null;
+    let bestBypass = null;
+    let bestDistance = Infinity;
+    for (const building of buildings) {
+      if (insideRect(target, building, 0.1)) continue;
+      const bypass = buildingDoorBypassWaypoint(from, target, building);
+      if (!bypass) continue;
+      const cx = (building.minX + building.maxX) / 2;
+      const cz = (building.minZ + building.maxZ) / 2;
+      const dist = Math.hypot(number(from.x) - cx, number(from.z) - cz);
+      if (dist < bestDistance) {
+        bestDistance = dist;
+        bestBypass = bypass;
+      }
+    }
+    return bestBypass;
+  }
+
   function navigationWaypoint(from, target) {
+    const buildings = allNavigationBuildings(map);
     const buildingRoute = requiredWaypoints(from, target);
-    if (buildingRoute.length) return buildingRoute[0];
+    if (buildingRoute.length) {
+      const first = buildingRoute[0];
+      if (
+        first?.kind === "door"
+        && first.transitionSide === "approach"
+        && !buildings.some((b) => insideRect(from, b, 0.1))
+      ) {
+        const doorBuilding = buildingBoundsForWaypoint(first, buildings);
+        const bypass = buildingDoorBypassWaypoint(from, first, doorBuilding);
+        if (bypass) return bypass;
+      }
+      return first;
+    }
 
     const semantic = originalNavigationWaypoint(from, target);
 
@@ -219,10 +334,12 @@ export async function setup(ctx) {
     }
 
     if (semantic) return semantic;
-    return groundFloorBypassWaypoint(from, target, {
+    const stairGroundBypass = groundFloorBypassWaypoint(from, target, {
       building: map.building,
       stair,
     });
+    if (stairGroundBypass) return stairGroundBypass;
+    return exteriorObstacleBypass(from, target, buildings);
   }
 
   map.navigationWaypoint = navigationWaypoint;
@@ -237,8 +354,8 @@ export async function setup(ctx) {
     bypassWaypoint(from, target) {
       return groundFloorBypassWaypoint(from, target, { building: map.building, stair });
     },
-    buildingBypassWaypoint(from, target) {
-      return buildingDoorBypassWaypoint(from, target, map.building);
+    buildingBypassWaypoint(from, target, building = map.building) {
+      return buildingDoorBypassWaypoint(from, target, building);
     },
   });
 }

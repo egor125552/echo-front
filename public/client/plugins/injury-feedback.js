@@ -8,7 +8,7 @@ export const manifest = {
 export function injuryMessage(event, p = {}, selfId = null) {
   if (event === "injury:downed") return "Ты тяжело ранен. Можно только ползти. Используй стимулятор: клавиша N на клавиатуре или кнопка Стимулятор на сенсорном экране. Без помощи ты истечёшь кровью.";
   if (event === "injury:downed-teammate-nearby") {
-    return "Лежащий напарник рядом. Можно поднять клавишей E.";
+    return "Лежащий напарник рядом. Можно поднять касанием одним пальцем или клавишей E.";
   }
   if (event === "injury:team-revive-started") {
     return selfId && p.reviverId === selfId && p.entityId !== selfId

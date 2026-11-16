@@ -112,7 +112,7 @@ export async function setup(ctx) {
 
   function placeNear(entityId, landingPosition = null, now = Date.now()) {
     const entity = entities.get(entityId);
-    if (!entity || entity.bot || entity.kind !== "human") return null;
+    if (!entity || entity.bot || entity.botParachutist || entity.kind !== "human") return null;
 
     const transform = ctx.components.get(entityId, "Transform");
     if (!transform) return null;
@@ -181,10 +181,6 @@ export async function setup(ctx) {
 
   ctx.events.on("parachute:launched", ({ entityId }) => {
     releaseAssignment(entityId);
-  });
-
-  ctx.events.on("parachute:landed", ({ entityId, x, y, z, now }) => {
-    placeNear(entityId, { x, y, z }, Number(now) || Date.now());
   });
 
   ctx.events.on("battle-royale:started", () => {

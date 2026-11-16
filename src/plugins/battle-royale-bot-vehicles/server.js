@@ -337,7 +337,7 @@ export async function setup(ctx) {
       // crosses its view. Bot-vs-bot encounters happen at the destination or
       // through an existing combat commitment. A human player remains a
       // high-priority fresh threat so drivers cannot blindly blast past them.
-      if (visibleEntity?.bot) continue;
+      if (visibleEntity?.bot && !visibleEntity?.humanSquad) continue;
       if (visible.distance <= dismountDistance) {
         return { entityId: visible.entityId, distance: visible.distance, dismountDistance,
           brakingDistance, source: "fresh-vision" };
@@ -823,7 +823,9 @@ export async function setup(ctx) {
       ? { point: recovery.point, nextPoint: recovery.nextPoint, remaining: Infinity }
       : routes.waypoint(car, state.route);
     const reachedWorldAnchor = state.destination?.drivePurpose === "world-anchor" && path.remaining < 8;
-    if (!ram && !recovery.turnaround && (path.remaining < 4 || reachedWorldAnchor)) {
+    const arrivedNonAnchor = state.destination?.drivePurpose !== "world-anchor"
+      && (path.remaining < 10 || distance(car, state.destination) <= 14);
+    if (!ram && !recovery.turnaround && (path.remaining < 4 || reachedWorldAnchor || arrivedNonAnchor)) {
       if (state.destination?.drivePurpose === "world-anchor") {
         const nextDestination = destinationFor(id, car, now);
         if (nextDestination && distance(car, nextDestination) > 60) {
@@ -1134,7 +1136,13 @@ export async function setup(ctx) {
           }
         }
       }
-      if (state.recoveries >= 3) stop(state, now, "stuck");
+      if (state.recoveries >= 3) {
+        const stopReason = state.destination?.drivePurpose !== "world-anchor"
+          && distance(car, state.destination) <= 22
+          ? "arrived"
+          : "stuck";
+        stop(state, now, stopReason);
+      }
       else {
         state.phase = "reverse"; state.phaseAt = now; state.recoveries++; counters.recoveries++;
         state.trafficWaitAt = null;
@@ -1259,7 +1267,11 @@ export async function setup(ctx) {
       else drive(id, state, controlDt, now, trafficCars, humanPositions);
     }
     const targetDrivers = driverLimit();
-    if (now < nextScan || states.size >= targetDrivers) return;
+    const liveBotCount = bots.all().filter((b) => b.alive).length;
+    const isFullMatch = liveBotCount > 12;
+    const autoDriverLimit = isFullMatch ? Math.min(targetDrivers, 2) : targetDrivers;
+    const autoSearchRadius = isFullMatch ? 10 : BOT_VEHICLE_SEARCH_RADIUS;
+    if (now < nextScan || states.size >= autoDriverLimit) return;
     nextScan = now + 1000;
     const available = vehicles.snapshot().filter(car => !car.occupied && !reservations.has(car.id)
       && (vehicleCooldowns.get(car.id) ?? 0) <= now
@@ -1267,16 +1279,20 @@ export async function setup(ctx) {
     lastScan = { eligible: 0, availableCars: available.length, nearCar: 0, refillNearCar: 0, withGoal: 0, assigned: 0 };
     const eligible = [];
     const nearestAvailableDistances = [];
+    const warehousePriority = ctx.services.has("warehouse-priority") ? ctx.services.get("warehouse-priority") : null;
+    const buildingNav = ctx.services.has("building-navigation") ? ctx.services.get("building-navigation") : null;
     for (const bot of bots.all()) {
-      if (!bot.alive || states.has(bot.id) || vehicles.isPassenger?.(bot.id) || (cooldowns.get(bot.id) ?? 0) > now) continue;
+      if (!bot.alive || bot.humanSquad || states.has(bot.id) || vehicles.isPassenger?.(bot.id) || (cooldowns.get(bot.id) ?? 0) > now) continue;
       const p = transform(bot.id);
-      if (!p || p.y > 1 || get("parachute").stateFor(bot.id)?.airborne) continue;
+      if (!p || p.y > 1 || p.downed || get("parachute").stateFor(bot.id)?.airborne) continue;
+      if (warehousePriority?.visitFor?.(bot.id) || buildingNav?.locationFor?.(p)?.building) continue;
+      if (isFullMatch && humanPositions.some((hp) => distance(p, hp) <= 220)) continue;
       eligible.push({ bot, p });
       lastScan.eligible++;
       let nearest = Infinity;
       for (const car of available) nearest = Math.min(nearest, distance(p, car));
       if (Number.isFinite(nearest)) nearestAvailableDistances.push(nearest);
-      if (nearest < BOT_VEHICLE_SEARCH_RADIUS) lastScan.nearCar++;
+      if (nearest < autoSearchRadius) lastScan.nearCar++;
       if (nearest < BOT_VEHICLE_REFILL_RADIUS) lastScan.refillNearCar++;
     }
 
@@ -1298,7 +1314,7 @@ export async function setup(ctx) {
       }
       pairs.sort((a, b) => a.distance - b.distance);
       for (const pair of pairs) {
-        if (assignedThisScan >= BOT_VEHICLE_ASSIGNMENTS_PER_SCAN || states.size >= targetDrivers) break;
+        if (assignedThisScan >= BOT_VEHICLE_ASSIGNMENTS_PER_SCAN || states.size >= autoDriverLimit) break;
         const id = pair.entry.bot.id;
         if (usedBots.has(id) || usedCars.has(pair.car.id) || reservations.has(pair.car.id)) continue;
         const goal = destinationFor(id, pair.entry.p, now);
@@ -1309,8 +1325,8 @@ export async function setup(ctx) {
         assignedThisScan++; lastScan.assigned++;
       }
     };
-    matchPairs(BOT_VEHICLE_SEARCH_RADIUS);
-    if (states.size < targetDrivers && assignedThisScan < BOT_VEHICLE_ASSIGNMENTS_PER_SCAN) {
+    matchPairs(autoSearchRadius);
+    if (!isFullMatch && states.size < autoDriverLimit && assignedThisScan < BOT_VEHICLE_ASSIGNMENTS_PER_SCAN) {
       matchPairs(BOT_VEHICLE_REFILL_RADIUS);
     }
     if (nearestAvailableDistances.length) {

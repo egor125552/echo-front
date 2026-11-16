@@ -207,12 +207,22 @@ test("tactical squad AI splits into medic and cover, pauses on enemy rush, ignor
   }
 });
 
-test("downed teammates appear in the Map (Карта) at 15-20m and trigger proximity prompt at 2m", async () => {
+test("Engine Lab: downed teammates appear in Map (Карта) at 15-20m, prompt at 2m without auto-starting, and revive on 1-finger tap", async () => {
+  const { EngineLab } = await import("../src/server/engine-lab.js");
   const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const lab = new EngineLab(game, {
+    mode: "battle-royale",
+    room: "squad-revive-engine-lab",
+    watch: [PLAYER],
+  });
   const s = game.host.services;
   let now = Date.now() + 8000;
   try {
-    const joined = game.api.connectHuman(PLAYER);
+    const prep = await lab.prepare([
+      { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [PLAYER] } },
+    ]);
+    assert(prep.results.every((r) => r.ok));
+    const joined = prep.results[0].result;
     const [mate1] = joined.squadmates;
     const keepIds = new Set([PLAYER, ...joined.squadmates, "br-bot-5"]);
     for (const ent of [...s.get("entities").all()]) {
@@ -226,6 +236,7 @@ test("downed teammates appear in the Map (Карта) at 15-20m and trigger prox
     groundEntity(game, joined.squadmates[2], { x: 82, y: 0, z: 80, angle: 0 });
     groundEntity(game, "br-bot-5", { x: -300, y: 0, z: -300, angle: 0 });
     game.host.events.emit("parachute:landed", { entityId: PLAYER, now });
+    lab.start();
 
     // Down mate1 at 18m
     s.get("health").applyDamage(mate1, 999, { attackerId: "br-bot-5", weaponId: "rifle", now });
@@ -238,7 +249,7 @@ test("downed teammates appear in the Map (Карта) at 15-20m and trigger prox
     assert.equal(mapItem.name, "Лежащий напарник 1");
     assert(Math.abs(mapItem.distance - 18) < 0.5);
 
-    // Player can select downed teammate from Map and activate route
+    // Player selects downed teammate from Map and activates route
     game.api.handleInput(PLAYER, {
       navigationSelectTargetId: `teammate:${mate1}`,
       navigationActivateSelected: true,
@@ -247,19 +258,209 @@ test("downed teammates appear in the Map (Карта) at 15-20m and trigger prox
     assert.equal(navState.active, true);
     assert.equal(navState.target?.id, `teammate:${mate1}`);
 
-    // Move player to 2.0m from downed mate1 and step — must emit injury:downed-teammate-nearby
-    game.drainEvents();
+    // Move player to 2.0m from downed mate1 and step in Engine Lab — must emit prompt but NOT auto-start revive
+    const capturedInjuryEvents = [];
+    game.host.events.on("*", (packet) => {
+      if (packet.event.startsWith("injury:")) capturedInjuryEvents.push(packet);
+    });
     groundEntity(game, PLAYER, { x: 0, y: 0, z: -16.0, angle: 0 });
-    now += 50;
-    game.api.step(0.05, now);
-    const playerEvents = game.api.eventsForPlayer(PLAYER, game.drainEvents());
+    await lab.advance({ steps: 2, sampleEvery: 1 });
+    assert.equal(s.get("injury").isRevivingTeammate(PLAYER), false, "Must NOT auto-start revive just by standing at 2m");
+    const playerEvents = game.api.eventsForPlayer(PLAYER, capturedInjuryEvents);
     const nearbyEvent = playerEvents.find((e) => e.event === "injury:downed-teammate-nearby");
     assert(nearbyEvent, "Approaching within 2m of downed teammate must emit injury:downed-teammate-nearby");
     assert.equal(
       injuryMessage(nearbyEvent.event, nearbyEvent.payload, PLAYER),
-      "Лежащий напарник рядом. Можно поднять клавишей E.",
+      "Лежащий напарник рядом. Можно поднять касанием одним пальцем или клавишей E.",
     );
+
+    // Now simulate 1-finger tap on iPhone (which sends interactPressed: true)
+    game.api.handleInput(PLAYER, { interactPressed: true }, lab.now);
+    assert.equal(s.get("injury").isRevivingTeammate(PLAYER), true, "1-finger tap (interactPressed) must start reviving teammate");
+    await lab.advance({ steps: 75, sampleEvery: 15 });
+    assert.equal(s.get("injury").isDowned(mate1), false, "Teammate must be revived after 3.5s via Engine Lab");
+    const report = lab.finish();
+    assert(report.simulatedMs >= 3500);
   } finally {
     await game.host.stop();
   }
 });
+
+test("Engine Lab full jump: squadmates skydive and land beside player on foot, engage nearby enemy squads, and never get hijacked into solo cars", async () => {
+  const { EngineLab } = await import("../src/server/engine-lab.js");
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const lab = new EngineLab(game, {
+    mode: "battle-royale",
+    room: "squad-jump-engine-lab",
+    watch: [PLAYER],
+  });
+  const s = game.host.services;
+  const c = game.host.components;
+  try {
+    const prep = await lab.prepare([
+      { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [PLAYER] } },
+    ]);
+    assert(prep.results.every((r) => r.ok));
+    const joined = prep.results[0].result;
+    assert.equal(joined.squadmates.length, 3);
+
+    let squadCombatHits = 0;
+    const teams = s.get("teams");
+    const playerTeam = teams.teamOf(PLAYER);
+    game.host.events.on("combat:damage", ({ attackerId, targetId }) => {
+      if (teams.teamOf(attackerId) === playerTeam || teams.teamOf(targetId) === playerTeam) {
+        squadCombatHits += 1;
+      }
+    });
+
+    lab.start();
+
+    // Advance 15 seconds (3 * 100 steps * 50ms) for freefall + canopy landing
+    for (let i = 0; i < 3; i += 1) {
+      await lab.advance({ steps: 100, sampleEvery: 20 });
+    }
+    const playerTransform = c.get(PLAYER, "Transform");
+    const playerParachute = c.get(PLAYER, "Parachute");
+    assert.equal(Boolean(playerParachute?.airborne), false, "Player must have landed by 15s");
+
+    const botVehicles = s.get("bot-vehicles");
+    for (const mateId of joined.squadmates) {
+      const mateTransform = c.get(mateId, "Transform");
+      const mateParachute = c.get(mateId, "Parachute");
+      assert.equal(Boolean(mateParachute?.airborne), false, `Squadmate ${mateId} must land with player by 15s`);
+      const dist = Math.hypot(mateTransform.x - playerTransform.x, mateTransform.z - playerTransform.z);
+      assert(dist <= 20, `Squadmate ${mateId} must land near player (dist=${dist.toFixed(1)}m)`);
+      assert.equal(botVehicles.stateFor(mateId), null, `Squadmate ${mateId} must not be hijacked into a solo car`);
+    }
+
+    // Advance another 15 seconds for on-foot squad combat around landing zone
+    for (let i = 0; i < 3; i += 1) {
+      await lab.advance({ steps: 100, sampleEvery: 20 });
+    }
+    assert(squadCombatHits > 10, `Player squad and nearby enemy squads must actively engage on foot (hits=${squadCombatHits})`);
+    assert.equal(
+      s.get("dropzone-vehicle").summary().placements,
+      0,
+      "No vehicles may be artificially spawned/teleported next to landing bots or player",
+    );
+    const allBots = s.get("entities").all().filter((e) => e.bot && e.alive);
+    const nearbyDrivers = allBots.filter((b) => {
+      const bt = c.get(b.id, "Transform");
+      const pt = c.get(PLAYER, "Transform");
+      return Math.hypot(bt.x - pt.x, bt.z - pt.z) <= 200 && botVehicles.stateFor(b.id) != null;
+    });
+    assert.equal(nearbyDrivers.length, 0, "No bots within 200m of player may grab cars during landing/combat");
+    for (const mateId of joined.squadmates) {
+      assert.equal(botVehicles.stateFor(mateId), null, `Squadmate ${mateId} must remain on foot with the squad`);
+    }
+  } finally {
+    await game.host.stop();
+  }
+});
+
+test("Engine Lab warehouse exit: squadmates inside warehouse (upper floor, behind stair, ground floor) never get trapped and exit through doorway when player leaves", async () => {
+  const { EngineLab } = await import("../src/server/engine-lab.js");
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const lab = new EngineLab(game, {
+    mode: "battle-royale",
+    room: "squad-warehouse-exit-lab",
+    watch: [PLAYER],
+  });
+  const s = game.host.services;
+  const c = game.host.components;
+  try {
+    const prep = await lab.prepare([
+      { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [PLAYER] } },
+    ]);
+    const joined = prep.results[0].result;
+    const [mate1, mate2, mate3] = joined.squadmates;
+    const now = Date.now() + 2000;
+    s.get("battle-royale").arm(now);
+
+    // Move unrelated bots far away so we test pure warehouse exit navigation
+    let idx = 0;
+    for (const ent of s.get("entities").all()) {
+      if ([PLAYER, mate1, mate2, mate3].includes(ent.id)) continue;
+      idx += 1;
+      groundEntity(game, ent.id, { x: -450 - (idx % 20) * 6, y: 0, z: -450 - Math.floor(idx / 20) * 6 });
+    }
+
+    // Place squadmates in the hardest spots inside the warehouse:
+    // mate1: upper floor (y=3.2, x=62, z=2)
+    // mate2: ground floor west of the staircase (y=0, x=56, z=-3)
+    // mate3: ground floor near inner wall (y=0, x=71, z=5)
+    // Player walks outside warehouse door to x=83, z=0
+    groundEntity(game, mate1, { x: 62, y: 3.2, z: 2, angle: 0 });
+    groundEntity(game, mate2, { x: 56, y: 0, z: -3, angle: 0 });
+    groundEntity(game, mate3, { x: 71, y: 0, z: 5, angle: 0 });
+    groundEntity(game, PLAYER, { x: 83, y: 0, z: 0, angle: Math.PI / 2 });
+    game.host.events.emit("parachute:landed", { entityId: PLAYER, now });
+
+    lab.start();
+    for (let i = 0; i < 3; i += 1) {
+      await lab.advance({ steps: 100, sampleEvery: 20 });
+    }
+
+    const buildingNav = s.get("building-navigation");
+    for (const mateId of [mate1, mate2, mate3]) {
+      const mt = c.get(mateId, "Transform");
+      const inside = Boolean(buildingNav.locationFor(mt)?.building);
+      const dist = Math.hypot(mt.x - 83, mt.z - 0);
+      assert.equal(inside, false, `Squadmate ${mateId} must exit the warehouse (pos=${JSON.stringify(mt)})`);
+      assert(dist <= 12, `Squadmate ${mateId} must join player outside warehouse (dist=${dist.toFixed(1)}m)`);
+    }
+  } finally {
+    await game.host.stop();
+  }
+});
+
+test("Engine Lab warehouse ascent: squadmates outside, behind stair, and on ground floor climb stairs to join player on upper floor", async () => {
+  const { EngineLab } = await import("../src/server/engine-lab.js");
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  const lab = new EngineLab(game, {
+    mode: "battle-royale",
+    room: "squad-warehouse-ascent-lab",
+    watch: [PLAYER],
+  });
+  const s = game.host.services;
+  const c = game.host.components;
+  try {
+    const prep = await lab.prepare([
+      { command: "service.call", args: { service: "match-api", method: "connectHuman", arguments: [PLAYER] } },
+    ]);
+    const joined = prep.results[0].result;
+    const [mate1, mate2, mate3] = joined.squadmates;
+    const now = Date.now() + 2000;
+    s.get("battle-royale").arm(now);
+
+    let idx = 0;
+    for (const ent of s.get("entities").all()) {
+      if ([PLAYER, mate1, mate2, mate3].includes(ent.id)) continue;
+      idx += 1;
+      groundEntity(game, ent.id, { x: -450 - (idx % 20) * 6, y: 0, z: -450 - Math.floor(idx / 20) * 6 });
+    }
+
+    groundEntity(game, PLAYER, { x: 64, y: 3.2, z: 3, angle: 0 });
+    groundEntity(game, mate1, { x: 80, y: 0, z: 0, angle: 0 });
+    groundEntity(game, mate2, { x: 56, y: 0, z: -4, angle: 0 });
+    groundEntity(game, mate3, { x: 71, y: 0, z: 6, angle: 0 });
+    game.host.events.emit("parachute:landed", { entityId: PLAYER, now });
+
+    lab.start();
+    for (let i = 0; i < 5; i += 1) {
+      await lab.advance({ steps: 100, sampleEvery: 20 });
+    }
+
+    for (const mateId of [mate1, mate2, mate3]) {
+      const mt = c.get(mateId, "Transform");
+      const dist = Math.hypot(mt.x - 64, mt.z - 3);
+      assert(mt.y >= 3.0, `Squadmate ${mateId} must reach warehouse upper floor (pos=${JSON.stringify(mt)})`);
+      assert(dist <= 10, `Squadmate ${mateId} must regroup near upper-floor player (dist=${dist.toFixed(1)}m)`);
+    }
+  } finally {
+    await game.host.stop();
+  }
+});
+
+
+

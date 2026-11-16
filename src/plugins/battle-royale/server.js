@@ -276,7 +276,7 @@ export async function setup(ctx) {
 
   ctx.events.on("parachute:landed", ({ entityId, now }) => {
     const entity = entities.get(entityId);
-    if (!entity || entity.bot || entity.kind !== "human") return;
+    if (!entity || entity.bot || entity.botParachutist || entity.kind !== "human") return;
     landedHumans.add(entityId);
     completeDeployment(Number(now) || Date.now());
   });

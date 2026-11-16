@@ -387,7 +387,11 @@ export async function setup(ctx) {
   function toggle(entityId, now = Date.now()) {
     const state = ensureState(entityId);
     if (!state.airborne) return false;
-    return state.phase === "deployed" ? cut(entityId, now) : deploy(entityId, now);
+    if (state.phase === "deployed") {
+      if (now - Number(state.deployedAt || 0) < PARACHUTE_REDEPLOY_COOLDOWN_MS) return false;
+      return cut(entityId, now);
+    }
+    return deploy(entityId, now);
   }
 
   function prepareMovement(dt, now = Date.now()) {

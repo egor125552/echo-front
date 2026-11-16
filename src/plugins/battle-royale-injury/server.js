@@ -27,6 +27,7 @@ export async function setup(ctx) {
   const teams = ctx.services.get("teams");
   const match = ctx.services.get("match-api");
   const physics = ctx.services.get("physics");
+  const ragdoll = ctx.services.get("ragdoll");
   const states = new Map();
   const isDowned = id => Boolean(states.get(id)?.downed);
   const stateFor = id => states.get(id) ?? null;
@@ -234,12 +235,42 @@ export async function setup(ctx) {
       weaponId,
       now: packet.now,
     });
+    if (transform && !ragdoll.isActive(entity.id)) {
+      ctx.events.emit("sound:spatial", {
+        entityId: entity.id,
+        key: "ragdoll.impact.body",
+        ragdollPart: "torso",
+        collapse: "downed",
+        intensity: 0.95,
+        x: Number(transform.x) || 0,
+        y: Number(transform.y) || 0,
+        z: Number(transform.z) || 0,
+        radius: 46,
+      });
+    }
     wipeOrphanedDownedBots(teams.teamOf(entity.id), packet.source?.attackerId ?? null, packet.now);
   });
 
-  ctx.events.on("entity:died", ({ entityId, killerId, now = Date.now() }) => {
+  ctx.events.on("entity:died", ({ entityId, killerId, weaponId, now = Date.now() }) => {
     pauseTeamRevive(entityId, "reviver-died", now);
     const st = states.get(entityId);
+    const wasDowned = Boolean(st?.downed);
+    if (st) st.downed = false;
+    const transform = ctx.components.get(entityId, "Transform");
+    const airborne = Boolean(ctx.components.get(entityId, "Parachute")?.airborne);
+    if (transform && !airborne && !ragdoll.isActive(entityId) && (!wasDowned || (!st?.wiping && weaponId !== "bleed-out"))) {
+      ctx.events.emit("sound:spatial", {
+        entityId,
+        key: wasDowned ? "ragdoll.impact.1" : "ragdoll.impact.body",
+        ragdollPart: wasDowned ? "pelvis" : "torso",
+        collapse: wasDowned ? "death-slump" : "death",
+        intensity: wasDowned ? 0.78 : 1.0,
+        x: Number(transform.x) || 0,
+        y: Number(transform.y) || 0,
+        z: Number(transform.z) || 0,
+        radius: wasDowned ? 38 : 46,
+      });
+    }
     if (st?.wiping) return;
     wipeOrphanedDownedBots(teams.teamOf(entityId), killerId ?? null, now);
   });

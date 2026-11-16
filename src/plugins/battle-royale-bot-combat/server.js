@@ -53,13 +53,20 @@ function stableSeed(value) {
   return hash >>> 0;
 }
 
-function steeringTo(transform, target) {
+const BOT_TURN_SPEED_RAD_PER_SEC = 2.6;
+
+function steeringTo(transform, target, thinkDelayMs = 120) {
   const dx = target.x - transform.x;
   const dz = target.z - transform.z;
   const desired = Math.atan2(dx, -dz);
   const delta = wrapAngle(desired - transform.angle);
+  const dtSec = Math.max(0.05, Math.min(0.25, (Number(thinkDelayMs) || 120) / 1000));
+  const maxTurnStep = BOT_TURN_SPEED_RAD_PER_SEC * dtSec;
+  const proportional = Math.max(-1, Math.min(1, delta * 2.1));
+  const deadbeatCap = maxTurnStep > 0 ? Math.abs(delta) / maxTurnStep : 1;
+  const turn = Math.sign(proportional) * Math.min(Math.abs(proportional), deadbeatCap);
   return {
-    turn: Math.max(-1, Math.min(1, delta * 2.4)),
+    turn,
     aligned: Math.abs(delta) < 0.25,
     distance: Math.hypot(dx, dz),
   };
@@ -137,8 +144,9 @@ function burstAllowsFire(botId, state, now) {
   return true;
 }
 
-function stagedStairRoute(transform, route) {
+export function stagedStairRoute(transform, route) {
   if (route?.kind !== "stair") return route;
+  if (route.transitionSide === "cross") return route;
   const transformY = Number(transform?.y) || 0;
   const routeY = Number(route?.y) || 0;
   const approachingBottomFromEast = (
@@ -147,9 +155,11 @@ function stagedStairRoute(transform, route) {
     && transform.x >= route.x - 0.15
   );
   if (!approachingBottomFromEast) return route;
-  const approach = { ...route, x: route.x + BOT_STAIR_ENTRY_OFFSET, stairStage: "align" };
-  const centered = Math.abs(transform.z - route.z) <= 0.22;
-  if (!centered || distance2(transform, approach) > BOT_STAIR_ENTRY_TOLERANCE) return approach;
+  const offset = route.transitionSide === "approach" ? 0.75 : BOT_STAIR_ENTRY_OFFSET;
+  const approach = { ...route, x: route.x + offset, stairStage: "align" };
+  const centered = Math.abs(transform.z - route.z) <= 0.28;
+  const inEntryCorridor = transform.x <= approach.x + BOT_STAIR_ENTRY_TOLERANCE;
+  if (!centered || !inEntryCorridor) return approach;
   return route;
 }
 
@@ -175,6 +185,20 @@ export function normalizeRouteForTarget(transform, target, route, upperY = 3.2) 
   const currentY = Number(transform?.y) || 0;
   if (!targetUpper && currentY < BOT_GROUND_RAMP_ESCAPE_Y) return null;
   return route;
+}
+
+export function nextMidStairRoute(transform, target, previousRoute, freshRoute, upperY = 3.2) {
+  if (previousRoute?.kind !== "stair") return null;
+  if (!stairRouteMatchesTargetFloor(previousRoute, target, upperY)) return null;
+  const currentY = Number(transform?.y) || 0;
+  if (currentY <= 0.02 || currentY >= upperY - 0.12) return null;
+  if (freshRoute?.kind === "stair" && stairRouteMatchesTargetFloor(freshRoute, target, upperY)) {
+    return normalizeRouteForTarget(transform, target, freshRoute, upperY);
+  }
+  if (previousRoute.transitionSide === "cross") {
+    return normalizeRouteForTarget(transform, target, previousRoute, upperY);
+  }
+  return null;
 }
 
 export async function setup(ctx) {
@@ -332,50 +356,185 @@ export async function setup(ctx) {
     return shared;
   }
 
+  function buildingIdAt(position) {
+    if (!position) return null;
+    if (ctx.services.has("building-navigation")) {
+      const loc = ctx.services.get("building-navigation").locationFor(position);
+      if (loc?.building?.id) return String(loc.building.id);
+    }
+    const b = map?.building;
+    if (
+      b
+      && Number(position.x) >= b.minX
+      && Number(position.x) <= b.maxX
+      && Number(position.z) >= b.minZ
+      && Number(position.z) <= b.maxZ
+    ) {
+      return String(b.id ?? "warehouse");
+    }
+    return null;
+  }
+
+  function buildingLocationAt(position) {
+    if (!position) return { buildingId: null, regionId: null };
+    if (ctx.services.has("building-navigation")) {
+      const loc = ctx.services.get("building-navigation").locationFor(position);
+      if (loc?.building?.id) {
+        return {
+          buildingId: String(loc.building.id),
+          regionId: loc.region?.id ? String(loc.region.id) : null,
+        };
+      }
+    }
+    return { buildingId: buildingIdAt(position), regionId: null };
+  }
+
   function squadRallyInterest(botId, transform, now) {
+    const botEntity = entities.get(botId);
     const allMates = squadTeammatesFor(botId, { includeHuman: true, includeDowned: false });
     const humanMate = allMates.find((m) => !m.entity.bot);
     if (humanMate) {
       const distToHuman = distance3(transform, humanMate.transform);
-      if (distToHuman >= 14 && distToHuman <= 88) {
-        const role = squadRoleFor(botId);
-        const lateralOffset = role === "flanker" ? 4.0 : -4.0;
-        const angle = Number(humanMate.transform.angle) || 0;
+      const selfLoc = buildingLocationAt(transform);
+      const humanLoc = buildingLocationAt(humanMate.transform);
+      const selfBuilding = selfLoc.buildingId;
+      const humanBuilding = humanLoc.buildingId;
+      const differentFloor = Math.abs((Number(transform.y) || 0) - (Number(humanMate.transform.y) || 0)) > 1.1;
+      const onStair = Boolean(selfLoc.regionId && (selfLoc.regionId === "stair" || selfLoc.regionId.startsWith("stair:")));
+      const separatedByStructure = selfBuilding !== humanBuilding
+        || differentFloor
+        || (onStair && selfLoc.regionId !== humanLoc.regionId);
+      if (separatedByStructure || distToHuman >= 6.5) {
+        const slot = Number(botEntity?.squadSlot) || 0;
+        const baseAngle = Number(humanMate.transform.angle) || 0;
+        const formAngle = baseAngle + (slot === 0 ? -0.95 : slot === 1 ? 0.95 : Math.PI);
+        const radius = separatedByStructure ? 2.2 : 4.6;
+        const candidate = {
+          x: (Number(humanMate.transform.x) || 0) + Math.sin(formAngle) * radius,
+          y: Number(humanMate.transform.y) || 0,
+          z: (Number(humanMate.transform.z) || 0) - Math.cos(formAngle) * radius,
+        };
+        const candidateBuilding = buildingIdAt(candidate);
+        const safePoint = candidateBuilding === humanBuilding
+          ? candidate
+          : {
+            x: Number(humanMate.transform.x) || 0,
+            y: Number(humanMate.transform.y) || 0,
+            z: Number(humanMate.transform.z) || 0,
+          };
         return {
           kind: "squad-rally-interest",
           partnerId: humanMate.id,
           partnerGoal: "escort-human",
-          x: (Number(humanMate.transform.x) || 0) + Math.cos(angle) * lateralOffset,
-          y: Number(humanMate.transform.y) || 0,
-          z: (Number(humanMate.transform.z) || 0) + Math.sin(angle) * lateralOffset,
+          separatedByStructure,
+          distToHuman,
+          x: safePoint.x,
+          y: safePoint.y,
+          z: safePoint.z,
           expiresAt: now + 1800,
         };
       }
+      return null;
     }
     const partner = activeSquadPartner(botId);
-    if (!partner) return null;
-    const dist = distance3(transform, partner.transform);
-    if (dist < 13 || dist > 82) return null;
-    const partnerDecision = brain.commitmentFor?.(partner.id, now) ?? null;
-    const partnerInCombat = ["engage", "defend", "hunt"].includes(partnerDecision?.goal);
-    if (!partnerInCombat && dist < 22) return null;
-    const role = squadRoleFor(botId);
-    const lateralOffset = role === "flanker" ? 3.2 : -3.2;
-    const targetPos = partnerInCombat && partnerDecision?.target?.transform
-      ? partnerDecision.target.transform
-      : (partnerInCombat && partnerDecision?.target?.x !== undefined ? partnerDecision.target : partner.transform);
-    const angle = Number(partner.transform.angle) || 0;
-    const rallyX = (Number(targetPos.x) || 0) + Math.cos(angle) * lateralOffset;
-    const rallyZ = (Number(targetPos.z) || 0) + Math.sin(angle) * lateralOffset;
-    return {
-      kind: "squad-rally-interest",
-      partnerId: partner.id,
-      partnerGoal: partnerDecision?.goal ?? "roam",
-      x: rallyX,
-      y: Number(targetPos.y) || 0,
-      z: rallyZ,
-      expiresAt: now + 1800,
-    };
+    const selfState = ctx.components.get(botId, "Bot");
+    if (partner) {
+      const dist = distance3(transform, partner.transform);
+      const partnerDecision = brain.commitmentFor?.(partner.id, now) ?? null;
+      const partnerInCombat = ["engage", "defend", "hunt"].includes(partnerDecision?.goal);
+      const role = squadRoleFor(botId);
+      if (partnerInCombat && dist >= 5 && dist <= 120) {
+        if (selfState) selfState.squadRallyPartnerActive = false;
+        const lateralOffset = role === "flanker" ? 3.2 : -3.2;
+        const targetPos = partnerDecision?.target?.transform
+          ?? (partnerDecision?.target?.x !== undefined ? partnerDecision.target : partner.transform);
+        const dirX = (Number(targetPos.x) || 0) - (Number(partner.transform.x) || 0);
+        const dirZ = (Number(targetPos.z) || 0) - (Number(partner.transform.z) || 0);
+        const dirLen = Math.hypot(dirX, dirZ);
+        const rightX = dirLen > 0.25 ? -dirZ / dirLen : 1;
+        const rightZ = dirLen > 0.25 ? dirX / dirLen : 0;
+        const candidate = {
+          x: (Number(targetPos.x) || 0) + rightX * lateralOffset,
+          y: Number(targetPos.y) || 0,
+          z: (Number(targetPos.z) || 0) + rightZ * lateralOffset,
+        };
+        const safePoint = typeof map.insideAnyBuilding === "function"
+          && map.insideAnyBuilding(candidate) !== map.insideAnyBuilding(targetPos)
+          ? { x: Number(targetPos.x) || 0, y: Number(targetPos.y) || 0, z: Number(targetPos.z) || 0 }
+          : candidate;
+        return {
+          kind: "squad-rally-interest",
+          partnerId: partner.id,
+          partnerGoal: partnerDecision?.goal ?? "engage",
+          x: safePoint.x,
+          y: safePoint.y,
+          z: safePoint.z,
+          expiresAt: now + 1800,
+        };
+      }
+      if (role === "flanker") {
+        // Hysteresis prevents 180-degree oscillation at a single distance threshold:
+        // engage rally when separated >= 16m, release only once within 7m (or >125m).
+        const wasActive = Boolean(selfState?.squadRallyPartnerActive);
+        if (dist <= 7.0 || dist > 125) {
+          if (selfState) selfState.squadRallyPartnerActive = false;
+        } else if (wasActive || dist >= 16) {
+          if (selfState) selfState.squadRallyPartnerActive = true;
+          const safeLen = Math.max(0.01, dist);
+          const ux = (Number(transform.x) - Number(partner.transform.x)) / safeLen;
+          const uz = (Number(transform.z) - Number(partner.transform.z)) / safeLen;
+          const candidate = {
+            x: (Number(partner.transform.x) || 0) + ux * 4.2 - uz * 2.4,
+            y: Number(partner.transform.y) || 0,
+            z: (Number(partner.transform.z) || 0) + uz * 4.2 + ux * 2.4,
+          };
+          const partnerBuilding = buildingIdAt(partner.transform);
+          const safePoint = buildingIdAt(candidate) === partnerBuilding
+            ? candidate
+            : {
+              x: Number(partner.transform.x) || 0,
+              y: Number(partner.transform.y) || 0,
+              z: Number(partner.transform.z) || 0,
+            };
+          return {
+            kind: "squad-rally-interest",
+            partnerId: partner.id,
+            partnerGoal: partnerDecision?.goal ?? "roam",
+            x: safePoint.x,
+            y: safePoint.y,
+            z: safePoint.z,
+            expiresAt: now + 1800,
+          };
+        }
+      } else if (selfState) {
+        selfState.squadRallyPartnerActive = false;
+      }
+    } else if (selfState) {
+      selfState.squadRallyPartnerActive = false;
+    }
+    if (!tutorial?.botsPassive?.()) {
+      const humanTarget = entities.all().find((e) => (
+        e.alive && !e.bot && e.kind === "human" && !ctx.components.get(e.id, "Parachute")?.airborne
+      ));
+      const humanTransform = humanTarget ? ctx.components.get(humanTarget.id, "Transform") : null;
+      if (humanTransform) {
+        const distToHuman = distance3(transform, humanTransform);
+        if (distToHuman >= 22 && distToHuman <= 135) {
+          const seed = stableSeed(`${botEntity?.team || botId}:patrol`);
+          const approachAngle = ((seed % 360) * Math.PI) / 180;
+          return {
+            kind: "squad-rally-interest",
+            partnerId: humanTarget.id,
+            partnerGoal: "sector-patrol",
+            x: (Number(humanTransform.x) || 0) + Math.cos(approachAngle) * 18,
+            y: Number(humanTransform.y) || 0,
+            z: (Number(humanTransform.z) || 0) + Math.sin(approachAngle) * 18,
+            expiresAt: now + 2200,
+          };
+        }
+      }
+    }
+    return null;
   }
 
   function worldToLocalMove(angle, dx, dz) {
@@ -454,7 +613,8 @@ export async function setup(ctx) {
   }
 
   function setRouteInput(bot, transform, state, route, input, now) {
-    if (route?.kind === "stair" || route?.kind === "door") {
+    const insideDoorThroat = route?.kind === "door" && distance2(transform, route) <= 2.2;
+    if (route?.kind === "stair" || insideDoorThroat) {
       movement.setInput(bot.id, {
         ...input,
         strafe: 0,
@@ -473,10 +633,23 @@ export async function setup(ctx) {
     const midStair = stagedRoute?.kind === "stair"
       && Number(transform.y) > 0.2
       && Number(transform.y) < upperY - 0.15;
-    const preciseRoute = midStair
-      ? { ...stagedRoute, z: Number(transform.z) || 0, stairStage: "traverse" }
-      : stagedRoute;
-    const steering = steeringTo(transform, preciseRoute);
+    let preciseRoute = stagedRoute;
+    if (midStair) {
+      if (stagedRoute.transitionSide === "approach") {
+        preciseRoute = { ...stagedRoute, stairStage: "traverse" };
+      } else {
+        const dx = Math.abs((Number(stagedRoute.x) || 0) - (Number(transform.x) || 0));
+        const dz = Math.abs((Number(stagedRoute.z) || 0) - (Number(transform.z) || 0));
+        if (dx > dz * 1.5 && dx > 0.5 && dz <= 0.45) {
+          preciseRoute = { ...stagedRoute, z: Number(transform.z) || 0, stairStage: "traverse" };
+        } else if (dz > dx * 1.5 && dz > 0.5 && dx <= 0.45) {
+          preciseRoute = { ...stagedRoute, x: Number(transform.x) || 0, stairStage: "traverse" };
+        } else {
+          preciseRoute = { ...stagedRoute, stairStage: "traverse" };
+        }
+      }
+    }
+    const steering = steeringTo(transform, preciseRoute, thinkDelay);
     const headingError = Math.abs(wrapAngle(
       Math.atan2(preciseRoute.x - transform.x, -(preciseRoute.z - transform.z)) - transform.angle,
     ));
@@ -488,15 +661,18 @@ export async function setup(ctx) {
           ? 0.3
           : (preciseRoute.stairStage === "align" ? 0.55 : 0.82);
     } else if (preciseRoute.kind === "door") {
-      forward = headingError > 0.55 ? 0 : (headingError > 0.2 ? 0.42 : 1);
+      forward = headingError > 0.78 ? 0 : (headingError > 0.28 ? 0.5 : 1);
+    } else if (headingError > 1.05 || (headingError > 0.55 && steering.distance < 3.5)) {
+      // Turn in place before accelerating to prevent tight-orbit circling.
+      forward = 0;
     } else {
-      forward = headingError > 1.35 ? 0.28 : 1;
+      forward = headingError > 0.55 ? 0.45 : 1;
     }
     setRouteInput(bot, transform, state, preciseRoute, {
       forward,
       strafe: 0,
       turn: steering.turn,
-      sprint: preciseRoute.kind !== "stair" && steering.distance > 18,
+      sprint: preciseRoute.kind !== "stair" && forward >= 0.8 && steering.distance > 18,
       fireHeld: false,
     }, now);
     state.nextThinkAt = now + thinkDelay;
@@ -515,15 +691,20 @@ export async function setup(ctx) {
       : null;
     route = normalizeRouteForTarget(transform, target, route, upperY);
     if (routeToward(bot, transform, state, route, now, thinkDelay)) return true;
-    const steering = steeringTo(transform, target);
+    const steering = steeringTo(transform, target, thinkDelay);
     const headingError = Math.abs(wrapAngle(
       Math.atan2(target.x - transform.x, -(target.z - transform.z)) - transform.angle,
     ));
+    const forward = steering.distance <= stopDistance
+      ? 0
+      : (headingError > 1.05 || (headingError > 0.55 && steering.distance < 3.5))
+        ? 0
+        : (headingError > 0.55 ? 0.45 : 1);
     setNavigatedInput(bot, transform, state, {
-      forward: steering.distance <= stopDistance ? 0 : (headingError > 1.35 ? 0.25 : 1),
+      forward,
       strafe: 0,
       turn: steering.turn,
-      sprint: sprint && steering.distance > 5,
+      sprint: sprint && forward >= 0.8 && steering.distance > 5,
       fireHeld: false,
     }, now);
     state.nextThinkAt = now + thinkDelay;
@@ -567,8 +748,24 @@ export async function setup(ctx) {
       }
     }
 
+    if (bot.humanSquad) {
+      const human = entities.get(bot.humanSquad);
+      const humanTransform = human?.alive ? ctx.components.get(human.id, "Transform") : null;
+      if (
+        humanTransform
+        && distance3(transform, humanTransform) > 22
+        && distance3(humanTransform, visible.transform) > 36
+      ) {
+        return moveTowardPosition(bot, transform, state, humanTransform, now, {
+          sprint: true,
+          thinkDelay: 110,
+          stopDistance: 6.0,
+        });
+      }
+    }
+
     const steering = steeringTo(transform, visible.transform);
-    const aimed = steering.aligned && visible.distance <= 28;
+    const aimed = steering.aligned && visible.distance <= 32;
     const reacted = reactionReady(bot.id, state, visible.entityId, now);
     const fireHeld = fireInBurst(bot.id, state, reacted && aimed && burstAllowsFire(bot.id, state, now), now);
 
@@ -604,8 +801,8 @@ export async function setup(ctx) {
     let forward = 0.12;
     let strafe = 0;
     if (effectiveTactic === "flank") {
-      forward = steering.distance > desiredRange + 3 ? 0.68 : 0.22;
-      strafe = state.strafeDirection * 0.92;
+      forward = steering.distance > desiredRange + 6 ? 0.92 : (steering.distance > desiredRange + 2 ? 0.68 : 0.22);
+      strafe = steering.distance > desiredRange + 6 ? state.strafeDirection * 0.38 : state.strafeDirection * 0.92;
     } else if (effectiveTactic === "space") {
       forward = steering.distance < desiredRange ? -0.68 : 0.08;
       strafe = state.strafeDirection * 0.5;
@@ -621,7 +818,7 @@ export async function setup(ctx) {
       forward,
       strafe,
       turn: steering.turn,
-      sprint: steering.distance > desiredRange + 8 && effectiveTactic === "press",
+      sprint: steering.distance > desiredRange + 8 && (effectiveTactic === "press" || effectiveTactic === "flank"),
       fireHeld,
     }, now);
     state.nextThinkAt = now + 95;
@@ -715,16 +912,15 @@ export async function setup(ctx) {
   function traversalFor(transform, visibleEnemies, memory, interestTarget, zoneTarget, previousDecision) {
     const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
     const previousTraversalTarget = previousDecision?.target ?? previousDecision?.resumeTarget ?? null;
-    const midStair = previousDecision?.goal === "traverse"
-      && previousDecision.route?.kind === "stair"
-      && stairRouteMatchesTargetFloor(previousDecision.route, previousTraversalTarget, upperY)
-      && Number(transform.y) > 0.02
-      && Number(transform.y) < upperY - 0.12;
-    if (midStair) {
-      const retainedRoute = normalizeRouteForTarget(
+    if (previousDecision?.goal === "traverse" && previousDecision.route?.kind === "stair") {
+      const freshRoute = previousTraversalTarget && typeof map.navigationWaypoint === "function"
+        ? map.navigationWaypoint(transform, previousTraversalTarget)
+        : null;
+      const retainedRoute = nextMidStairRoute(
         transform,
         previousTraversalTarget,
         previousDecision.route,
+        freshRoute,
         upperY,
       );
       if (retainedRoute) {
@@ -737,17 +933,21 @@ export async function setup(ctx) {
       }
     }
 
-    const carriedBehaviorTarget = ["investigate", "search"].includes(previousDecision?.goal)
+    const isEscortRally = interestTarget?.kind === "squad-rally-interest"
+      && interestTarget?.partnerGoal === "escort-human";
+    const carriedBehaviorTarget = !isEscortRally && ["investigate", "search"].includes(previousDecision?.goal)
       ? previousDecision.target
-      : (previousDecision?.goal === "traverse" && previousDecision?.resumeTarget
+      : (!isEscortRally && previousDecision?.goal === "traverse" && previousDecision?.resumeTarget
         ? previousDecision.resumeTarget
         : null);
-    const freshSoundTarget = interestTarget?.kind === "sound-interest"
+    const freshSoundTarget = !isEscortRally
+      && interestTarget?.kind === "sound-interest"
       && Number(interestTarget.heardAt) > Number(previousDecision?.heardAt ?? previousDecision?.resumeHeardAt ?? -Infinity)
       ? interestTarget
       : null;
     const target = visibleEnemies[0]?.transform
       ?? memory?.transform
+      ?? (isEscortRally ? interestTarget : null)
       ?? freshSoundTarget
       ?? carriedBehaviorTarget
       ?? interestTarget
@@ -827,15 +1027,22 @@ export async function setup(ctx) {
     ];
 
     let medicBotId = null;
+    const defendingMedic = standingSquadBots.find((b) => (
+      b.state?.squadRoleActive === "medic-defending"
+      && b.state?.squadTargetAllyId === primaryAlly.entityId
+      && now - (b.state?.squadCoordinatedAt ?? 0) <= 2500
+    ));
     if (
       primaryAlly.reviverId
       && standingSquadBots.some((b) => b.id === primaryAlly.reviverId)
     ) {
       medicBotId = primaryAlly.reviverId;
+    } else if (defendingMedic) {
+      medicBotId = defendingMedic.id;
     } else {
       const scoredBots = standingSquadBots.map((candidate) => {
         const distToAlly = distance3(candidate.transform, primaryAlly.transform);
-        const enemyCloseToCandidate = standingEnemies.some(
+        const enemyCloseToCandidate = distToAlly > 3.5 && standingEnemies.some(
           (e) => distance3(candidate.transform, e.transform) <= 12,
         );
         return {
@@ -1088,13 +1295,31 @@ export async function setup(ctx) {
     const contactInterest = distantContact
       ? { kind: "visual-contact-interest", ...distantContact }
       : null;
-    const baseInterest = !visibleEnemies.length
+    if (distantContact && bot.humanSquad) {
+      shareTargetWithSquadmate(bot.id, distantContact.entityId, distantContact, now, 2200);
+    }
+    const rallyInterest = !visibleEnemies.length ? squadRallyInterest(bot.id, transform, now) : null;
+    if (bot.humanSquad && !visibleEnemies.length && rallyInterest && memory) {
+      const humanEntity = entities.get(bot.humanSquad);
+      const humanTransform = humanEntity?.alive ? ctx.components.get(humanEntity.id, "Transform") : null;
+      if (
+        humanTransform
+        && (distance3(humanTransform, memory.transform) > 22
+          || buildingIdAt(humanTransform) !== buildingIdAt(memory.transform))
+      ) {
+        clearMemory(state);
+        memory = null;
+      }
+    }
+    const baseInterest = !visibleEnemies.length && !bot.humanSquad
       ? (contactInterest ?? interest.targetFor(bot.id, transform, now))
-      : null;
+      : contactInterest;
     const interestTarget = !visibleEnemies.length
-      ? (baseInterest?.kind === "sound-interest" || baseInterest?.priorityVisit
-        ? baseInterest
-        : (squadRallyInterest(bot.id, transform, now) ?? baseInterest))
+      ? (contactInterest
+        ?? (bot.humanSquad && rallyInterest ? rallyInterest : null)
+        ?? (baseInterest?.kind === "sound-interest" || baseInterest?.priorityVisit
+          ? baseInterest
+          : (rallyInterest ?? baseInterest)))
       : null;
     const previousDecision = brain.commitmentFor(bot.id);
     const traversal = traversalFor(

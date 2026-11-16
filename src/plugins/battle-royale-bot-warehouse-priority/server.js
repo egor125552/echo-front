@@ -30,6 +30,7 @@ export function distanceToBuilding(position, building) {
 export async function setup(ctx) {
   const interest = ctx.services.get("bot-interest");
   const map = ctx.services.get("map");
+  const getEntities = () => (ctx.services.has("entities") ? ctx.services.get("entities") : null);
   const originalTargetFor = interest.targetFor.bind(interest);
   const visits = new Map();
 
@@ -56,6 +57,7 @@ export async function setup(ctx) {
   }
 
   function beginVisit(botId, transform, now) {
+    if (getEntities()?.get(botId)?.humanSquad) return null;
     if (distanceToBuilding(transform, map.building) > WAREHOUSE_NEAR_PRIORITY_RADIUS) return null;
     if (activeCount(now) >= WAREHOUSE_NEAR_PRIORITY_CAP) return null;
     const points = warehousePoints(transform);

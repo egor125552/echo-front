@@ -115,28 +115,28 @@ export function chooseUtilityDecision({
   );
 
   const engageScore = target ? clamp01(
-    0.12
+    0.28
     + safeProfile.aggression * 0.48
-    + durability * 0.16
+    + durability * 0.22
     + targetWeakness * 0.28
     + rangeAdvantage * 0.08
     + closePressure * 0.1
     + (defendingAgainstAttacker ? 0.3 : 0)
-    - safeProfile.caution * 0.18
-    - surrounded * safeProfile.caution * 0.3
+    - safeProfile.caution * 0.12
+    - surrounded * safeProfile.caution * 0.08
     - (1 - durability) * 0.24
     - ringPressure * safeProfile.caution * 0.16
   ) : 0;
 
   const evadeScore = target ? clamp01(
-    0.12
-    + safeProfile.caution * 0.34
-    + (1 - safeProfile.aggression) * 0.22
-    + (1 - durability) * 0.58
-    + surrounded * 0.36
+    0.05
+    + safeProfile.caution * 0.24
+    + (1 - safeProfile.aggression) * 0.14
+    + (1 - durability) * 0.68
+    + surrounded * 0.12
     - targetWeakness * 0.16
     - rangeAdvantage * safeProfile.aggression * 0.08
-    - (defendingAgainstAttacker ? 0.12 : 0)
+    - (defendingAgainstAttacker ? 0.18 : 0)
   ) : 0;
 
   const zoneScore = zoneTarget ? clamp01(
@@ -147,8 +147,10 @@ export function chooseUtilityDecision({
   ) : 0;
   const heardScore = !target ? soundInterestScore(safeProfile, durability, interestTarget) : null;
   const isSoundInterest = interestTarget?.kind === "sound-interest";
+  const isEscortHuman = interestTarget?.kind === "squad-rally-interest"
+    && interestTarget?.partnerGoal === "escort-human";
   const interestScore = !target && interestTarget
-    ? (heardScore ?? clamp01(0.22 + safeProfile.curiosity * 0.58 + durability * 0.08))
+    ? (isEscortHuman ? 0.96 : (heardScore ?? clamp01(0.22 + safeProfile.curiosity * 0.58 + durability * 0.08)))
     : 0;
 
   if (zoneTarget && !target) {
@@ -169,7 +171,7 @@ export function chooseUtilityDecision({
       return { goal: "zone", score: zoneScore, target: zoneTarget, threatCount };
     }
 
-    if (evadeScore > engageScore + 0.03) {
+    if (durability < 0.32 && evadeScore > engageScore + 0.03) {
       return {
         goal: "evade",
         score: evadeScore,
@@ -177,7 +179,7 @@ export function chooseUtilityDecision({
         threatCount,
         desiredRange: safeProfile.preferredRange + 5,
         tactic: safeProfile.flankBias > 0.62 ? "break-angle" : "withdraw",
-        returnFire: defendingAgainstAttacker || nearestDistance <= 10,
+        returnFire: defendingAgainstAttacker || nearestDistance <= 18,
       };
     }
     return {
@@ -426,18 +428,20 @@ export async function setup(ctx) {
       )
     );
 
+    const isEscortHuman = context.interestTarget?.kind === "squad-rally-interest"
+      && context.interestTarget?.partnerGoal === "escort-human";
     const meta = {
       now,
       underFire,
       visibleThreat,
-      freshSound,
+      freshSound: freshSound || isEscortHuman,
       traversalActive,
       investigationReached: reachedInvestigation,
-      force: false,
+      force: isEscortHuman,
     };
 
     let candidate;
-    const urgent = visibleThreat || underFire || freshSound;
+    const urgent = visibleThreat || underFire || freshSound || isEscortHuman;
 
     if (traversalActive) {
       const carriedInvestigation = context.traversal.target?.kind === "sound-interest"

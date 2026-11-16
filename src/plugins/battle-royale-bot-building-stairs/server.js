@@ -139,6 +139,29 @@ function steeringInput(transform, target, previous = {}) {
   };
 }
 
+export function stairEntryDesiredTarget(transform, geometry, route = null) {
+  if (!transform || !geometry) return null;
+  if (finite(route?.y, geometry.lowY) > geometry.lowY + 0.35) return null;
+  if (finite(transform.y) > geometry.lowY + 0.55) return null;
+  if (route?.transitionSide === "cross") return null;
+  if (insideHorizontal(transform, geometry.bounds, 0.05)
+    && finite(transform.y) > geometry.lowY + BOT_BUILDING_STAIR_CAPTURE_Y) return null;
+
+  const ax = finite(geometry.bottom.x) - finite(geometry.approach.x);
+  const az = finite(geometry.bottom.z) - finite(geometry.approach.z);
+  const axisLength = Math.hypot(ax, az) || 1;
+  const ux = ax / axisLength;
+  const uz = az / axisLength;
+  const relX = finite(transform.x) - finite(geometry.approach.x);
+  const relZ = finite(transform.z) - finite(geometry.approach.z);
+  const along = relX * ux + relZ * uz;
+  const lateralError = Math.abs(relX * -uz + relZ * ux);
+  const aligned = lateralError <= BOT_BUILDING_STAIR_ALIGN_TOLERANCE;
+  const inEntryCorridor = along >= -BOT_BUILDING_STAIR_ALIGN_TOLERANCE
+    && along <= axisLength + 0.35;
+  return aligned && inEntryCorridor ? geometry.bottom : geometry.approach;
+}
+
 export async function setup(ctx) {
   const bots = ctx.services.get("bots");
   const botCombat = ctx.services.get("bot-combat");
@@ -175,18 +198,8 @@ export async function setup(ctx) {
     // combat controller already handles the ramp traversal and the top landing;
     // its bug was assuming every lower entrance sits east of the ramp, which is
     // only true for the legacy warehouse stair.
-    if (finite(route.y) > geometry.lowY + 0.35) return;
-    if (finite(transform.y) > geometry.lowY + 0.55) return;
-    if (insideHorizontal(transform, geometry.bounds, 0.05)
-      && finite(transform.y) > geometry.lowY + BOT_BUILDING_STAIR_CAPTURE_Y) return;
-
-    const direction = geometry.direction;
-    const lateralError = direction === "north" || direction === "south"
-      ? Math.abs(finite(transform.x) - finite(geometry.approach.x))
-      : Math.abs(finite(transform.z) - finite(geometry.approach.z));
-    const atApproach = distance2(transform, geometry.approach) <= BOT_BUILDING_STAIR_ALIGN_TOLERANCE;
-    const aligned = lateralError <= BOT_BUILDING_STAIR_ALIGN_TOLERANCE;
-    const desired = atApproach && aligned ? geometry.bottom : geometry.approach;
+    const desired = stairEntryDesiredTarget(transform, geometry, route);
+    if (!desired) return;
 
     movement.setInput(bot.id, steeringInput(transform, desired, input));
     counters.correctedFrames += 1;

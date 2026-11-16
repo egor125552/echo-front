@@ -210,29 +210,30 @@ function stairGeometry(building, stair, floorById) {
   const lowY = Math.min(fromY, toY);
   const highY = Math.max(fromY, toY);
   const inset = 0.5;
+  const insideInset = Math.min(run * 0.25, 1.05);
   let bottom;
   let bottomInside;
   let topInside;
   let top;
   if (direction === "east") {
     bottom = { x: bounds.minX - inset, y: lowY, z: center.z };
-    bottomInside = { x: bounds.minX + inset, y: lowY, z: center.z };
-    topInside = { x: bounds.maxX - inset, y: highY, z: center.z };
+    bottomInside = { x: bounds.minX + insideInset, y: lowY, z: center.z };
+    topInside = { x: bounds.maxX - insideInset, y: highY, z: center.z };
     top = { x: bounds.maxX + inset, y: highY, z: center.z };
   } else if (direction === "north") {
     bottom = { x: center.x, y: lowY, z: bounds.maxZ + inset };
-    bottomInside = { x: center.x, y: lowY, z: bounds.maxZ - inset };
-    topInside = { x: center.x, y: highY, z: bounds.minZ + inset };
+    bottomInside = { x: center.x, y: lowY, z: bounds.maxZ - insideInset };
+    topInside = { x: center.x, y: highY, z: bounds.minZ + insideInset };
     top = { x: center.x, y: highY, z: bounds.minZ - inset };
   } else if (direction === "south") {
     bottom = { x: center.x, y: lowY, z: bounds.minZ - inset };
-    bottomInside = { x: center.x, y: lowY, z: bounds.minZ + inset };
-    topInside = { x: center.x, y: highY, z: bounds.maxZ - inset };
+    bottomInside = { x: center.x, y: lowY, z: bounds.minZ + insideInset };
+    topInside = { x: center.x, y: highY, z: bounds.maxZ - insideInset };
     top = { x: center.x, y: highY, z: bounds.maxZ + inset };
   } else {
     bottom = { x: bounds.maxX + inset, y: lowY, z: center.z };
-    bottomInside = { x: bounds.maxX - inset, y: lowY, z: center.z };
-    topInside = { x: bounds.minX + inset, y: highY, z: center.z };
+    bottomInside = { x: bounds.maxX - insideInset, y: lowY, z: center.z };
+    topInside = { x: bounds.minX + insideInset, y: highY, z: center.z };
     top = { x: bounds.minX - inset, y: highY, z: center.z };
   }
   return {
@@ -466,26 +467,199 @@ export async function setup(ctx) {
     return runtime;
   }
 
+  function buildRoomRegionsForFloor(entry, floor) {
+    const rooms = Array.isArray(floor.rooms) ? floor.rooms : [];
+    if (!rooms.length) return [];
+    const fb = floorBounds(entry.spec, floor);
+    const regions = rooms.map((room, index) => ({
+      id: String(room.id ?? `${floor.id}-room-${index + 1}`),
+      name: String(room.name ?? room.id ?? `${floor.id}-room-${index + 1}`),
+      priority: finite(room.priority, 10),
+      bounds: roomBounds(entry.spec, floor, room),
+    }));
+
+    // Expand outer-facing room edges seamlessly to the floor boundary so there is
+    // no thin dead strip between a room rectangle and the building's exterior wall.
+    for (let i = 0; i < regions.length; i += 1) {
+      const current = regions[i].bounds;
+      const zOverlaps = (other) => other.maxZ > current.minZ + 0.05 && other.minZ < current.maxZ - 0.05;
+      const xOverlaps = (other) => other.maxX > current.minX + 0.05 && other.minX < current.maxX - 0.05;
+      const hasWest = regions.some((r, idx) => idx !== i && zOverlaps(r.bounds) && r.bounds.maxX <= current.minX + 0.25);
+      const hasEast = regions.some((r, idx) => idx !== i && zOverlaps(r.bounds) && r.bounds.minX >= current.maxX - 0.25);
+      const hasNorth = regions.some((r, idx) => idx !== i && xOverlaps(r.bounds) && r.bounds.maxZ <= current.minZ + 0.25);
+      const hasSouth = regions.some((r, idx) => idx !== i && xOverlaps(r.bounds) && r.bounds.minZ >= current.maxZ - 0.25);
+      if (!hasWest && current.minX - fb.minX <= 1.25) current.minX = fb.minX;
+      if (!hasEast && fb.maxX - current.maxX <= 1.25) current.maxX = fb.maxX;
+      if (!hasNorth && current.minZ - fb.minZ <= 1.25) current.minZ = fb.minZ;
+      if (!hasSouth && fb.maxZ - current.maxZ <= 1.25) current.maxZ = fb.maxZ;
+    }
+    return regions;
+  }
+
+  function subtractInterval(intervals, blockStart, blockEnd) {
+    const next = [];
+    for (const [start, end] of intervals) {
+      if (blockEnd <= start || blockStart >= end) {
+        next.push([start, end]);
+        continue;
+      }
+      if (blockStart > start) next.push([start, blockStart]);
+      if (blockEnd < end) next.push([blockEnd, end]);
+    }
+    return next;
+  }
+
+  function buildInteriorPassages(entry, floor, roomRegions) {
+    const passages = [];
+    const y = finite(floor.y);
+    const floorWalls = (entry.spec.walls ?? []).filter((wall) => (
+      String(wall.floorId ?? entry.spec.floors[0].id) === String(floor.id)
+    ));
+    const CLEARANCE = 0.55;
+
+    for (let i = 0; i < roomRegions.length; i += 1) {
+      for (let j = i + 1; j < roomRegions.length; j += 1) {
+        const a = roomRegions[i];
+        const b = roomRegions[j];
+        const xGapAB = Math.abs(a.bounds.maxX - b.bounds.minX);
+        const xGapBA = Math.abs(b.bounds.maxX - a.bounds.minX);
+        const zGapAB = Math.abs(a.bounds.maxZ - b.bounds.minZ);
+        const zGapBA = Math.abs(b.bounds.maxZ - a.bounds.minZ);
+
+        if (xGapAB <= 0.6 || xGapBA <= 0.6) {
+          const zMin = Math.max(a.bounds.minZ, b.bounds.minZ) + CLEARANCE;
+          const zMax = Math.min(a.bounds.maxZ, b.bounds.maxZ) - CLEARANCE;
+          if (zMax - zMin < 0.8) continue;
+          const aLeft = xGapAB <= xGapBA;
+          const seamX = aLeft
+            ? (a.bounds.maxX + b.bounds.minX) / 2
+            : (b.bounds.maxX + a.bounds.minX) / 2;
+          let free = [[zMin, zMax]];
+          for (const wall of floorWalls) {
+            const wx = finite(entry.spec.x) + finite(wall.x);
+            const whx = Math.max(0.05, Math.abs(finite(wall.hx, 0.2)));
+            if (Math.abs(wx - seamX) > whx + 0.65) continue;
+            const wz = finite(entry.spec.z) + finite(wall.z);
+            const whz = Math.max(0.05, Math.abs(finite(wall.hz, 0.2)));
+            free = subtractInterval(free, wz - whz - CLEARANCE, wz + whz + CLEARANCE);
+          }
+          free.sort((u, v) => (v[1] - v[0]) - (u[1] - u[0]));
+          if (!free.length || free[0][1] - free[0][0] < 0.8) continue;
+          const passZ = (free[0][0] + free[0][1]) / 2;
+          const offset = 1.25;
+          const ax = aLeft
+            ? Math.max(a.bounds.minX + 0.5, seamX - offset)
+            : Math.min(a.bounds.maxX - 0.5, seamX + offset);
+          const bx = aLeft
+            ? Math.min(b.bounds.maxX - 0.5, seamX + offset)
+            : Math.max(b.bounds.minX + 0.5, seamX - offset);
+          passages.push({
+            id: `${entry.id}:${a.id}:${b.id}`,
+            from: a.id,
+            to: b.id,
+            fromPoint: { x: ax, y, z: passZ },
+            toPoint: { x: bx, y, z: passZ },
+            kind: "passage",
+          });
+          continue;
+        }
+
+        if (zGapAB <= 0.6 || zGapBA <= 0.6) {
+          const xMin = Math.max(a.bounds.minX, b.bounds.minX) + CLEARANCE;
+          const xMax = Math.min(a.bounds.maxX, b.bounds.maxX) - CLEARANCE;
+          if (xMax - xMin < 0.8) continue;
+          const aNorth = zGapAB <= zGapBA;
+          const seamZ = aNorth
+            ? (a.bounds.maxZ + b.bounds.minZ) / 2
+            : (b.bounds.maxZ + a.bounds.minZ) / 2;
+          let free = [[xMin, xMax]];
+          for (const wall of floorWalls) {
+            const wz = finite(entry.spec.z) + finite(wall.z);
+            const whz = Math.max(0.05, Math.abs(finite(wall.hz, 0.2)));
+            if (Math.abs(wz - seamZ) > whz + 0.65) continue;
+            const wx = finite(entry.spec.x) + finite(wall.x);
+            const whx = Math.max(0.05, Math.abs(finite(wall.hx, 0.2)));
+            free = subtractInterval(free, wx - whx - CLEARANCE, wx + whx + CLEARANCE);
+          }
+          free.sort((u, v) => (v[1] - v[0]) - (u[1] - u[0]));
+          if (!free.length || free[0][1] - free[0][0] < 0.8) continue;
+          const passX = (free[0][0] + free[0][1]) / 2;
+          const offset = 1.25;
+          const az = aNorth
+            ? Math.max(a.bounds.minZ + 0.5, seamZ - offset)
+            : Math.min(a.bounds.maxZ - 0.5, seamZ + offset);
+          const bz = aNorth
+            ? Math.min(b.bounds.maxZ - 0.5, seamZ + offset)
+            : Math.max(b.bounds.minZ + 0.5, seamZ - offset);
+          passages.push({
+            id: `${entry.id}:${a.id}:${b.id}`,
+            from: a.id,
+            to: b.id,
+            fromPoint: { x: passX, y, z: az },
+            toPoint: { x: passX, y, z: bz },
+            kind: "passage",
+          });
+        }
+      }
+    }
+    return passages;
+  }
+
+  function resolveFloorRegionId(floorId, position, floorRoomRegions) {
+    const rooms = floorRoomRegions.get(String(floorId));
+    if (!rooms?.length) return String(floorId);
+    const containing = rooms.find((region) => pointInside(position, region.bounds, 0.15));
+    if (containing) return containing.id;
+    let best = rooms[0];
+    let bestDist = Infinity;
+    for (const region of rooms) {
+      const cx = (region.bounds.minX + region.bounds.maxX) / 2;
+      const cz = (region.bounds.minZ + region.bounds.maxZ) / 2;
+      const d = Math.hypot((Number(position?.x) || 0) - cx, (Number(position?.z) || 0) - cz);
+      if (d < bestDist) {
+        best = region;
+        bestDist = d;
+      }
+    }
+    return best.id;
+  }
+
   function buildNavigation(entry, floorById) {
     const custom = entry.spec.navigation ?? {};
-    const regions = custom.regions?.length
-      ? custom.regions.map((region) => ({ ...region }))
-      : entry.spec.floors.map((floor, index) => ({
-        id: String(floor.id),
-        name: String(floor.name ?? `этаж ${index + 1}`),
-        priority: 10,
-        bounds: floorBounds(entry.spec, floor),
-      }));
+    const regions = [];
     const transitions = [];
+    const floorRoomRegions = new Map();
+
+    if (custom.regions?.length) {
+      for (const region of custom.regions) regions.push({ ...region });
+    } else {
+      for (let index = 0; index < entry.spec.floors.length; index += 1) {
+        const floor = entry.spec.floors[index];
+        const roomRegions = buildRoomRegionsForFloor(entry, floor);
+        if (roomRegions.length) {
+          regions.push(...roomRegions);
+          floorRoomRegions.set(String(floor.id), roomRegions);
+          transitions.push(...buildInteriorPassages(entry, floor, roomRegions));
+        } else {
+          regions.push({
+            id: String(floor.id),
+            name: String(floor.name ?? `этаж ${index + 1}`),
+            priority: 10,
+            bounds: floorBounds(entry.spec, floor),
+          });
+        }
+      }
+    }
 
     for (const door of entry.spec.doors ?? []) {
       const floor = floorById.get(String(door.floorId ?? entry.spec.floors?.[0]?.id));
       if (!floor) continue;
       const points = doorPassagePoints(entry.spec, floor, door);
+      const targetRegion = resolveFloorRegionId(floor.id, points.inside, floorRoomRegions);
       transitions.push({
         id: `${door.id}:outside`,
         from: String(door.fromRegion ?? "outside"),
-        to: String(door.toRegion ?? floor.id),
+        to: String(door.toRegion ?? targetRegion),
         fromPoint: points.outside,
         toPoint: points.inside,
         kind: "door",
@@ -511,9 +685,11 @@ export async function setup(ctx) {
       });
       const lowFloor = finite(stair.fromFloor.y) <= finite(stair.toFloor.y) ? stair.fromFloor : stair.toFloor;
       const highFloor = lowFloor === stair.fromFloor ? stair.toFloor : stair.fromFloor;
+      const lowRegionId = resolveFloorRegionId(lowFloor.id, stair.bottom, floorRoomRegions);
+      const highRegionId = resolveFloorRegionId(highFloor.id, stair.top, floorRoomRegions);
       transitions.push({
         id: `${stair.id}:bottom`,
-        from: String(lowFloor.id),
+        from: lowRegionId,
         to: regionId,
         fromPoint: stair.bottom,
         toPoint: stair.bottomInside,
@@ -522,7 +698,7 @@ export async function setup(ctx) {
       transitions.push({
         id: `${stair.id}:top`,
         from: regionId,
-        to: String(highFloor.id),
+        to: highRegionId,
         fromPoint: stair.topInside,
         toPoint: stair.top,
         kind: "stair",
@@ -750,6 +926,16 @@ export async function setup(ctx) {
   map.acousticProfileAt = acousticProfileAt;
   map.acousticZoneAt = (position) => acousticProfileAt(position).zone;
   map.acousticOcclusionBetween = acousticOcclusionBetween;
+  map.insideAnyBuilding = (position, padding = 0) => {
+    if (!position) return false;
+    if (built.some((entry) => pointInside(position, entry.bounds, padding))) return true;
+    const b = map?.building;
+    if (!b) return false;
+    return finite(position.x) >= finite(b.minX) - padding
+      && finite(position.x) <= finite(b.maxX) + padding
+      && finite(position.z) >= finite(b.minZ) - padding
+      && finite(position.z) <= finite(b.maxZ) + padding;
+  };
 
   for (const spec of BATTLE_ROYALE_BUILDINGS) createBuilding(spec);
 

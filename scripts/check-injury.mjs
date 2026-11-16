@@ -169,3 +169,25 @@ test('bots die immediately and can aim real projectiles at a crawling human', ()
   step(5);
   assert(snap().health < before - 15, 'The real projectile missed the crawling player');
 }));
+
+test('knockdown and death emit spatial ragdoll body-fall sounds audible to nearby players', () => scenario(({ game, s, down, now }) => {
+  game.drainEvents();
+  down();
+  const downedEvents = game.api.eventsForPlayer(OTHER, game.drainEvents());
+  const downedFall = downedEvents.find(
+    p => p.event === 'sound:spatial' && p.payload?.entityId === PLAYER && p.payload?.collapse === 'downed',
+  );
+  assert.ok(downedFall, 'Nearby player must receive spatial ragdoll body-fall sound when someone is knocked down');
+  assert.equal(downedFall.payload.key, 'ragdoll.impact.body');
+
+  const botId = s.get('entities').spawn({ id: 'fall-sound-bot', bot: true, team: 45, health: 100, position: { x: 4, y: 0, z: -6 } });
+  game.drainEvents();
+  s.get('health').applyDamage(botId, 999, { attackerId: OTHER, weaponId: 'rifle', now: now() });
+  const deathEvents = game.api.eventsForPlayer(OTHER, game.drainEvents());
+  const deathFall = deathEvents.find(
+    p => p.event === 'sound:spatial' && p.payload?.entityId === botId && p.payload?.collapse === 'death',
+  );
+  assert.ok(deathFall, 'Nearby player must receive spatial ragdoll body-fall sound when a standing enemy dies');
+  assert.equal(deathFall.payload.key, 'ragdoll.impact.body');
+}));
+

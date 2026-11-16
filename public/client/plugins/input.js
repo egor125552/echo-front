@@ -409,6 +409,7 @@ export async function setup(ctx) {
 
     button.addEventListener("click", (event) => {
       if (!enabled || !handleControlClick(event, button)) return;
+      if (action === "parachute" || action === "parachute-status" || action === "parkour-pose") return;
       if (action === "reload") reload = true;
       if (action === "weapon-prev") selectDelta = -1;
       if (action === "weapon-next") selectDelta = 1;
