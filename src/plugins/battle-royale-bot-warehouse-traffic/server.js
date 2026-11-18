@@ -85,10 +85,13 @@ function steeringInput(transform, target, { sprint = false, slow = false } = {})
   if (heading > 1.15) forward = 0.12;
   else if (heading > 0.62) forward = Math.min(forward, 0.34);
   else if (heading > 0.3) forward = Math.min(forward, 0.62);
+  const turn = heading <= 0.025
+    ? 0
+    : Math.sign(delta) * Math.min(0.82, heading * 1.45, (heading * 0.88) / (2.6 * 0.05));
   return {
     forward,
     strafe: 0,
-    turn: clamp(delta * 1.9, -1, 1),
+    turn,
     sprint: Boolean(sprint && distance > 5 && heading < 0.45),
     fireHeld: false,
   };

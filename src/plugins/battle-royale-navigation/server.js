@@ -15,6 +15,7 @@ const TARGET_REACHED_DEFAULT = 5.5;
 const TARGET_VERTICAL_TOLERANCE = 2.15;
 const CHECKPOINT_VERTICAL_TOLERANCE = 1.2;
 const MAX_VISIBLE_VEHICLE_TARGETS = 5;
+const MAX_VISIBLE_GENERATED_CRATE_TARGETS = 8;
 const NON_DETOUR_OBSTACLE_KINDS = new Set(["world-boundary"]);
 
 export const manifest = {
@@ -294,7 +295,17 @@ export async function setup(ctx) {
 
     const state = playerStates.get(playerId) ?? null;
     const pinned = new Set([state?.selectedTargetId, state?.activeTargetId].filter(Boolean));
-    const nonVehicles = targets.filter((target) => target.kind !== "vehicle");
+    const nonSpecial = targets.filter((target) => target.kind !== "vehicle" && target.kind !== "crate");
+    const staticCrates = targets.filter((target) => target.kind === "crate" && !target.metadata?.generated);
+    const generatedCrates = targets
+      .filter((target) => target.kind === "crate" && target.metadata?.generated)
+      .sort((a, b) => {
+        if (a.outsideSafeZone !== b.outsideSafeZone) return a.outsideSafeZone ? 1 : -1;
+        return a.distance - b.distance;
+      })
+      .filter((target, index) => (
+        index < MAX_VISIBLE_GENERATED_CRATE_TARGETS || pinned.has(target.id)
+      ));
     const vehicleTargets = targets
       .filter((target) => target.kind === "vehicle")
       .filter((target) => !target.metadata?.occupiedByOther)
@@ -305,12 +316,12 @@ export async function setup(ctx) {
     const visibleVehicles = vehicleTargets.filter((target, index) => (
       index < MAX_VISIBLE_VEHICLE_TARGETS || pinned.has(target.id)
     ));
-    targets = [...nonVehicles, ...visibleVehicles];
+    targets = [...nonSpecial, ...staticCrates, ...generatedCrates, ...visibleVehicles];
 
     targets.sort((a, b) => {
       if (a.order !== b.order) return a.order - b.order;
       if (a.outsideSafeZone !== b.outsideSafeZone) return a.outsideSafeZone ? 1 : -1;
-      if (a.kind === "vehicle" && b.kind === "vehicle" && a.distance !== b.distance) {
+      if ((a.kind === "vehicle" || a.kind === "crate") && a.kind === b.kind && a.distance !== b.distance) {
         return a.distance - b.distance;
       }
       return a.name.localeCompare(b.name, "ru");
@@ -734,6 +745,19 @@ export async function setup(ctx) {
     return selectTarget(playerId, next.id, now);
   }
 
+  function selectPrev(playerId, now = Date.now()) {
+    const targets = availableTargets(playerId);
+    if (!targets.length) {
+      emitFor(playerId, "navigation:unavailable", { reason: "no-targets", now });
+      return null;
+    }
+    const state = playerState(playerId);
+    const current = targets.findIndex((target) => target.id === state.selectedTargetId);
+    const prevIndex = current <= 0 ? targets.length - 1 : current - 1;
+    const prev = targets[prevIndex];
+    return selectTarget(playerId, prev.id, now);
+  }
+
   function stop(playerId, now = Date.now(), reason = "toggle", { announce = true } = {}) {
     const state = playerState(playerId);
     const previous = state.activeTargetId
@@ -896,8 +920,8 @@ export async function setup(ctx) {
       ? distance2(state.lastTargetPosition, target.position)
       : Infinity;
     const exhausted = state.checkpointIndex >= state.checkpoints.length;
-    const staleMovingTarget = (target.kind === "vehicle" || target.kind === "crate")
-      && targetMoved >= (target.kind === "crate" ? 1.5 : NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE);
+    const staleMovingTarget = (target.kind === "vehicle" || target.kind === "crate" || target.kind === "airdrop" || target.kind === "bounty")
+      && targetMoved >= (target.kind === "crate" || target.kind === "airdrop" ? 1.5 : NAVIGATION_MOVING_TARGET_REPLAN_DISTANCE);
     const staleRoute = now - state.lastRouteAt >= NAVIGATION_ROUTE_REPLAN_MS
       && state.checkpointIndex > 0;
     const modeChanged = state.routeMeta?.mode !== routeModeFor(playerId);
@@ -1044,19 +1068,69 @@ export async function setup(ctx) {
   registerProvider("crates", () => (
     (map.crates ?? [])
       .filter((crate) => !crate.opened)
-      .map((crate, index) => ({
-        id: `crate:${crate.id}`,
-        name: crate.loot === "armor" ? "Ящик с бронёй" : "Ящик с автоматом",
-        kind: "crate",
-        order: 15 + index * 0.01,
-        arriveDistance: 1.6,
-        position: { x: crate.x, y: crate.y ?? 0, z: crate.z },
-        metadata: {
-          loot: crate.loot ?? null,
-          crateId: crate.id,
-          verticalTolerance: 1.1,
-        },
-      }))
+      .map((crate) => {
+        if (crate.juggernaut || crate.loot === "juggernaut") {
+          return {
+            id: `airdrop:${crate.id}`,
+            name: crate.airdropPhase === "descending"
+              ? "Груз Джаггернаут (спускается)"
+              : "Груз Джаггернаут",
+            kind: "airdrop",
+            order: 2.5,
+            arriveDistance: 2.2,
+            position: { x: crate.x, y: 0, z: crate.z },
+            metadata: {
+              loot: "juggernaut",
+              crateId: crate.id,
+              airdrop: true,
+              juggernaut: true,
+              airdropPhase: crate.airdropPhase ?? "landed",
+              generated: false,
+              verticalTolerance: 2.2,
+            },
+          };
+        }
+        if (crate.airdrop || crate.loot === "airdrop") {
+          return {
+            id: `airdrop:${crate.id}`,
+            name: crate.airdropPhase === "descending"
+              ? "Груз снабжения (спускается)"
+              : "Груз снабжения",
+            kind: "airdrop",
+            order: 4,
+            arriveDistance: 2.2,
+            position: { x: crate.x, y: 0, z: crate.z },
+            metadata: {
+              loot: "airdrop",
+              crateId: crate.id,
+              airdrop: true,
+              airdropPhase: crate.airdropPhase ?? "landed",
+              generated: false,
+              verticalTolerance: 2.2,
+            },
+          };
+        }
+        return {
+          id: `crate:${crate.id}`,
+          name: crate.loot === "armor"
+            ? "Ящик с бронёй"
+            : crate.loot === "marksman"
+              ? "Ящик с винтовкой"
+              : crate.loot === "sniper"
+                ? "Ящик со снайперкой"
+                : "Ящик с автоматом",
+          kind: "crate",
+          order: 15,
+          arriveDistance: 1.6,
+          position: { x: crate.x, y: crate.y ?? 0, z: crate.z },
+          metadata: {
+            loot: crate.loot ?? null,
+            crateId: crate.id,
+            generated: Boolean(crate.generated),
+            verticalTolerance: 1.1,
+          },
+        };
+      })
   ));
 
   registerProvider("vehicles", (playerId) => {
@@ -1089,6 +1163,7 @@ export async function setup(ctx) {
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {
     if (input.navigationNextPressed) selectNext(playerId, now);
+    if (input.navigationPrevPressed) selectPrev(playerId, now);
     if (input.navigationTogglePressed) toggle(playerId, now);
     return originalHandleInput(playerId, input, now);
   };
@@ -1147,6 +1222,7 @@ export async function setup(ctx) {
     registerProvider,
     availableTargets,
     selectNext,
+    selectPrev,
     selectTarget,
     toggle,
     stop,

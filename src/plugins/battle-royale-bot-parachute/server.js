@@ -1,3 +1,5 @@
+import { getSharedTacticalCombatNet } from "../../ai/tactical-combat-net.js";
+
 export const manifest = {
   id: "battle-royale-bot-parachute",
   version: "1.0.1",
@@ -59,6 +61,7 @@ export async function setup(ctx) {
 
   const originalStep = matchApi.step.bind(matchApi);
   const assignments = new Map();
+  const combatNet = getSharedTacticalCombatNet();
   let generation = 0;
 
   function mapLimit() {
@@ -356,7 +359,8 @@ export async function setup(ctx) {
         });
       }
       if (
-        state.phase === "freefall"
+        assignment.target?.kind !== "redeploy"
+        && state.phase === "freefall"
         && leaderParachute
         && (leaderParachute.phase === "deployed" || !leaderParachute.airborne)
       ) {
@@ -375,10 +379,24 @@ export async function setup(ctx) {
         ? Number(state.groundDistance)
         : Number(transform.y) || 0;
       const distance = distance2(transform, assignment.target);
+      const verticalSpeed = Math.abs(Number(state.simulatedVerticalVelocity) || Number(transform.verticalVelocity) || 35);
+      const paraDecision = combatNet.decideParachuteForBot(bot.id, {
+        altitude: clearance,
+        verticalSpeed,
+        landingDistance: distance,
+      }, now);
+      assignment.neuralParachuteMode = paraDecision.parachuteMode;
       const reachPressure = !bot.humanSquad
         && assignment.target?.kind !== "contested-squad-drop"
-        && distance > Math.max(45, clearance * 1.28);
-      if (clearance <= assignment.deployAltitude || reachPressure) {
+        && (distance > Math.max(45, clearance * 1.28)
+          || (paraDecision.parachuteMode === "glide_early_open" && clearance <= 340 && distance > clearance * 1.05));
+      const learnedPullFloor = !bot.humanSquad && assignment.target?.kind !== "contested-squad-drop"
+        ? clamp(paraDecision.learnedHumanDeployAltitude, 115, assignment.deployAltitude)
+        : assignment.deployAltitude;
+      const effectiveDeployAltitude = paraDecision.parachuteMode === "combat_low_pull"
+        ? Math.min(assignment.deployAltitude, Math.max(112, learnedPullFloor))
+        : assignment.deployAltitude;
+      if (clearance <= effectiveDeployAltitude || reachPressure) {
         if (parachute.deploy(bot.id, now)) {
           assignment.status = "deployed";
           assignment.deployedAt = now;
@@ -429,7 +447,15 @@ export async function setup(ctx) {
     for (const bot of deploymentBots()) assignAndLaunch(bot, now);
   });
 
-  ctx.events.on("parachute:deployed", ({ entityId, now }) => {
+  ctx.events.on("parachute:deployed", ({ entityId, groundDistance, y, verticalVelocity, now } = {}) => {
+    const ent = entities.get(entityId);
+    if (ent && !ent.bot && !ent.botParachutist) {
+      combatNet.learnFromHumanParachute({
+        altitude: Number.isFinite(Number(groundDistance)) ? Number(groundDistance) : (Number(y) || 120),
+        verticalVelocity: Number(verticalVelocity) || -35,
+        landingDistance: 28,
+      }, Number(now) || Date.now());
+    }
     const assignment = assignments.get(entityId);
     if (!assignment) return;
     assignment.status = "deployed";
@@ -495,12 +521,66 @@ export async function setup(ctx) {
     }
   };
 
+  function redeploy(botId, target = null, launchPoint = null, now = Date.now()) {
+    const bot = entities.get(botId);
+    const transform = ctx.components.get(botId, "Transform");
+    if (!bot || !bot.bot || !transform) return null;
+    const dropTarget = clampToMap({
+      x: Number(target?.x ?? transform.x) || 0,
+      y: 0,
+      z: Number(target?.z ?? transform.z) || 0,
+      kind: String(target?.kind ?? "redeploy"),
+    });
+    const altitude = clamp(Number(launchPoint?.y ?? launchPoint?.altitude) || 260, 120, 420);
+    const launch = {
+      ...clampToMap({
+        x: Number(launchPoint?.x ?? dropTarget.x) || 0,
+        z: Number(launchPoint?.z ?? dropTarget.z) || 0,
+      }),
+      y: altitude,
+      altitude,
+      angle: Number.isFinite(Number(launchPoint?.angle)) ? Number(launchPoint.angle) : transform.angle,
+    };
+    const assignment = {
+      entityId: bot.id,
+      generation,
+      target: dropTarget,
+      launch,
+      deployAltitude: clamp(altitude * 0.45, 70, 130),
+      skill: 0.85,
+      status: "freefall",
+      assignedAt: now,
+      deployedAt: null,
+      landedAt: null,
+      impactSpeed: null,
+      damage: 0,
+      landingKilled: false,
+      killed: false,
+      landingError: null,
+    };
+    assignments.set(bot.id, assignment);
+    const state = withBotAsParachutist(bot, () => parachute.launch(bot.id, launch, now));
+    if (!state) {
+      assignment.status = "launch-failed";
+      return assignment;
+    }
+    ctx.events.emit("bot-parachute:assigned", {
+      entityId: bot.id,
+      target: { ...dropTarget },
+      launch: { ...launch },
+      deployAltitude: assignment.deployAltitude,
+      now,
+    });
+    return assignment;
+  }
+
   ctx.services.provide("bot-parachutes", {
     assignmentFor(entityId) {
       const value = assignments.get(entityId);
       return value ? structuredClone(value) : null;
     },
     retarget,
+    redeploy,
     retargetAll(target = {}, options = {}) {
       return retarget([...assignments.keys()], target, options);
     },

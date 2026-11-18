@@ -163,7 +163,11 @@ export async function setup(ctx) {
         if (!response.ok) throw new Error(`Audio HTTP ${response.status}: ${url}`);
         return response.arrayBuffer();
       })
-      .then((data) => audioContext.decodeAudioData(data));
+      .then((data) => audioContext.decodeAudioData(data))
+      .catch((error) => {
+        if (buffers.get(url) === promise) buffers.delete(url);
+        throw error;
+      });
     buffers.set(url, promise);
     return promise;
   }
@@ -338,10 +342,14 @@ export async function setup(ctx) {
     trackSource(source, channel, replace);
     source.start();
 
+    let currentPosition = { ...position };
+    let currentGain = Math.max(0, Number(gain) || 0);
+
     return {
       source,
       update(nextPosition) {
-        const next = localize(nextPosition);
+        currentPosition = { ...nextPosition };
+        const next = localize(currentPosition);
         const nextMix = hybridSpatialMix(next.azimuth);
         const nextAttenuation = distanceAttenuation(next.distance, {
           maxDistance: radius,
@@ -357,7 +365,18 @@ export async function setup(ctx) {
         hrtfPanner.positionZ.linearRampToValueAtTime(-next.localForward, at);
         rearFilter.frequency.linearRampToValueAtTime(rearCutoff(next), at);
         airFilter.frequency.linearRampToValueAtTime(distanceAirCutoff(next.distance, radius, airAbsorptionMinHz), at);
-        distanceGain.gain.linearRampToValueAtTime(gain * nextAttenuation, at);
+        distanceGain.gain.linearRampToValueAtTime(currentGain * nextAttenuation, at);
+      },
+      setGain(nextGain, rampSec = 0.08) {
+        currentGain = Math.max(0, Number(nextGain) || 0);
+        const next = localize(currentPosition);
+        const nextAttenuation = distanceAttenuation(next.distance, {
+          maxDistance: radius,
+          referenceDistance,
+          rolloffFactor,
+        });
+        const at = audioContext.currentTime + Math.max(0.02, Number(rampSec) || 0.08);
+        distanceGain.gain.linearRampToValueAtTime(currentGain * nextAttenuation, at);
       },
       updateOcclusion(nextAmount) {
         const normalized = clamp01(nextAmount);
@@ -380,7 +399,13 @@ export async function setup(ctx) {
 
   ctx.services.provide("audio", {
     context: audioContext,
-    async resume() { if (audioContext.state !== "running") await audioContext.resume(); },
+    async resume() {
+      if (audioContext.state === "running") return;
+      await Promise.race([
+        Promise.resolve(audioContext.resume()).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 1500)),
+      ]);
+    },
     load,
     stopChannel,
     setReverbMix,

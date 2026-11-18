@@ -1,6 +1,6 @@
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 export const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-export const CONSERVATIVE_BRAKE_DECELERATION = 1.35;
+export const CONSERVATIVE_BRAKE_DECELERATION = 3.2;
 export const STOPPING_BUFFER = 5;
 
 export function safeSpeedForDistance(distanceMeters, buffer = STOPPING_BUFFER) {
@@ -24,15 +24,26 @@ export function drivingInput(vehicle, point, {
   const speed = Math.abs(vehicle.forwardSpeed ?? vehicle.speed ?? 0);
   const error = angleDelta(headingTo(vehicle, point) - vehicle.angle);
   const bend = nextPoint ? Math.abs(angleDelta(headingTo(point, nextPoint) - headingTo(vehicle, point))) : 0;
-  const targetSteering = clamp(error * 1.5 + (vehicle.angvel?.y ?? 0) * .3, -1, 1);
-  const strafe = clamp(targetSteering, previousSteering - dt * 2.2, previousSteering + dt * 2.2);
+  const rawSteering = Math.abs(error) < 0.015 ? 0 : clamp(error * 1.45 + (vehicle.angvel?.y ?? 0) * .25, -1, 1);
+  const maxSteerStep = Math.max(0.08, dt * 2.8);
+  const strafe = clamp(rawSteering, previousSteering - maxSteerStep, previousSteering + maxSteerStep);
   let wantedSpeed = ram ? 32 : 24;
-  wantedSpeed = Math.min(wantedSpeed, 4 + 24 * Math.max(0, Math.cos(error)) ** 4);
+  wantedSpeed = Math.min(wantedSpeed, 6 + 22 * Math.max(0, Math.cos(error)) ** 2.4);
   wantedSpeed = Math.min(wantedSpeed, speedLimit);
-  if (bend > .25) wantedSpeed = Math.min(wantedSpeed, safeSpeedForDistance(distance(vehicle, point), 7) + 2.5);
+  if (bend > .25) wantedSpeed = Math.min(wantedSpeed, safeSpeedForDistance(distance(vehicle, point), 6) + 3.5);
   if (Number.isFinite(remaining)) wantedSpeed = Math.min(wantedSpeed, safeSpeedForDistance(remaining, STOPPING_BUFFER));
   if (Number.isFinite(obstacleDistance)) wantedSpeed = Math.min(wantedSpeed, safeSpeedForDistance(obstacleDistance, 6));
-  let forward = speed > wantedSpeed + .6 ? -1 : clamp((wantedSpeed - speed) * .4, .1, 1);
+  const speedDelta = wantedSpeed - speed;
+  let forward;
+  if (obstacleDistance <= 7) {
+    forward = speed > 1 ? -1 : 0;
+  } else if (speedDelta >= -1.8) {
+    forward = clamp(0.28 + speedDelta * 0.22, 0.16, 1);
+  } else if (speedDelta >= -4.2 && obstacleDistance > 16 && remaining > 14) {
+    forward = clamp(0.12 + (speedDelta + 1.8) * 0.05, 0, 0.12);
+  } else {
+    forward = clamp((speedDelta + 1.8) * 0.24, -1, -0.15);
+  }
   if ((vehicle.forwardSpeed ?? 0) < -1) forward = 1;
   if (wantedSpeed < .3 && speed < .5) forward = 0;
   const pointDistance = distance(vehicle, point);

@@ -28,6 +28,8 @@ function neutralizeGameplay(sample = {}) {
     selectDelta: 0,
     platePressed: false,
     stimulantPressed: false,
+    fastStimulantPressed: false,
+    turboStimulantPressed: false,
     interactPressed: false,
     parachutePressed: false,
     posePressed: false,
@@ -102,6 +104,7 @@ export async function setup(ctx) {
   let stack = [];
   let pendingNavigation = null;
   let pendingRoomRule = null;
+  let pendingShopBuy = null;
   let gamepadFrame = 0;
   let previousPadButtons = new Map();
   let twoFingerTimer = null;
@@ -239,8 +242,27 @@ export async function setup(ctx) {
   }
 
   function mainScreen() {
+    const hasEnemyAi = typeof ctx.services?.has === "function" && ctx.services.has("enemy-ai-settings");
+    const enemyAi = hasEnemyAi
+      ? ctx.services.get("enemy-ai-settings")
+      : network;
+    const isAi = (enemyAi?.mode ?? enemyAi?.enemyAiMode) === "ai";
     const items = [
       { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
+      {
+        label: `Режим ботов: ${isAi ? "Боты с ИИ (враги и напарники)" : "Обычные боты"}`,
+        action: () => {
+          const next = isAi ? "standard" : "ai";
+          if (typeof enemyAi?.setMode === "function") enemyAi.setMode(next);
+          else network.setEnemyAiMode?.(next);
+          announce(next === "ai"
+            ? "Включён режим: боты с ИИ (враги и напарники)."
+            : "Включён режим: обычные боты.");
+          screen = mainScreen();
+          index = 2;
+          render();
+        },
+      },
     ];
     if (isRoomHost()) {
       items.push({ label: "Настройки комнаты", action: () => show(roomSettingsScreen(), { push: true }) });
@@ -375,6 +397,97 @@ export async function setup(ctx) {
     };
   }
 
+  function shopScreen() {
+    const shopState = latestSnapshot?.shop ?? {};
+    const self = latestSnapshot?.entities?.find((entity) => entity.id === network.playerId) ?? null;
+    const cash = Math.max(0, Math.round(Number(shopState.cash ?? self?.cash) || 0));
+    const nearbyShop = shopState.nearbyShop ?? null;
+    const prices = shopState.prices ?? {};
+    const buybackCost = Number(prices.buyback) || 1500;
+    const fastCost = Number(prices.fastStimulant) || 900;
+    const turboCost = Number(prices.turboStimulant) || 1800;
+    const platesCost = Number(prices.armorPlates) || 600;
+    const marksmanCost = Number(prices.marksman) || 700;
+    const sniperCost = Number(prices.sniper) || 1100;
+    const juggernautDropCost = Number(prices.juggernautDrop) || 2200;
+    const marksmanOwned = Boolean(shopState.marksmanOwned ?? self?.weapons?.includes?.("marksman"));
+    const sniperOwned = Boolean(shopState.sniperOwned ?? self?.weapons?.includes?.("sniper"));
+    const deadMates = Array.isArray(shopState.deadTeammates) ? shopState.deadTeammates : [];
+    const turboPurchased = Number(shopState.turboPurchasedCount ?? self?.turboPurchasedCount) || 0;
+    const turboLimit = Number(shopState.turboPurchaseLimit ?? self?.turboPurchaseLimit) || 3;
+    const turboLeftToBuy = Math.max(0, turboLimit - turboPurchased);
+
+    const queueBuy = (itemId, targetId = null) => {
+      pendingShopBuy = {
+        shopId: nearbyShop?.id ?? null,
+        itemId,
+        ...(targetId ? { targetId } : {}),
+      };
+      ctx.events.emit("input:changed", { reason: `shop:buy:${itemId}` });
+    };
+
+    const items = [];
+    for (const mate of deadMates) {
+      items.push({
+        label: `Выкупить напарника (${mate.name || "Напарник"}) — ${buybackCost} долларов`,
+        action: () => queueBuy("buyback", mate.id),
+      });
+    }
+    items.push({
+      label: `Вызвать сброс Джаггернаута (600 брони, 700 здоровья, гора стимуляторов — стягивает всех врагов) — ${juggernautDropCost} долларов`,
+      action: () => queueBuy("juggernaut-drop"),
+    });
+    items.push({
+      label: `Усиленный стимулятор (подъём за 1 секунду) — ${fastCost} долларов (в запасе ${self?.fastStimulants ?? 0})`,
+      action: () => queueBuy("fast-stimulant"),
+    });
+    items.push({
+      label: turboLeftToBuy > 0
+        ? `Усиленный стимулятор турбо (600 здоровья, осталось купить ${turboLeftToBuy} из ${turboLimit}) — ${turboCost} долларов`
+        : `Усиленный стимулятор турбо (лимит ${turboLimit} из ${turboLimit} исчерпан)`,
+      action: () => {
+        if (turboLeftToBuy <= 0) {
+          announce(`Больше купить нельзя: достигнут предел ${turboLimit} из ${turboLimit}.`);
+          return;
+        }
+        queueBuy("turbo-stimulant");
+      },
+    });
+    items.push({
+      label: `Комплект бронепластин (3 штуки) — ${platesCost} долларов`,
+      action: () => queueBuy("armor-plates"),
+    });
+    items.push({
+      label: marksmanOwned
+        ? `Патроны для винтовки (+24) — ${marksmanCost} долларов`
+        : `Винтовка — ${marksmanCost} долларов`,
+      action: () => queueBuy("marksman"),
+    });
+    items.push({
+      label: sniperOwned
+        ? `Патроны для снайперки (+10) — ${sniperCost} долларов`
+        : `Снайперка — ${sniperCost} долларов`,
+      action: () => queueBuy("sniper"),
+    });
+    const activeBounty = shopState.activeBounty ?? null;
+    items.push({
+      label: activeBounty
+        ? `Контракт «Охота за головами» (цель: ${activeBounty.targetName}, ${activeBounty.distance} м, награда +1000 долларов) — обновить бесплатно`
+        : "Контракт «Охота за головами» (отметить ближайшего врага на карте, награда +1000 долларов) — бесплатно",
+      action: () => queueBuy("bounty-contract"),
+    });
+    items.push({
+      label: "Закрыть магазин",
+      action: () => closeMenu(),
+    });
+
+    return {
+      id: "shop",
+      title: `${nearbyShop?.name || "Магазин"}. Баланс: ${cash} долларов`,
+      items,
+    };
+  }
+
   function openMain() {
     if (!network.connected) return;
     stack = [];
@@ -389,6 +502,16 @@ export async function setup(ctx) {
     }
     stack = [];
     show(mapScreen());
+  }
+
+  function openShop() {
+    if (!network.connected || network.mode !== "battle-royale") return;
+    if (!latestSnapshot?.shop?.nearbyShop) {
+      announce("Магазин далеко. Выберите магазин в меню Карта и подойдите к нему.");
+      return;
+    }
+    stack = [];
+    show(shopScreen());
   }
 
   function move(delta) {
@@ -417,8 +540,10 @@ export async function setup(ctx) {
     const base = open ? neutralizeGameplay(originalSample()) : originalSample();
     const navigation = pendingNavigation;
     const roomRule = pendingRoomRule;
+    const shopBuy = pendingShopBuy;
     pendingNavigation = null;
     pendingRoomRule = null;
+    pendingShopBuy = null;
     return {
       ...base,
       ...(navigation ? {
@@ -426,6 +551,7 @@ export async function setup(ctx) {
         navigationTogglePressed: Boolean(base.navigationTogglePressed || navigation.activate),
       } : {}),
       ...(roomRule ? { socialRoomRule: roomRule } : {}),
+      ...(shopBuy ? { shopBuy } : {}),
     };
   };
 
@@ -481,10 +607,36 @@ export async function setup(ctx) {
     if (!down) return;
     if (control === "map") openMap();
     else if (control === "menu") openMain();
+    else if (control === "shop") openShop();
   });
   ctx.events.on("gesture:action", ({ action } = {}) => {
     if (action === "map") openMap();
     else if (action === "menu") openMain();
+  });
+  ctx.events.on("game:event", (packet) => {
+    const p = packet?.payload ?? {};
+    if (packet?.event === "shop:open-requested" && p.entityId === network.playerId) {
+      openShop();
+      return;
+    }
+    if (packet?.event === "shop:purchased" && p.entityId === network.playerId) {
+      announce(`Куплено: ${p.itemName}. Осталось ${p.balance} долларов.`);
+      if (open && screen?.id === "shop") {
+        screen = shopScreen();
+        render();
+      }
+      return;
+    }
+    if (packet?.event === "shop:purchase-failed" && p.entityId === network.playerId) {
+      const reasons = {
+        "insufficient-funds": `Недостаточно долларов. Нужно ${p.required ?? ""} долларов.`,
+        "limit-reached": `Достигнут предел покупок: ${p.limit ?? 3}.`,
+        "capacity-full": "С собой уже максимум этого предмета.",
+        "no-dead-teammate": "Все напарники сейчас живы.",
+        "too-far": "Вы отошли от магазина.",
+      };
+      announce(reasons[p.reason] ?? "Покупка недоступна.");
+    }
   });
 
   // Gestures on empty menu space allow full navigation in fullscreen gesture mode:
@@ -632,6 +784,14 @@ export async function setup(ctx) {
       } else {
         screen = roomSettingsScreen();
       }
+    } else if (screen?.id === "shop") {
+      if (!latestSnapshot?.shop?.nearbyShop) {
+        closeMenu({ announceClose: false });
+        announce("Вы отошли от магазина.");
+      } else {
+        screen = shopScreen();
+        ui.title.textContent = screen.title;
+      }
     }
   });
 
@@ -639,6 +799,7 @@ export async function setup(ctx) {
     latestSnapshot = null;
     pendingNavigation = null;
     pendingRoomRule = null;
+    pendingShopBuy = null;
     cancelTwoFingerHold();
     closeMenu({ announceClose: false });
   });
@@ -646,6 +807,7 @@ export async function setup(ctx) {
   ctx.services.provide("menus", {
     openMain,
     openMap,
+    openShop,
     close: closeMenu,
     get open() { return open; },
     get screen() { return screen?.id ?? null; },

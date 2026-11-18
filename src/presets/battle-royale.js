@@ -40,6 +40,7 @@ import * as botBrain from "../plugins/battle-royale-bot-brain/server.js";
 import * as botAwareness from "../plugins/battle-royale-bot-awareness/server.js";
 import * as botCoverFire from "../plugins/battle-royale-bot-cover-fire/server.js";
 import * as buildingAiPortability from "../plugins/battle-royale-building-ai-portability/server.js";
+import * as aiEnemyDecisions from "../plugins/ai-enemy-decisions/server.js";
 import * as botCombat from "../plugins/battle-royale-bot-combat/server.js";
 import * as botBuildingStairs from "../plugins/battle-royale-bot-building-stairs/server.js";
 import * as warehouseTraffic from "../plugins/battle-royale-bot-warehouse-traffic/server.js";
@@ -83,6 +84,8 @@ import * as dropzoneVehicle from "../plugins/battle-royale-dropzone-vehicle/serv
 import * as projectileLifecycle from "../plugins/rapier-projectile-lifecycle/server.js";
 import * as injury from "../plugins/battle-royale-injury/server.js";
 import * as injuryIntegration from "../plugins/battle-royale-injury/integration.js";
+import * as shop from "../plugins/battle-royale-shop/server.js";
+import * as crateGenerator from "../plugins/battle-royale-crate-generator/server.js";
 import * as botVehicles from "../plugins/battle-royale-bot-vehicles/server.js";
 import * as developerSettings from "../plugins/developer-settings/server.js";
 
@@ -129,6 +132,7 @@ export const battleRoyalePreset = [
   botAwareness,
   botCoverFire,
   buildingAiPortability,
+  aiEnemyDecisions,
   botCombat,
   botBuildingStairs,
   warehouseTraffic,
@@ -169,6 +173,8 @@ export const battleRoyalePreset = [
   projectileLifecycle,
   injury,
   injuryIntegration,
+  shop,
+  crateGenerator,
   botVehicles,
   developerSettings,
 ];

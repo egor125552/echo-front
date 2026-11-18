@@ -52,53 +52,79 @@ export async function setup(ctx) {
   const preStepStates = new Map();
   let contactCursor = Number(physics.contactForceCursor?.()) || 0;
 
+  function attachCrateBody(crate) {
+    if (!crate?.id) return null;
+    if (byId.has(crate.id)) return byId.get(crate.id);
+
+    // Older versions gave each loot crate a static wall collider. Remove it
+    // before creating the real rigid body so there is no invisible duplicate
+    // pinning the new movable crate in place.
+    if (crate.collider) {
+      try { physics.removeWall?.(crate.collider); } catch {}
+      crate.collider = null;
+    }
+
+    const bodyId = `loot-crate:${crate.id}`;
+    const baseY = finite(crate.y);
+    const entry = physics.createDynamicCuboid(bodyId, {
+      x: finite(crate.x),
+      y: baseY + CRATE_HEIGHT / 2,
+      z: finite(crate.z),
+      hx: CRATE_HALF_X,
+      hy: CRATE_HEIGHT / 2,
+      hz: CRATE_HALF_Z,
+      mass: CRATE_MASS,
+      friction: 0.52,
+      restitution: 0.055,
+      linearDamping: 0.24,
+      angularDamping: 0.9,
+      canSleep: true,
+      ccd: false,
+      metadata: {
+        kind: "loot-crate",
+        crateId: crate.id,
+        material: "metal",
+        accessibleName: "металлический ящик",
+        interactionHint: "Удерживайте E и идите вперёд, чтобы толкать. Нажмите E, чтобы открыть",
+        contactForceThreshold: 120,
+      },
+    });
+
+    crate.bodyId = bodyId;
+    crate.collider = entry?.colliders?.[0] ?? null;
+    crate.hx = CRATE_HALF_X;
+    crate.hz = CRATE_HALF_Z;
+    crate.height = CRATE_HEIGHT;
+    crate.material = "metal";
+    byId.set(crate.id, crate);
+    byBodyId.set(bodyId, crate);
+    return crate;
+  }
+
+  function registerCrate(crate) {
+    const attached = attachCrateBody(crate);
+    if (attached) syncCrate(attached);
+    return attached;
+  }
+
+  function unregisterCrate(crateId) {
+    const crate = byId.get(crateId);
+    if (!crate) return false;
+    if (crate.bodyId) {
+      physics.removeDynamicBody?.(crate.bodyId);
+      byBodyId.delete(crate.bodyId);
+      preStepStates.delete(crate.bodyId);
+    }
+    byId.delete(crateId);
+    impactCooldown.delete(crateId);
+    crate.collider = null;
+    return true;
+  }
+
   physics.beginBatch?.();
   try {
     for (const crate of crates) {
-      if (!crate?.id) continue;
-
-      // Older versions gave each loot crate a static wall collider. Remove it
-      // before creating the real rigid body so there is no invisible duplicate
-      // pinning the new movable crate in place.
-      if (crate.collider) {
-        try { physics.removeWall?.(crate.collider); } catch {}
-        crate.collider = null;
-      }
-
-      const bodyId = `loot-crate:${crate.id}`;
-      const baseY = finite(crate.y);
-      const entry = physics.createDynamicCuboid(bodyId, {
-        x: finite(crate.x),
-        y: baseY + CRATE_HEIGHT / 2,
-        z: finite(crate.z),
-        hx: CRATE_HALF_X,
-        hy: CRATE_HEIGHT / 2,
-        hz: CRATE_HALF_Z,
-        mass: CRATE_MASS,
-        friction: 0.52,
-        restitution: 0.055,
-        linearDamping: 0.24,
-        angularDamping: 0.9,
-        canSleep: true,
-        ccd: false,
-        metadata: {
-          kind: "loot-crate",
-          crateId: crate.id,
-          material: "metal",
-          accessibleName: "металлический ящик",
-          interactionHint: "Удерживайте E и идите вперёд, чтобы толкать. Нажмите E, чтобы открыть",
-          contactForceThreshold: 120,
-        },
-      });
-
-      crate.bodyId = bodyId;
-      crate.collider = entry?.colliders?.[0] ?? null;
-      crate.hx = CRATE_HALF_X;
-      crate.hz = CRATE_HALF_Z;
-      crate.height = CRATE_HEIGHT;
-      crate.material = "metal";
-      byId.set(crate.id, crate);
-      byBodyId.set(bodyId, crate);
+      attachCrateBody(crate);
     }
   } finally {
     physics.endBatch?.();
@@ -314,6 +340,8 @@ export async function setup(ctx) {
         material: "metal",
       };
     },
+    registerCrate,
+    unregisterCrate,
     applyPush,
     capturePreStep,
     afterPhysics,

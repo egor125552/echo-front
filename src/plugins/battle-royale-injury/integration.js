@@ -25,6 +25,7 @@ const interruptingTeamRevive = input => Boolean(
   || input.sprint
   || input.fireHeld || input.firePressed
   || input.reload || input.platePressed || input.stimulantPressed
+  || input.fastStimulantPressed || input.turboStimulantPressed
   || input.parachutePressed || input.jumpPressed);
 
 const walkingInput = input => ({
@@ -77,7 +78,10 @@ export async function setup(ctx) {
   const handle = match.handleInput.bind(match);
   match.handleInput = (id, input = {}, now = Date.now()) => {
     if (!battleRoyale.canAct(now)) { movement.setInput(id, {}); return; }
-    if (input.stimulantPressed && !interrupting(input, injury.isDowned(id)) && meds.start(id, now)) {
+    const requestedKind = input.turboStimulantPressed
+      ? "turbo"
+      : (input.fastStimulantPressed ? "fast" : (input.stimulantPressed ? "auto" : null));
+    if (requestedKind && !interrupting(input, injury.isDowned(id)) && meds.start(id, now, requestedKind)) {
       if (injury.isRevivingTeammate(id)) injury.pauseTeamRevive(id, "stimulant", now);
       handle(id, injury.isDowned(id) ? {} : walkingInput(input), now);
       return;
@@ -156,17 +160,40 @@ export async function setup(ctx) {
       return { ...snap, entities: snap.entities.map(e => ({ ...e, ...meds.describe(e.id) })) };
     };
   }
+  const teams = ctx.services.has("teams") ? ctx.services.get("teams") : null;
   const events = match.eventsForPlayer.bind(match);
   match.eventsForPlayer = (id, packets) => {
     const base = events(id, packets);
     const seen = new Set(base);
+    const ownTeam = Number(teams?.teamOf?.(id)) || 0;
+    const self = ctx.components.get(id, "Transform");
     return [
       ...base,
-      ...packets.filter(p => (
-        !seen.has(p)
-        && p.event.startsWith("injury:")
-        && (p.payload.entityId === id || p.payload.reviverId === id)
-      )),
+      ...packets.filter(p => {
+        if (seen.has(p) || !p.event.startsWith("injury:")) return false;
+        const payload = p.payload ?? {};
+        if (payload.entityId === id || payload.reviverId === id) return true;
+        const targetTeam = Number(payload.teamId || teams?.teamOf?.(payload.entityId)) || 0;
+        if (ownTeam > 0 && targetTeam === ownTeam) return true;
+        if (
+          self
+          && Number.isFinite(payload.x)
+          && Number.isFinite(payload.z)
+          && (
+            p.event === "injury:stim-started"
+            || p.event === "injury:stim-completed"
+            || p.event === "injury:stim-cancelled"
+            || p.event === "injury:team-revive-started"
+            || p.event === "injury:team-revive-paused"
+            || p.event === "injury:team-revive-completed"
+            || p.event === "injury:revived"
+          )
+        ) {
+          const dist = Math.hypot((Number(self.x) || 0) - Number(payload.x), (Number(self.z) || 0) - Number(payload.z));
+          return dist <= Number(payload.radius ?? 36) + 4;
+        }
+        return false;
+      }),
     ];
   };
   for (const method of ["suspendHuman", "disconnectHuman"]) {

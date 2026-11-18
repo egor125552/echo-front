@@ -1,6 +1,8 @@
 const SOUNDS = {
   "weapon.pistol": "/assets/audio/core/pistol-shot.mp3",
   "weapon.rifle": "/assets/audio/core/automatic-shot.mp3",
+  "weapon.marksman": "/assets/aistudio/single-shot-m-1-rifle_c09ae09f.mp3",
+  "weapon.sniper": "/assets/aistudio/precise-booming-shot-from-a-short-barreled-weapon_4606b104.mp3",
   "footstep.forest.1": "/assets/audio/footsteps/forest/forest-step-1.mp3",
   "footstep.forest.2": "/assets/audio/footsteps/forest/forest-step-2.mp3",
   "footstep.forest.3": "/assets/audio/footsteps/forest/forest-step-3.mp3",
@@ -63,8 +65,23 @@ export const SPATIAL_SOUND_PROFILES = {
   footstep: { gain: 0.95, referenceDistance: 2.2, rolloffFactor: 0.55, airAbsorptionMinHz: 6500 },
   "weapon.pistol": { gain: 1, referenceDistance: 2.5, rolloffFactor: 0.32, airAbsorptionMinHz: 3200 },
   "weapon.rifle": { gain: 1.05, referenceDistance: 3, rolloffFactor: 0.28, airAbsorptionMinHz: 2800 },
+  "weapon.marksman": { gain: 1.12, referenceDistance: 4, rolloffFactor: 0.24, airAbsorptionMinHz: 2600 },
+  "weapon.sniper": { gain: 1.25, referenceDistance: 5.5, rolloffFactor: 0.19, airAbsorptionMinHz: 2200 },
   default: { gain: 1, referenceDistance: 2, rolloffFactor: 0.5, airAbsorptionMinHz: 4200 },
 };
+
+const WEAPON_SOUND_KEYS = Object.freeze({
+  pistol: "weapon.pistol",
+  rifle: "weapon.rifle",
+  marksman: "weapon.marksman",
+  sniper: "weapon.sniper",
+});
+
+const WEAPON_HOLD_INTERVAL_MS = Object.freeze({
+  rifle: 100,
+  pistol: 200,
+  marksman: 255,
+});
 
 export function spatialProfileForKey(key) {
   if (String(key).startsWith("footstep.")) return SPATIAL_SOUND_PROFILES.footstep;
@@ -93,6 +110,7 @@ export async function setup(ctx) {
   let selfState = { weapon: null, ammo: null, alive: false, canFire: true };
   let selfAcousticZone = "outdoor";
   let automaticTimer = null;
+  let lastOwnShotAt = { marksman: -Infinity, sniper: -Infinity };
 
   function stopAutomatic() {
     if (automaticTimer) clearInterval(automaticTimer);
@@ -102,18 +120,25 @@ export async function setup(ctx) {
   async function playOwnShot() {
     if (!selfState.alive || !selfState.weapon || !selfState.canFire) return;
     if (Number.isFinite(selfState.ammo) && selfState.ammo <= 0) return;
-    const key = selfState.weapon === "rifle" ? "weapon.rifle" : "weapon.pistol";
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (selfState.weapon === "sniper" && now - lastOwnShotAt.sniper < 1040) return;
+    if (selfState.weapon === "marksman" && now - lastOwnShotAt.marksman < 215) return;
+    const key = WEAPON_SOUND_KEYS[selfState.weapon] ?? "weapon.pistol";
     const url = SOUNDS[key];
     if (!url) return;
+    if (selfState.weapon === "sniper") lastOwnShotAt.sniper = now;
+    if (selfState.weapon === "marksman") lastOwnShotAt.marksman = now;
     if (Number.isFinite(selfState.ammo)) selfState.ammo = Math.max(0, selfState.ammo - 1);
-    try { await audio.playCentered(url, { gain: 0.9, channel: "own-weapon" }); }
+    const gain = selfState.weapon === "sniper" ? 1.05 : selfState.weapon === "marksman" ? 0.98 : 0.9;
+    try { await audio.playCentered(url, { gain, channel: "own-weapon" }); }
     catch (error) { console.error("Echo Front local weapon audio error", error); }
   }
 
   function startAutomaticIfNeeded() {
     stopAutomatic();
-    if (selfState.weapon !== "rifle" && selfState.weapon !== "pistol") return;
-    automaticTimer = setInterval(() => { void playOwnShot(); }, selfState.weapon === "rifle" ? 100 : 200);
+    const intervalMs = WEAPON_HOLD_INTERVAL_MS[selfState.weapon];
+    if (!intervalMs) return;
+    automaticTimer = setInterval(() => { void playOwnShot(); }, intervalMs);
   }
 
   async function playFeedback(key, url) {
@@ -182,7 +207,7 @@ export async function setup(ctx) {
       }
       if (packet.event !== "sound:spatial") return;
       if (payload.entityId === network.playerId) {
-        if (payload.key === "weapon.pistol" || payload.key === "weapon.rifle") return;
+        if (Object.values(WEAPON_SOUND_KEYS).includes(payload.key)) return;
         await audio.playCentered(url, { gain: isFootstep ? 0.45 : 0.85 });
         return;
       }
@@ -219,7 +244,13 @@ export async function setup(ctx) {
         ...Object.values(SOUNDS).filter((url) => !url.includes("footsteps")),
         ...FOOTSTEP_SETS.forest.walk,
       ];
-      await Promise.all([...new Set(urls)].map((url) => audio.load(url)));
+      const warming = Promise.allSettled(
+        [...new Set(urls)].map((url) => audio.load(url).catch(() => null)),
+      );
+      await Promise.race([
+        warming,
+        new Promise((resolve) => setTimeout(resolve, 4000)),
+      ]);
     },
   });
 }

@@ -45,7 +45,7 @@ export async function setup(ctx) {
     if (
       packet.event === "weapon:unlocked"
       && payload.entityId === network.playerId
-      && payload.weaponId === "rifle"
+      && (payload.weaponId === "rifle" || payload.weaponId === "marksman" || payload.weaponId === "sniper")
     ) {
       void play("rifle.unlocked", 1.05);
       return;

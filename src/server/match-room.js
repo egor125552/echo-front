@@ -12,9 +12,12 @@ import {
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
 import { summarizePerformanceSamples } from "./performance-samples.js";
 import { encodeSnapshotMessage } from "../../public/client/snapshot-delta.js";
+import { AI_DECISION_MAX_REQUESTS, resolveGeminiApiKey } from "./gemini-decisions.js";
+import { normalizeEnemyAiMode } from "../plugins/ai-enemy-decisions/server.js";
 
 const HOT_RECONNECT_KEEPALIVE_MS = 8000;
 const LAST_RUNTIME_ERROR_KEY = "last-runtime-error-v1";
+const AI_BUDGET_KEY = "ai-decisions-budget-v1";
 
 function monotonicNow() {
   return typeof performance !== "undefined" && typeof performance.now === "function"
@@ -65,6 +68,8 @@ export class MatchRoom extends DurableObject {
     this.inputSamples = [];
     this.lastRuntimeError = null;
     this.snapshotStreams = new WeakMap();
+    this.aiDecisionPending = null;
+    this.aiBudgetLock = Promise.resolve();
 
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
@@ -77,7 +82,12 @@ export class MatchRoom extends DurableObject {
       const tutorial = sockets.some((socket) => {
         try { return socket.deserializeAttachment()?.tutorial === true; } catch { return false; }
       });
+      const enemyAi = sockets.some((socket) => {
+        try { return normalizeEnemyAiMode(socket.deserializeAttachment()?.enemyAi) === "ai"; } catch { return false; }
+      }) ? "ai" : "standard";
       await this.ensureGame(mode, { tutorial });
+      await this.syncAiBudgetState();
+      this.applyEnemyAiMode(enemyAi);
       for (const ws of sockets) {
         if (ws.readyState === 3) continue;
         const attachment = ws.deserializeAttachment();
@@ -166,8 +176,121 @@ export class MatchRoom extends DurableObject {
       this.lastSnapshotAt = 0;
       this.diagnosticsStats = freshDiagnosticsStats();
       this.inputSamples = [];
+      this.aiDecisionsService()?.setBudgetStats({
+        configured: Boolean(resolveGeminiApiKey(this.env)),
+        maxRequests: AI_DECISION_MAX_REQUESTS,
+      });
     }
     return this.game;
+  }
+
+  aiDecisionsService() {
+    const services = this.game?.host?.services;
+    if (!services?.has("ai-enemy-decisions")) return null;
+    return services.get("ai-enemy-decisions");
+  }
+
+  applyEnemyAiMode(nextMode, now = Date.now()) {
+    const normalized = normalizeEnemyAiMode(nextMode);
+    const service = this.aiDecisionsService();
+    if (service) service.setMode(normalized, now);
+    else this.game?.api?.setEnemyAiMode?.(normalized, now);
+    return normalized;
+  }
+
+  async syncAiBudgetState() {
+    const configured = Boolean(resolveGeminiApiKey(this.env));
+    const service = this.aiDecisionsService();
+    service?.setBudgetStats({ configured, maxRequests: AI_DECISION_MAX_REQUESTS });
+    if (!this.env?.MATCH_ROOM?.getByName) return null;
+    try {
+      const budgetRoom = this.env.MATCH_ROOM.getByName("__ai-budget__");
+      const res = await budgetRoom.fetch(new Request("https://internal/internal/ai-budget"));
+      if (!res.ok) return null;
+      const data = await res.json();
+      service?.setBudgetStats({
+        usedRequests: data.usedRequests,
+        maxRequests: data.maxRequests,
+        configured: Boolean(data.configured ?? configured),
+      });
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  async reserveGlobalAiBudget() {
+    if (!this.env?.MATCH_ROOM?.getByName) {
+      return {
+        allowed: true,
+        usedRequests: (this.aiDecisionsService()?.describe()?.usedRequests ?? 0) + 1,
+        maxRequests: AI_DECISION_MAX_REQUESTS,
+      };
+    }
+    const budgetRoom = this.env.MATCH_ROOM.getByName("__ai-budget__");
+    const res = await budgetRoom.fetch(new Request("https://internal/internal/ai-budget/consume", {
+      method: "POST",
+    }));
+    const data = await res.json();
+    this.aiDecisionsService()?.setBudgetStats({
+      usedRequests: data.usedRequests,
+      maxRequests: data.maxRequests,
+      configured: Boolean(data.configured),
+    });
+    return data;
+  }
+
+  triggerAiDecisionRefresh(now = Date.now()) {
+    const aiService = this.aiDecisionsService();
+    if (!aiService || this.aiDecisionPending || !aiService.shouldRefresh(now)) return;
+    this.aiDecisionPending = aiService.refreshOnce({
+      env: this.env,
+      reserveBudget: () => this.reserveGlobalAiBudget(),
+      now,
+    })
+      .catch(() => null)
+      .finally(() => {
+        this.aiDecisionPending = null;
+        try { this.broadcastEvents(); } catch {}
+      });
+  }
+
+  readStoredBudget() {
+    return this.ctx.storage.get(AI_BUDGET_KEY).then((record) => {
+      const usedRequests = Math.max(0, Math.floor(Number(record?.usedRequests) || 0));
+      const maxRequests = AI_DECISION_MAX_REQUESTS;
+      return {
+        ok: true,
+        usedRequests,
+        maxRequests,
+        remainingRequests: Math.max(0, maxRequests - usedRequests),
+        configured: Boolean(resolveGeminiApiKey(this.env)),
+      };
+    });
+  }
+
+  consumeStoredBudget() {
+    const task = this.aiBudgetLock.then(async () => {
+      const current = await this.readStoredBudget();
+      if (current.usedRequests >= current.maxRequests) {
+        return {
+          ...current,
+          allowed: false,
+        };
+      }
+      const usedRequests = current.usedRequests + 1;
+      await this.ctx.storage.put(AI_BUDGET_KEY, { usedRequests });
+      return {
+        ok: true,
+        allowed: true,
+        usedRequests,
+        maxRequests: current.maxRequests,
+        remainingRequests: Math.max(0, current.maxRequests - usedRequests),
+        configured: current.configured,
+      };
+    });
+    this.aiBudgetLock = task.catch(() => {});
+    return task;
   }
 
   socketsForPlayer(playerId, excludedSocket = null) {
@@ -277,6 +400,7 @@ export class MatchRoom extends DurableObject {
       }
       this.broadcastEvents(sample);
       this.broadcastSnapshot(false, sample);
+      this.triggerAiDecisionRefresh(now);
     } catch (error) {
       this.reportRuntimeError(error, { phase: "game-loop", mode: this.mode });
     }
@@ -314,6 +438,56 @@ export class MatchRoom extends DurableObject {
 
   async fetch(request) {
     const requestUrl = new URL(request.url);
+    if (requestUrl.pathname === "/internal/ai-budget") {
+      return Response.json(await this.readStoredBudget(), { headers: { "Cache-Control": "no-store" } });
+    }
+    if (requestUrl.pathname === "/internal/ai-budget/consume" && request.method === "POST") {
+      return Response.json(await this.consumeStoredBudget(), { headers: { "Cache-Control": "no-store" } });
+    }
+    if (requestUrl.pathname === "/internal/ai-enemies") {
+      const headers = { "Cache-Control": "no-store" };
+      if (request.method === "POST") {
+        let body = {};
+        try { body = await request.json(); } catch {}
+        if (!this.game && body.mode) {
+          await this.ensureGame(body.mode, { tutorial: Boolean(body.tutorial) });
+        }
+        await this.syncAiBudgetState();
+        if (typeof body.enemyAiMode === "string") {
+          this.applyEnemyAiMode(body.enemyAiMode);
+        }
+        if (body.trigger === true && this.aiDecisionsService()) {
+          try {
+            const batch = await this.aiDecisionsService().refreshOnce({
+              env: this.env,
+              reserveBudget: () => this.reserveGlobalAiBudget(),
+              now: Date.now(),
+            });
+            this.broadcastEvents();
+            return Response.json({
+              ok: true,
+              batch,
+              state: this.aiDecisionsService().describe(),
+            }, { headers });
+          } catch (error) {
+            this.broadcastEvents();
+            return Response.json({
+              ok: false,
+              code: error?.code ?? "DECISIONS_API_ERROR",
+              error: String(error?.message ?? error),
+              state: this.aiDecisionsService().describe(),
+            }, { status: Number(error?.status) || 502, headers });
+          }
+        }
+      }
+      await this.syncAiBudgetState();
+      return Response.json({
+        ok: true,
+        roomActive: Boolean(this.game),
+        mode: this.mode,
+        state: this.aiDecisionsService()?.describe() ?? null,
+      }, { headers });
+    }
     if (requestUrl.pathname === "/api/diagnostics") return this.diagnosticsResponse(requestUrl);
     if (requestUrl.pathname === "/api/play-error") return this.runtimeErrorResponse();
     if (requestUrl.pathname === "/api/engine-command") return handleEngineControlRequest(this, request);
@@ -339,6 +513,7 @@ export class MatchRoom extends DurableObject {
 
     const mode = normalizeGameMode(requestUrl.searchParams.get("mode"));
     const tutorial = requestUrl.searchParams.get("tutorial") === "1";
+    const enemyAi = normalizeEnemyAiMode(requestUrl.searchParams.get("enemyAi"));
     const snapshotProtocol = requestUrl.searchParams.get("snapshotProtocol") === "delta-v1" ? "delta-v1" : null;
     let phase = "delete-alarm";
     let playerId = null;
@@ -347,6 +522,8 @@ export class MatchRoom extends DurableObject {
       await this.ctx.storage.deleteAlarm();
       phase = "ensure-game";
       await this.ensureGame(mode, { tutorial });
+      await this.syncAiBudgetState();
+      this.applyEnemyAiMode(enemyAi);
       this.hotReconnectUntil = 0;
       this.lastStepAt = Date.now();
       phase = "cleanup-disconnected-humans";
@@ -361,7 +538,7 @@ export class MatchRoom extends DurableObject {
       const client = pair[0];
       server = pair[1];
       this.ctx.acceptWebSocket(server);
-      server.serializeAttachment({ playerId, mode, tutorial, snapshotProtocol });
+      server.serializeAttachment({ playerId, mode, tutorial, enemyAi, snapshotProtocol });
       this.disconnectedHumans.delete(playerId);
 
       phase = "connect-human";
@@ -425,6 +602,16 @@ export class MatchRoom extends DurableObject {
       if (data.type === "perf-probe" && Number.isSafeInteger(data.id)
         && data.id >= 0 && data.id <= 1_000_000_000) {
         ws.send(JSON.stringify({ type: "perf-pong", id: data.id, server: this.performanceReport(now) }));
+      }
+      if (data.type === "settings" && typeof data.enemyAiMode === "string") {
+        const nextEnemyAi = this.applyEnemyAiMode(data.enemyAiMode, now);
+        try {
+          ws.serializeAttachment({ ...(attachment ?? {}), enemyAi: nextEnemyAi });
+        } catch {}
+        await this.syncAiBudgetState();
+        if (nextEnemyAi === "ai") this.triggerAiDecisionRefresh(now);
+        this.broadcastEvents();
+        this.broadcastSnapshot(true);
       }
       if (tutorial && data.type === "tutorial:speech-complete") {
         this.game.api.tutorialAcknowledge?.(playerId, data.phase, now);

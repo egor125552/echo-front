@@ -169,11 +169,38 @@ export async function setup(ctx) {
   const physics = ctx.services.get("physics");
   const map = ctx.services.get("map");
   const blockedEntities = new Map();
+  const botKinematics = new Map();
+
+  function wrapAngle(value) {
+    let angle = Number(value) || 0;
+    while (angle > Math.PI) angle -= Math.PI * 2;
+    while (angle < -Math.PI) angle += Math.PI * 2;
+    return angle;
+  }
+
+  function getBotKinematics(entityId) {
+    let state = botKinematics.get(entityId);
+    if (!state) {
+      state = {
+        targetAngle: null,
+        turnRate: 0,
+        smoothForward: 0,
+        smoothStrafe: 0,
+      };
+      botKinematics.set(entityId, state);
+    }
+    return state;
+  }
+
+  function resetBotKinematics(entityId) {
+    botKinematics.delete(entityId);
+  }
 
   ctx.components.register("Transform");
   ctx.components.register("Input");
 
   ctx.events.on("entity:spawned", ({ entityId, spec }) => {
+    resetBotKinematics(entityId);
     if (spec.movable === false) return;
     const spawn = spec.position ?? map.nextSpawn(spec.team ?? 1);
     physics.createCharacter(entityId, spawn);
@@ -197,6 +224,7 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("entity:died", ({ entityId }) => {
+    resetBotKinematics(entityId);
     physics.setCharacterEnabled(entityId, false);
     blockedEntities.delete(entityId);
     const transform = ctx.components.get(entityId, "Transform");
@@ -215,6 +243,7 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("entity:respawned", ({ entityId }) => {
+    resetBotKinematics(entityId);
     physics.setCharacterEnabled(entityId, true);
     blockedEntities.delete(entityId);
     const transform = ctx.components.get(entityId, "Transform");
@@ -226,6 +255,7 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
+    resetBotKinematics(entityId);
     blockedEntities.delete(entityId);
     physics.removeCharacter(entityId);
     ctx.components.remove(entityId, "Transform");
@@ -236,6 +266,13 @@ export async function setup(ctx) {
     setInput(entityId, input = {}) {
       const state = ctx.components.get(entityId, "Input");
       if (!state) return;
+      const entity = entities.get(entityId);
+      if (entity?.bot) {
+        const kin = getBotKinematics(entityId);
+        kin.targetAngle = Number.isFinite(Number(input.targetAngle))
+          ? wrapAngle(Number(input.targetAngle))
+          : null;
+      }
       state.forward = Math.max(-1, Math.min(1, Number(input.forward) || 0));
       state.strafe = Math.max(-1, Math.min(1, Number(input.strafe) || 0));
       state.turn = Math.max(-1, Math.min(1, Number(input.turn) || 0));
@@ -243,6 +280,7 @@ export async function setup(ctx) {
       state.fireHeld = Boolean(input.fireHeld);
     },
     teleport(entityId, position) {
+      resetBotKinematics(entityId);
       const transform = ctx.components.get(entityId, "Transform");
       if (!transform) return;
       const target = {
@@ -271,13 +309,61 @@ export async function setup(ctx) {
           if (!input) continue;
 
           const turnSpeed = entity.bot ? BOT_TURN_SPEED : HUMAN_TURN_SPEED;
-          transform.angle += input.turn * turnSpeed * safeDt;
+          let rawForward = input.forward;
+          const strafeFactor = entity.bot ? 0.7 : 1;
+          let rawStrafe = input.strafe * strafeFactor;
+
+          if (entity.bot) {
+            const kin = getBotKinematics(entityId);
+            if (kin.targetAngle !== null) {
+              const remaining = wrapAngle(kin.targetAngle - transform.angle);
+              if (Math.abs(remaining) <= 0.003) {
+                transform.angle = kin.targetAngle;
+                kin.turnRate = 0;
+              } else {
+                const maxRate = Math.max(0.35, Math.abs(input.turn) || 0.85) * turnSpeed;
+                const arriveRate = Math.max(-maxRate, Math.min(maxRate, remaining * 8.5));
+                const alpha = Math.min(1, safeDt * 18);
+                kin.turnRate += (arriveRate - kin.turnRate) * alpha;
+                const stepAngle = kin.turnRate * safeDt;
+                if (Math.sign(stepAngle) === Math.sign(remaining) && Math.abs(stepAngle) >= Math.abs(remaining)) {
+                  transform.angle = kin.targetAngle;
+                  kin.turnRate = 0;
+                } else {
+                  transform.angle = wrapAngle(transform.angle + stepAngle);
+                }
+              }
+            } else if (Math.abs(input.turn) < 0.001) {
+              kin.turnRate = 0;
+              transform.angle = wrapAngle(transform.angle);
+            } else {
+              const desiredRate = input.turn * turnSpeed;
+              const alpha = Math.min(1, safeDt * 22);
+              kin.turnRate += (desiredRate - kin.turnRate) * alpha;
+              transform.angle = wrapAngle(transform.angle + kin.turnRate * safeDt);
+            }
+
+            const rawMag = Math.hypot(rawForward, rawStrafe);
+            if (rawMag <= 0.001) {
+              kin.smoothForward = 0;
+              kin.smoothStrafe = 0;
+            } else if (Math.hypot(kin.smoothForward, kin.smoothStrafe) <= 0.02) {
+              kin.smoothForward = rawForward;
+              kin.smoothStrafe = rawStrafe;
+            } else {
+              const gaitAlpha = Math.min(1, safeDt * 15);
+              kin.smoothForward += (rawForward - kin.smoothForward) * gaitAlpha;
+              kin.smoothStrafe += (rawStrafe - kin.smoothStrafe) * gaitAlpha;
+            }
+            rawForward = kin.smoothForward;
+            rawStrafe = kin.smoothStrafe;
+          } else {
+            transform.angle += input.turn * turnSpeed * safeDt;
+          }
+
           const speed = Number.isFinite(transform.movementSpeed)
             ? Math.max(0, transform.movementSpeed)
             : (input.sprint ? 5.4 : 3.25);
-          const rawForward = input.forward;
-          const strafeFactor = entity.bot ? 0.7 : 1;
-          const rawStrafe = input.strafe * strafeFactor;
           const inputLength = Math.hypot(rawForward, rawStrafe);
           const scale = inputLength > 1 ? 1 / inputLength : 1;
           const forward = rawForward * scale;

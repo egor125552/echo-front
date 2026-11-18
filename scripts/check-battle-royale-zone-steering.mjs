@@ -36,3 +36,24 @@ test("zone damage keeps the same DPS across a delayed server tick", () => {
   assert.equal(zoneDamageForElapsed(2500), 30);
   assert.equal(zoneDamageForElapsed(5000), 60);
 });
+
+test("late-game small zones release bots already inside the circle and never collapse targets to (0, 0)", () => {
+  // Inside a 100m zone (at ~45m from center): bot is safely inside and free to patrol
+  assert.equal(shouldSteerForZone(45, 100), false);
+  assert.equal(zoneSteeringPoint(32, 30, 100), null);
+
+  // Outside a 100m zone (at ~110m from center): bot steers into its sector (~62m), not (0, 0)
+  const target100 = zoneSteeringPoint(80, 75, 100);
+  assert.ok(target100);
+  assert.ok(Math.hypot(target100.x, target100.z) >= 55, "Must steer into sector, not (0, 0)");
+
+  // Inside the 35m final zone (at ~18m from center): bot is free to roam/fight, not locked to zone center
+  assert.equal(shouldSteerForZone(18, 35), false);
+  assert.equal(zoneSteeringPoint(12, 13, 35), null);
+
+  // Outside the 35m final zone (at ~42m from center): steers to ~21.7m in its sector, not (0, 0)
+  const target35 = zoneSteeringPoint(30, 30, 35);
+  assert.ok(target35);
+  assert.ok(Math.hypot(target35.x, target35.z) >= 18, "Final zone steering must preserve sector instead of (0, 0)");
+});
+

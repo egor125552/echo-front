@@ -34,15 +34,21 @@ function trait(botId, salt, min, max) {
 }
 
 export function botPersonality(botId, weaponId = "pistol") {
+  const sniper = weaponId === "sniper";
+  const marksman = weaponId === "marksman";
   const rifle = weaponId === "rifle";
   return Object.freeze({
     aggression: trait(botId, "aggression", 0.28, 0.9),
     caution: trait(botId, "caution", 0.3, 0.92),
     curiosity: trait(botId, "curiosity", 0.28, 0.9),
     persistence: trait(botId, "persistence", 0.3, 0.92),
-    preferredRange: rifle
-      ? trait(botId, "range", 10.5, 16)
-      : trait(botId, "range", 5.5, 9.5),
+    preferredRange: sniper
+      ? trait(botId, "range", 40, 62)
+      : marksman
+        ? trait(botId, "range", 24, 36)
+        : rifle
+          ? trait(botId, "range", 10.5, 16)
+          : trait(botId, "range", 5.5, 9.5),
     flankBias: trait(botId, "flank", 0.25, 0.95),
   });
 }
@@ -77,6 +83,7 @@ function soundInterestScore(profile, ownDurability, interestTarget) {
 
 export function chooseUtilityDecision({
   profile,
+  weaponId = null,
   ownDurability = 1,
   visibleEnemies = [],
   memory = null,
@@ -89,14 +96,19 @@ export function chooseUtilityDecision({
   const durability = clamp01(ownDurability);
   const visible = Array.isArray(visibleEnemies) ? visibleEnemies : [];
   const threatCount = visible.length;
+  const sniperMode = weaponId === "sniper" || safeProfile.preferredRange >= 38;
+  const marksmanMode = weaponId === "marksman" || (!sniperMode && safeProfile.preferredRange >= 22);
 
   let target = null;
   let targetScore = Infinity;
   for (const enemy of visible) {
     const distance = Math.max(0.1, Number(enemy.distance) || 999);
     const weakness = 1 - enemyDurability(enemy);
+    const armored = (Number(enemy.armor) || 0) > 0;
     const attackerPriority = underFire && threatTargetId && enemy.entityId === threatTargetId ? 0.42 : 1;
-    const score = distance * (1 - weakness * 0.22) * attackerPriority;
+    const armorBreakPriority = sniperMode && armored && distance >= 12 ? 0.78 : 1;
+    const distancePenalty = sniperMode && distance > 140 ? 1.45 : 1;
+    const score = distance * (1 - weakness * 0.22) * attackerPriority * armorBreakPriority * distancePenalty;
     if (score >= targetScore) continue;
     target = enemy;
     targetScore = score;
@@ -182,15 +194,19 @@ export function chooseUtilityDecision({
         returnFire: defendingAgainstAttacker || nearestDistance <= 18,
       };
     }
+    const rangedPrecision = sniperMode || marksmanMode;
+    const tactic = rangedPrecision && nearestDistance < safeProfile.preferredRange - 3
+      ? "space"
+      : (safeProfile.flankBias > 0.68 && nearestDistance < safeProfile.preferredRange + 4
+        ? "flank"
+        : (nearestDistance < safeProfile.preferredRange - 2 ? "space" : "press"));
     return {
       goal: "engage",
       score: engageScore,
       target,
       threatCount,
       desiredRange: safeProfile.preferredRange,
-      tactic: safeProfile.flankBias > 0.68 && nearestDistance < safeProfile.preferredRange + 4
-        ? "flank"
-        : (nearestDistance < safeProfile.preferredRange - 2 ? "space" : "press"),
+      tactic,
     };
   }
 
@@ -551,6 +567,7 @@ export async function setup(ctx) {
     } else {
       candidate = decorate(botId, chooseUtilityDecision({
         profile,
+        weaponId: weaponId(botId),
         ownDurability: ownDurability(botId),
         visibleEnemies,
         memory: context.memory,

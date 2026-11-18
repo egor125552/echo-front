@@ -184,6 +184,7 @@ export async function setup(ctx) {
   let nextAbandonedCheckAt = 0;
   const extraDriverVehicle = new Map();
   const extraPassengerVehicle = new Map();
+  const primaryPassengerIds = [];
   const PASSENGER_CAPACITY = 3;
   const PASSENGER_SEATS = [
     { x: -0.7, y: 0.65, z: -0.72 },
@@ -376,6 +377,9 @@ export async function setup(ctx) {
       kind: "offroad",
       accessibleName: "внедорожник",
       audioProfile: "truck",
+      passengerIds: [...primaryPassengerIds],
+      passengerCount: primaryPassengerIds.length,
+      passengerCapacity: PASSENGER_CAPACITY,
     } : null;
   }
 
@@ -415,6 +419,7 @@ export async function setup(ctx) {
       speedKph: Math.max(0, Number(state.speedKph) || (Number(state.speed) || 0) * 3.6),
       forwardSpeed: Number(state.forwardSpeed) || 0,
       driverId: state.driverId ?? null,
+      passengerIds: [...(state.passengerIds ?? [])],
       occupied: Boolean(state.occupied ?? state.driverId),
       groundedWheels: Math.max(0, Number(state.groundedWheels) || 0),
       input: compactNetworkInput(state.input),
@@ -449,6 +454,7 @@ export async function setup(ctx) {
       speedKph: speed * 3.6,
       forwardSpeed,
       driverId: entry.driverId,
+      passengerIds: [...entry.passengerIds],
       occupied: Boolean(entry.driverId),
       groundedWheels,
       input: compactNetworkInput(entry.input),
@@ -462,7 +468,10 @@ export async function setup(ctx) {
     const observedEntityId = options.observedEntityId ?? null;
     const withinInterest = (vehicle) => {
       if (!vehicle) return false;
-      if (vehicle.driverId === observedEntityId) return true;
+      if (
+        vehicle.driverId === observedEntityId
+        || (Array.isArray(vehicle.passengerIds) && vehicle.passengerIds.includes(observedEntityId))
+      ) return true;
       if (center && Number.isFinite(radius)) return distance3(center, vehicle) <= radius;
       return true;
     };
@@ -575,6 +584,32 @@ export async function setup(ctx) {
   }
 
 
+  function syncPrimaryPassengers() {
+    const primary = originalStateFor(primaryId);
+    if (!primary) return;
+    const rot = primary.rotation ?? { x: 0, y: 0, z: 0, w: 1 };
+    for (let i = primaryPassengerIds.length - 1; i >= 0; i--) {
+      const passengerId = primaryPassengerIds[i];
+      const entity = entities.get(passengerId);
+      const transform = ctx.components.get(passengerId, "Transform");
+      if (!entity?.alive || !transform) {
+        primaryPassengerIds.splice(i, 1);
+        extraPassengerVehicle.delete(passengerId);
+        continue;
+      }
+      const seatSpec = PASSENGER_SEATS[i] ?? PASSENGER_SEATS[PASSENGER_SEATS.length - 1];
+      const seat = rotateVector(rot, seatSpec);
+      const position = { x: primary.x + seat.x, y: primary.y + seat.y, z: primary.z + seat.z };
+      physics.teleport(passengerId, position);
+      transform.x = position.x;
+      transform.y = position.y;
+      transform.z = position.z;
+      transform.angle = Number(primary.angle) || headingFromRotation(rot);
+      transform.verticalVelocity = 0;
+      transform.grounded = false;
+    }
+  }
+
   function syncExtraPassengers(entry) {
     const body = bodyState(entry);
     if (!body) return;
@@ -610,29 +645,93 @@ export async function setup(ctx) {
   }
 
   function vehicleForPassenger(playerId) {
+    const vehicleId = extraPassengerVehicle.get(playerId);
+    if (vehicleId === primaryId) return enrichPrimary(originalStateFor(primaryId));
     const entry = passengerVehicle(playerId);
     return entry ? extraState(entry) : null;
   }
 
   function enterPassenger(playerId, vehicleId, now = Date.now()) {
     if (!playerId || isDriving(playerId) || isPassenger(playerId)) return false;
-    const entry = extras.get(vehicleId);
     const entity = entities.get(playerId);
     const transform = ctx.components.get(playerId, "Transform");
+    if (!entity?.alive || !transform || transform.downed || transform.ragdollActive) return false;
+    const maxDist = entity.bot ? Math.max(BOT_ENTER_DISTANCE, 32) : ENTER_DISTANCE + 1.2;
+
+    if (vehicleId === primaryId) {
+      const primary = originalStateFor(primaryId);
+      if (!primary?.driverId || primaryPassengerIds.length >= PASSENGER_CAPACITY) return false;
+      if (distance3(transform, primary) > maxDist) return false;
+      armor?.cancelPlating?.(playerId, "vehicle-enter");
+      primaryPassengerIds.push(playerId);
+      extraPassengerVehicle.set(playerId, primaryId);
+      movement.setInput(playerId, {});
+      physics.setCharacterEnabled(playerId, false);
+      syncPrimaryPassengers();
+      ctx.events.emit("vehicle:passenger-entered", {
+        entityId: playerId,
+        entityName: entity.name ?? null,
+        vehicleId: primaryId,
+        driverId: primary.driverId ?? null,
+        vehicleKind: "offroad",
+        vehicleName: "внедорожник",
+        now,
+      });
+      return true;
+    }
+
+    const entry = extras.get(vehicleId);
     const body = entry ? bodyState(entry) : null;
-    if (!entry?.driverId || entry.passengerIds.length >= PASSENGER_CAPACITY || !entity?.alive || !transform || transform.downed || transform.ragdollActive || !body) return false;
-    if (distance3(transform, body) > ENTER_DISTANCE + 1.2) return false;
+    if (!entry?.driverId || entry.passengerIds.length >= PASSENGER_CAPACITY || !body) return false;
+    if (distance3(transform, body) > maxDist) return false;
     armor?.cancelPlating?.(playerId, "vehicle-enter");
     entry.passengerIds.push(playerId);
     extraPassengerVehicle.set(playerId, entry.id);
     movement.setInput(playerId, {});
     physics.setCharacterEnabled(playerId, false);
     syncExtraPassengers(entry);
-    ctx.events.emit("vehicle:passenger-entered", { entityId: playerId, vehicleId: entry.id, now });
+    ctx.events.emit("vehicle:passenger-entered", {
+      entityId: playerId,
+      entityName: entity.name ?? null,
+      vehicleId: entry.id,
+      driverId: entry.driverId ?? null,
+      vehicleKind: entry.tuning.kind,
+      vehicleName: entry.tuning.accessibleName,
+      now,
+    });
     return true;
   }
 
   function exitPassenger(playerId, now = Date.now(), reason = "interact") {
+    const vehicleId = extraPassengerVehicle.get(playerId);
+    const entityName = entities.get(playerId)?.name ?? null;
+    if (vehicleId === primaryId) {
+      const index = primaryPassengerIds.indexOf(playerId);
+      if (index >= 0) primaryPassengerIds.splice(index, 1);
+      extraPassengerVehicle.delete(playerId);
+      physics.setCharacterEnabled(playerId, true);
+      const primary = originalStateFor(primaryId);
+      if (primary) {
+        const spread = index >= 0 ? (index - 1) * 1.1 : 0;
+        movement.teleport(playerId, {
+          x: primary.x + 2.35,
+          y: Math.max(0, Number(primary.y) || 0),
+          z: primary.z + spread,
+          angle: Number(primary.angle) || 0,
+        });
+      }
+      ctx.events.emit("vehicle:passenger-exited", {
+        entityId: playerId,
+        entityName,
+        vehicleId: primaryId,
+        driverId: primary?.driverId ?? null,
+        vehicleKind: "offroad",
+        vehicleName: "внедорожник",
+        reason,
+        now,
+      });
+      return true;
+    }
     const entry = passengerVehicle(playerId);
     if (!entry) return false;
     const index = entry.passengerIds.indexOf(playerId);
@@ -644,7 +743,16 @@ export async function setup(ctx) {
       const spread = index >= 0 ? (index - 1) * 1.1 : 0;
       movement.teleport(playerId, { ...target, z: target.z + spread });
     }
-    ctx.events.emit("vehicle:passenger-exited", { entityId: playerId, vehicleId: entry.id, reason, now });
+    ctx.events.emit("vehicle:passenger-exited", {
+      entityId: playerId,
+      entityName,
+      vehicleId: entry.id,
+      driverId: entry.driverId ?? null,
+      vehicleKind: entry.tuning.kind,
+      vehicleName: entry.tuning.accessibleName,
+      reason,
+      now,
+    });
     return true;
   }
 
@@ -811,7 +919,12 @@ export async function setup(ctx) {
 
   function exit(playerId, now = Date.now(), reason = "interact") {
     if (isPassenger(playerId)) return exitPassenger(playerId, now, reason);
-    if (originalIsDriving(playerId)) return originalExit(playerId, now, reason);
+    if (originalIsDriving(playerId)) {
+      for (const passengerId of [...primaryPassengerIds].reverse()) {
+        exitPassenger(passengerId, now, reason);
+      }
+      return originalExit(playerId, now, reason);
+    }
     const entry = extraDriverEntry(playerId);
     return entry ? exitExtra(entry, playerId, now, reason) : false;
   }
@@ -1047,6 +1160,7 @@ export async function setup(ctx) {
       syncExtraDriver(entry);
       syncExtraPassengers(entry);
     }
+    syncPrimaryPassengers();
     cleanAbandonedVehicles(now);
   }
 
@@ -1122,11 +1236,21 @@ export async function setup(ctx) {
 
   ctx.events.on("entity:died", ({ entityId, now }) => {
     const eventNow = Number(now) || Date.now();
+    if (extraPassengerVehicle.get(entityId) === primaryId) {
+      const idx = primaryPassengerIds.indexOf(entityId);
+      if (idx >= 0) primaryPassengerIds.splice(idx, 1);
+      extraPassengerVehicle.delete(entityId);
+    }
     const passengerEntry = passengerVehicle(entityId);
     if (passengerEntry) {
       const index = passengerEntry.passengerIds.indexOf(entityId);
       if (index >= 0) passengerEntry.passengerIds.splice(index, 1);
       extraPassengerVehicle.delete(entityId);
+    }
+    if (originalDriverId() === entityId) {
+      for (const passengerId of [...primaryPassengerIds].reverse()) {
+        exitPassenger(passengerId, eventNow, "driver-lost");
+      }
     }
     const entry = extraDriverEntry(entityId);
     if (!entry) return;
@@ -1149,11 +1273,21 @@ export async function setup(ctx) {
 
   ctx.events.on("entity:removed", ({ entityId, now }) => {
     const eventNow = Number(now) || Date.now();
+    if (extraPassengerVehicle.get(entityId) === primaryId) {
+      const idx = primaryPassengerIds.indexOf(entityId);
+      if (idx >= 0) primaryPassengerIds.splice(idx, 1);
+      extraPassengerVehicle.delete(entityId);
+    }
     const passengerEntry = passengerVehicle(entityId);
     if (passengerEntry) {
       const index = passengerEntry.passengerIds.indexOf(entityId);
       if (index >= 0) passengerEntry.passengerIds.splice(index, 1);
       extraPassengerVehicle.delete(entityId);
+    }
+    if (originalDriverId() === entityId) {
+      for (const passengerId of [...primaryPassengerIds].reverse()) {
+        exitPassenger(passengerId, eventNow, "driver-removed");
+      }
     }
     const entry = extraDriverEntry(entityId);
     if (!entry) return;
@@ -1199,7 +1333,10 @@ export async function setup(ctx) {
     exitPassenger,
     isPassenger,
     vehicleForPassenger,
-    passengerIds(vehicleId) { return [...(extras.get(vehicleId)?.passengerIds ?? [])]; },
+    passengerIds(vehicleId) {
+      if (vehicleId === primaryId) return [...primaryPassengerIds];
+      return [...(extras.get(vehicleId)?.passengerIds ?? [])];
+    },
     passengerCapacity: PASSENGER_CAPACITY,
     fleetLayout: FLEET_LAYOUT,
   });

@@ -20,6 +20,7 @@ import * as botController from "../plugins/bot-controller/server.js";
 import * as botLoadouts from "../plugins/bot-loadouts/server.js";
 import * as botPerception from "../plugins/bot-perception/server.js";
 import * as tutorialSession from "../plugins/tutorial-session/server.js";
+import * as aiEnemyDecisions from "../plugins/ai-enemy-decisions/server.js";
 import * as botCombat from "../plugins/bot-combat/server.js";
 import * as botFill from "../plugins/bot-fill/server.js";
 import * as matchApi from "../plugins/match-api/server.js";
@@ -52,6 +53,7 @@ const baseAfterTraining = [
   botLoadouts,
   botPerception,
   tutorialSession,
+  aiEnemyDecisions,
   botCombat,
   botFill,
   matchApi,

@@ -7,6 +7,7 @@ export const GAMEPAD_DEADZONE = 0.16;
 export const GAMEPAD_TRIGGER_DEADZONE = 0.08;
 export const GAMEPAD_CHANGE_INTERVAL_MS = 34;
 export const GAMEPAD_AXIS_EPSILON = 0.025;
+export const GAMEPAD_ARMOR_HOLD_MS = 380;
 
 function clampAxis(value) {
   return Math.max(-1, Math.min(1, Number(value) || 0));
@@ -47,14 +48,16 @@ function selectGamepad() {
 }
 
 function ensureAccessibleHelp() {
+  if (typeof document === "undefined" || typeof document.getElementById !== "function" || typeof document.querySelectorAll !== "function") return;
   if (document.getElementById("gamepad-controls-help")) return;
-  const headings = [...document.querySelectorAll("#game-panel h3")];
+  const rawHeadings = document.querySelectorAll("#game-panel h3");
+  const headings = rawHeadings ? Array.from(rawHeadings) : [];
   const heading = headings.find((node) => node.textContent?.trim() === "Управление") ?? headings[0];
-  if (!heading) return;
+  if (!heading || typeof document.createElement !== "function") return;
   const help = document.createElement("p");
   help.id = "gamepad-controls-help";
-  help.textContent = "Геймпад: пешком левый стик — движение, правый стик — поворот камеры и направления персонажа. Крестик или A — бег при удержании, а во время парашютного падения раскрыть или снова раскрыть купол. Квадрат или X — прыжок. Кружок или B — отпустить тело во время обычного прыжка; с раскрытым парашютом — срезать купол. Правый курок — огонь. Треугольник или Y — взаимодействовать и входить или выходить из машины. L1 и R1 — предыдущее и следующее оружие. В машине левый стик поворачивает, правый курок — газ, левый курок — тормоз и задний ход после остановки, нажатие левого стика — ручник. Камера правым стиком работает так же, как пешком.";
-  heading.insertAdjacentElement("afterend", help);
+  help.textContent = "Геймпад: левый стик — движение, правый стик — поворот камеры и персонажа. Крестик (A) — бег при удержании пешком, в воздухе — раскрыть парашют. Квадрат (X) — прыжок. Кружок (B) — отпустить тело в прыжке или срезать открытый парашют. Треугольник (Y) — короткое нажатие открывает двери, ящики или магазин, поднимает напарника или сажает в машину; удержание Треугольника (Y) на полсекунды с последующим отпусканием запускает надевание бронепластин. Крестовина вверх — стимулятор (в нокауте сразу берёт быстрый 1-секундный стимулятор, если куплен), L2 пешком — турбо-стимулятор (600 HP). Крестовина влево и вправо — выбор цели навигации, крестовина вниз — включить или выключить ведение по маршруту. Нажатие правого стика (R3) — автоповорот к цели навигации (в воздухе — статус полёта). Кнопка Share/View — карта, Options/Menu — меню игры. L1 и R1 — смена оружия, R2 — огонь.";
+  heading.insertAdjacentElement?.("afterend", help);
 }
 
 export async function setup(ctx) {
@@ -67,6 +70,7 @@ export async function setup(ctx) {
   let lastNotifyAt = -Infinity;
   let pendingAnalogNotify = false;
   let latestParachute = null;
+  let latestSelf = null;
   let driving = false;
   let analog = {
     moveForward: 0,
@@ -78,18 +82,56 @@ export async function setup(ctx) {
     rightTrigger: 0,
   };
   let previousButtons = new Map();
+  let triangleHoldStartedAt = null;
+  let triangleArmorTriggered = false;
+  let triangleDeferredTap = false;
   let firePressed = false;
   let reload = false;
   let selectDelta = 0;
   let interactPressed = false;
+  let interactHeld = false;
+  let interactReleased = false;
+  let platePressed = false;
+  let stimulantPressed = false;
+  let turboStimulantPressed = false;
   let parachutePressed = false;
   let posePressed = false;
   let jumpPressed = false;
+  let navigationNextPressed = false;
+  let navigationPrevPressed = false;
+  let navigationTogglePressed = false;
+  let navigationFacePressed = false;
 
   ensureAccessibleHelp();
 
+  function canStartArmorPlating() {
+    if (driving || latestParachute?.airborne) return false;
+    if (!latestSelf || !latestSelf.alive || latestSelf.downed || latestSelf.plating || latestSelf.armorPlating) return false;
+    const armor = Number(latestSelf.armor) || 0;
+    const armorMax = Number(latestSelf.armorMax) || 150;
+    const reserve = Number(latestSelf.armorReserve ?? latestSelf.armorPlates) || 0;
+    return reserve > 0 && armor < armorMax;
+  }
+
+  function pulseGamepadConfirm(options = { duration: 105, weak: 0.68, strong: 0.86 }) {
+    if (ctx.services.has("haptic-feedback")) {
+      void ctx.services.get("haptic-feedback").rumbleGamepad?.(options);
+      return;
+    }
+    const pad = selectGamepad();
+    const actuator = pad?.vibrationActuator;
+    if (actuator && typeof actuator.playEffect === "function") {
+      void actuator.playEffect(actuator.type || "dual-rumble", {
+        startDelay: 0,
+        duration: Math.max(85, Number(options.duration) || 105),
+        weakMagnitude: Number(options.weak) || 0.68,
+        strongMagnitude: Number(options.strong) || 0.86,
+      });
+    }
+  }
+
   function emitChanged(reason, immediate = false) {
-    if (!network.connected) return;
+    if (network && !network.connected) return;
     const now = performance.now();
     if (immediate || now - lastNotifyAt >= GAMEPAD_CHANGE_INTERVAL_MS) {
       lastNotifyAt = now;
@@ -122,7 +164,7 @@ export async function setup(ctx) {
       forward: state.moveForward,
       strafe: state.strafe,
       turn: state.turn,
-      sprint: state.crossHeld && !latestParachute?.airborne,
+      sprint: (state.crossHeld || state.leftStickHeld) && !latestParachute?.airborne,
       fireHeld: state.rightTrigger >= 0.12,
     };
   }
@@ -132,6 +174,13 @@ export async function setup(ctx) {
     if (driving === value) return;
     driving = value;
     firePressed = false;
+    triangleHoldStartedAt = null;
+    triangleArmorTriggered = false;
+    triangleDeferredTap = false;
+    if (interactHeld) {
+      interactHeld = false;
+      interactReleased = true;
+    }
     ctx.events.emit("input:fire-stop", { source: "gamepad", reason: `vehicle:${reason}` });
     emitChanged(`gamepad:vehicle:${value ? "entered" : "exited"}`, true);
   }
@@ -142,7 +191,8 @@ export async function setup(ctx) {
       || Math.abs(before.strafe) > 0.001
       || Math.abs(before.turn) > 0.001
       || before.sprint
-      || before.fireHeld;
+      || before.fireHeld
+      || interactHeld;
     analog = {
       moveForward: 0,
       strafe: 0,
@@ -154,13 +204,25 @@ export async function setup(ctx) {
     };
     previousButtons = new Map();
     activeIndex = null;
+    triangleHoldStartedAt = null;
+    triangleArmorTriggered = false;
+    triangleDeferredTap = false;
     firePressed = false;
     reload = false;
     selectDelta = 0;
     interactPressed = false;
+    if (interactHeld) interactReleased = true;
+    interactHeld = false;
+    platePressed = false;
+    stimulantPressed = false;
+    turboStimulantPressed = false;
     parachutePressed = false;
     posePressed = false;
     jumpPressed = false;
+    navigationNextPressed = false;
+    navigationPrevPressed = false;
+    navigationTogglePressed = false;
+    navigationFacePressed = false;
     pendingAnalogNotify = false;
     ctx.events.emit("input:gamepad-turn", { turn: 0, reason });
     if (hadState) emitChanged(`gamepad:${reason}`, true);
@@ -209,37 +271,84 @@ export async function setup(ctx) {
   }
 
   function updateButtons(gamepad) {
+    const now = performance.now();
     const cross = buttonEdge(gamepad, 0);
     const circle = buttonEdge(gamepad, 1);
     const square = buttonEdge(gamepad, 2);
     const triangle = buttonEdge(gamepad, 3);
     const l1 = buttonEdge(gamepad, 4);
     const r1 = buttonEdge(gamepad, 5);
+    const l2 = buttonEdge(gamepad, 6);
+    const selectBtn = buttonEdge(gamepad, 8);
+    const startBtn = buttonEdge(gamepad, 9);
+    const r3 = buttonEdge(gamepad, 11);
+    const dpadUp = buttonEdge(gamepad, 12);
+    const dpadDown = buttonEdge(gamepad, 13);
+    const dpadLeft = buttonEdge(gamepad, 14);
+    const dpadRight = buttonEdge(gamepad, 15);
 
-    // Cross/A is contextual: it is sprint while held on foot, but during the
-    // parachute phase it becomes the explicit deploy/redeploy button.
+    // Cross/A is contextual: sprint while held on foot, deploy/redeploy in air.
     if (cross.pressed && latestParachute?.airborne && !driving) {
       parachutePressed = true;
       emitChanged("gamepad:cross:parachute", true);
     }
 
-    // Circle/B explicitly cuts an open canopy. During a normal jump the existing
-    // parkour system interprets it as releasing the body into ragdoll/free fall.
+    // Circle/B explicitly cuts an open canopy; on foot/jump it triggers parkour ragdoll pose.
     if (circle.pressed && !driving) {
       if (latestParachute?.deployed) parachutePressed = true;
       else posePressed = true;
       emitChanged("gamepad:circle", true);
     }
 
-    // Square/X is now the dedicated jump button.
+    // Square/X is the dedicated jump button (weapons reload automatically).
     if (square.pressed && !driving) {
       jumpPressed = true;
       emitChanged("gamepad:square:jump", true);
     }
 
+    // Triangle/Y:
+    // - Holding Triangle for ~380ms starts putting on armor plates (if damaged & plates available),
+    //   allowing the player to release Triangle immediately while plating continues automatically.
+    // - Short tap (<380ms, or immediate when armor plating is not applicable) triggers interact
+    //   (doors, crates, vehicles, reviving downed teammates) and supports continuous crate push while held.
     if (triangle.pressed) {
-      interactPressed = true;
-      emitChanged("gamepad:triangle", true);
+      triangleHoldStartedAt = now;
+      triangleArmorTriggered = false;
+      if (!driving) {
+        interactHeld = true;
+        interactReleased = false;
+      }
+      if (canStartArmorPlating()) {
+        triangleDeferredTap = true;
+      } else {
+        triangleDeferredTap = false;
+        interactPressed = true;
+        emitChanged("gamepad:triangle:interact", true);
+      }
+    } else if (triangle.down && triangleHoldStartedAt != null) {
+      const heldMs = now - triangleHoldStartedAt;
+      if (!triangleArmorTriggered && heldMs >= GAMEPAD_ARMOR_HOLD_MS && canStartArmorPlating()) {
+        triangleArmorTriggered = true;
+        triangleDeferredTap = false;
+        platePressed = true;
+        pulseGamepadConfirm({ duration: 115, weak: 0.74, strong: 0.92 });
+        emitChanged("gamepad:triangle:armor-plate", true);
+      }
+    } else if (triangle.released) {
+      const shouldTap = triangleDeferredTap && !triangleArmorTriggered;
+      triangleHoldStartedAt = null;
+      triangleArmorTriggered = false;
+      triangleDeferredTap = false;
+      if (interactHeld) {
+        interactHeld = false;
+        interactReleased = true;
+      }
+      if (shouldTap) {
+        interactPressed = true;
+        emitChanged("gamepad:triangle:tap-interact", true);
+      } else if (interactReleased) {
+        emitChanged("gamepad:triangle:release", true);
+      }
     }
 
     if (l1.pressed && !driving) {
@@ -250,13 +359,72 @@ export async function setup(ctx) {
       selectDelta = 1;
       emitChanged("gamepad:r1", true);
     }
+
+    // D-Pad Up: Use stimulant (heal on foot or self-revive when downed; prefers bought 1s stim when downed)
+    if (dpadUp.pressed && !driving) {
+      stimulantPressed = true;
+      pulseGamepadConfirm({ duration: 90, weak: 0.62, strong: 0.78 });
+      emitChanged("gamepad:dpad-up:stimulant", true);
+    }
+
+    // L2 on foot: Use Turbo Stimulant (600 HP)
+    if (l2.pressed && !driving && !latestParachute?.airborne) {
+      turboStimulantPressed = true;
+      pulseGamepadConfirm({ duration: 110, weak: 0.72, strong: 0.88 });
+      emitChanged("gamepad:l2:turbo-stimulant", true);
+    }
+
+    // D-Pad Left / Right: Cycle navigation targets backward / forward
+    if (dpadLeft.pressed) {
+      navigationPrevPressed = true;
+      emitChanged("gamepad:dpad-left:nav-prev", true);
+    }
+    if (dpadRight.pressed) {
+      navigationNextPressed = true;
+      emitChanged("gamepad:dpad-right:nav-next", true);
+    }
+
+    // D-Pad Down: Toggle active navigation route guidance
+    if (dpadDown.pressed) {
+      navigationTogglePressed = true;
+      emitChanged("gamepad:dpad-down:nav-toggle", true);
+    }
+
+    // R3 (Right Stick Click): Parachute status in air, or auto-face navigation target on ground
+    if (r3.pressed) {
+      if (latestParachute?.airborne) {
+        input.triggerVirtualAction?.("parachute-status");
+      } else {
+        navigationFacePressed = true;
+        input.triggerVirtualAction?.("navigation-face");
+        emitChanged("gamepad:r3:nav-face", true);
+      }
+    }
+
+    // Select / Share / View (button 8): Parachute status in air, or toggle Map on ground
+    if (selectBtn.pressed) {
+      if (latestParachute?.airborne) {
+        input.triggerVirtualAction?.("parachute-status");
+      } else if (typeof input.triggerVirtualAction === "function") {
+        input.triggerVirtualAction("map");
+      } else if (ctx.services.has("overlay-manager")) {
+        ctx.services.get("overlay-manager")?.toggle?.("map");
+      }
+    }
+
+    // Start / Options / Menu (button 9): Toggle Game Menu
+    if (startBtn.pressed) {
+      if (typeof input.triggerVirtualAction === "function") {
+        input.triggerVirtualAction("menu");
+      } else if (ctx.services.has("overlay-manager")) {
+        ctx.services.get("overlay-manager")?.toggle?.("menu");
+      }
+    }
   }
 
-  function poll() {
-    frameId = window.requestAnimationFrame(poll);
-
-    const inactive = document.hidden
-      || (typeof document.hasFocus === "function" && !document.hasFocus());
+  function sampleGamepadState() {
+    const inactive = document?.hidden
+      || (typeof document?.hasFocus === "function" && !document.hasFocus());
     if (inactive) {
       if (activeIndex != null) reset("inactive");
       return;
@@ -268,11 +436,12 @@ export async function setup(ctx) {
       return;
     }
 
-    if (activeIndex !== gamepad.index) {
+    const padIdx = gamepad.index ?? 0;
+    if (activeIndex !== padIdx) {
       reset("switched");
-      activeIndex = gamepad.index;
+      activeIndex = padIdx;
       ctx.events.emit("gamepad:connected", {
-        index: gamepad.index,
+        index: padIdx,
         id: gamepad.id,
         mapping: gamepad.mapping,
       });
@@ -286,7 +455,15 @@ export async function setup(ctx) {
     }
   }
 
+  function poll() {
+    if (typeof window?.requestAnimationFrame === "function") {
+      frameId = window.requestAnimationFrame(poll);
+    }
+    sampleGamepadState();
+  }
+
   input.sample = () => {
+    sampleGamepadState();
     const sampled = originalSample();
     const effective = effectiveState();
     const result = {
@@ -300,32 +477,51 @@ export async function setup(ctx) {
       reload: Boolean(sampled.reload || reload),
       selectDelta: Number(sampled.selectDelta) || selectDelta,
       interactPressed: Boolean(sampled.interactPressed || interactPressed),
+      interactHeld: Boolean(sampled.interactHeld || interactHeld),
+      interactReleased: Boolean(sampled.interactReleased || interactReleased),
+      platePressed: Boolean(sampled.platePressed || platePressed),
+      stimulantPressed: Boolean(sampled.stimulantPressed || stimulantPressed),
+      turboStimulantPressed: Boolean(sampled.turboStimulantPressed || turboStimulantPressed),
       parachutePressed: Boolean(sampled.parachutePressed || parachutePressed),
       posePressed: Boolean(sampled.posePressed || posePressed),
       jumpPressed: Boolean(sampled.jumpPressed || jumpPressed),
+      navigationNextPressed: Boolean(sampled.navigationNextPressed || navigationNextPressed),
+      navigationPrevPressed: Boolean(sampled.navigationPrevPressed || navigationPrevPressed),
+      navigationTogglePressed: Boolean(sampled.navigationTogglePressed || navigationTogglePressed),
+      navigationFacePressed: Boolean(sampled.navigationFacePressed || navigationFacePressed),
     };
     firePressed = false;
     reload = false;
     selectDelta = 0;
     interactPressed = false;
+    interactReleased = false;
+    platePressed = false;
+    stimulantPressed = false;
+    turboStimulantPressed = false;
     parachutePressed = false;
     posePressed = false;
     jumpPressed = false;
+    navigationNextPressed = false;
+    navigationPrevPressed = false;
+    navigationTogglePressed = false;
+    navigationFacePressed = false;
     return result;
   };
 
   ctx.events.on("game:snapshot", (snapshot) => {
-    const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
+    const pid = network?.playerId ?? snapshot?.playerId ?? (snapshot?.entities?.length === 1 ? snapshot.entities[0].id : undefined);
+    const self = snapshot?.entities?.find((entity) => entity.id === pid);
+    latestSelf = self ?? null;
     latestParachute = self?.parachute ?? null;
     const selfDriving = (snapshot?.vehicles ?? []).some(
-      (vehicle) => vehicle?.driverId === network.playerId,
+      (vehicle) => vehicle?.driverId === pid,
     );
     setDriving(selfDriving, "snapshot");
   });
 
   ctx.events.on("game:event", (packet) => {
     const payload = packet?.payload ?? {};
-    if (payload.entityId !== network.playerId) return;
+    if (!network?.playerId || payload.entityId !== network.playerId) return;
     if (packet.event === "vehicle:entered") setDriving(true, "event");
     if (packet.event === "vehicle:exited" || packet.event === "vehicle:driver-lost") {
       setDriving(false, "event");
@@ -334,18 +530,20 @@ export async function setup(ctx) {
 
   ctx.events.on("network:disconnected", () => {
     driving = false;
+    latestSelf = null;
+    latestParachute = null;
     reset("network-disconnected");
   });
 
-  window.addEventListener("gamepaddisconnected", (event) => {
+  window?.addEventListener?.("gamepaddisconnected", (event) => {
     if (event.gamepad?.index === activeIndex) reset("disconnected");
   });
-  window.addEventListener("blur", () => reset("blur"));
-  document.addEventListener("visibilitychange", () => {
+  window?.addEventListener?.("blur", () => reset("blur"));
+  document?.addEventListener?.("visibilitychange", () => {
     if (document.hidden) reset("hidden");
   });
 
-  frameId = window.requestAnimationFrame(poll);
+  frameId = typeof window?.requestAnimationFrame === "function" ? window.requestAnimationFrame(poll) : 0;
 
   ctx.services.provide("gamepad", {
     get connected() { return activeIndex != null; },

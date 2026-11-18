@@ -62,6 +62,7 @@ export async function setup(ctx) {
   const pingBuffer = createPingBuffer(audio.context);
 
   let navigationNextPressed = false;
+  let navigationPrevPressed = false;
   let navigationTogglePressed = false;
   let latestNavigation = null;
   let latestSelf = null;
@@ -83,12 +84,15 @@ export async function setup(ctx) {
   input.sample = () => {
     const sampled = originalSample();
     const next = navigationNextPressed;
+    const prev = navigationPrevPressed;
     const toggle = navigationTogglePressed;
     navigationNextPressed = false;
+    navigationPrevPressed = false;
     navigationTogglePressed = false;
     return {
       ...sampled,
       navigationNextPressed: Boolean(sampled.navigationNextPressed || next),
+      navigationPrevPressed: Boolean(sampled.navigationPrevPressed || prev),
       navigationTogglePressed: Boolean(sampled.navigationTogglePressed || toggle),
     };
   };

@@ -11,8 +11,8 @@ export const BOT_VEHICLE_FAILURE_COOLDOWN_MS = 60_000;
 export const BOT_VEHICLE_STATIONARY_FAILURE_QUARANTINE_MS = 180_000;
 export const BOT_VEHICLE_CRASH_COOLDOWN_MS = 30_000;
 export const BOT_VEHICLE_RETRY_COOLDOWN_MS = 1_500;
-export const BOT_VEHICLE_APPROACH_INTERVAL_MS = 100;
-export const BOT_VEHICLE_DRIVE_INTERVAL_MS = 250;
+export const BOT_VEHICLE_APPROACH_INTERVAL_MS = 50;
+export const BOT_VEHICLE_DRIVE_INTERVAL_MS = 50;
 export const BOT_VEHICLE_NEAR_DRIVE_INTERVAL_MS = 50;
 export const BOT_VEHICLE_DETAILED_RADIUS = 320;
 const BOT_RAM_MAX_DISTANCE = 105;
@@ -123,12 +123,34 @@ export async function setup(ctx) {
       if (recentFailures.length > 24) recentFailures.splice(0, recentFailures.length - 24);
     }
     const releasedCar = vehicles.stateFor(state.vehicleId);
+    const releasePassengers = new Set([
+      ...(releasedCar?.passengerIds ?? releasedCar?.passengers ?? []),
+      ...(state.passengerId ? [state.passengerId] : []),
+    ]);
+    for (const passengerId of releasePassengers) {
+      if (entities.get(passengerId)?.bot && vehicles.isPassenger?.(passengerId)) {
+        vehicles.exit(passengerId, now, "bot-dismount");
+        if (botState(passengerId)) {
+          botState(passengerId).vehicleControl = false;
+          botState(passengerId).nextThinkAt = 0;
+          if (state.destination?.buildingId) {
+            botState(passengerId).squadLootBuildingId = state.destination.buildingId;
+          }
+        }
+      }
+    }
     reservations.delete(state.vehicleId);
     states.delete(id);
     counters.releaseReasons[reason] = (counters.releaseReasons[reason] ?? 0) + 1;
     const retryDelay = reason === "unavailable" ? BOT_VEHICLE_RETRY_COOLDOWN_MS : 45_000;
     cooldowns.set(id, now + retryDelay);
-    if (botState(id)) { botState(id).vehicleControl = false; botState(id).nextThinkAt = 0; }
+    if (botState(id)) {
+      botState(id).vehicleControl = false;
+      botState(id).nextThinkAt = 0;
+      if (state.destination?.buildingId) {
+        botState(id).squadLootBuildingId = state.destination.buildingId;
+      }
+    }
     setFootInput(id, {});
     ctx.events.emit("bot-vehicle:released", {
       entityId: id, vehicleId: state.vehicleId, reason, now,
@@ -173,22 +195,41 @@ export async function setup(ctx) {
     return Math.min(fleetCapacity, Math.ceil(liveBots * BOT_DRIVER_SHARE));
   }
 
+  function squadPartnerId(id) {
+    const botCombat = ctx.services.has("bot-combat") ? ctx.services.get("bot-combat") : null;
+    if (typeof botCombat?.squadPartnerId === "function") return botCombat.squadPartnerId(id);
+    if (typeof perception.squadPartnerId === "function") return perception.squadPartnerId(id);
+    const m = /^br-bot-(\d+)$/.exec(String(id ?? ""));
+    if (!m) return null;
+    const idx = Number(m[1]);
+    return Number.isFinite(idx) && idx >= 1 ? `br-bot-${idx % 2 === 1 ? idx + 1 : idx - 1}` : null;
+  }
+
   function assign(id, vehicleId, destination, now = Date.now(), options = {}) {
     const entity = entities.get(id), p = transform(id), car = vehicles.stateFor(vehicleId);
     const maxDistance = Math.max(BOT_VEHICLE_SEARCH_RADIUS, Number(options.maxDistance) || BOT_VEHICLE_SEARCH_RADIUS);
+    const minDistance = Number.isFinite(options.minDistance)
+      ? Number(options.minDistance)
+      : (destination?.drivePurpose === "building-raid" ? 25 : 60);
     const initialDistance = p && car ? distance(p, car) : Infinity;
     if (!entity?.bot || !entity.alive || !botState(id) || !p || p.downed || states.has(id)
       || states.size >= driverLimit() || !car || car.occupied || reservations.has(vehicleId)
       || (vehicleCooldowns.get(vehicleId) ?? 0) > now
       || sameFailedParkingSpot(car, now)
       || !destination || !Number.isFinite(destination.x) || !Number.isFinite(destination.z)
-      || initialDistance > maxDistance || distance(p, destination) < 60
+      || initialDistance > maxDistance || distance(p, destination) < minDistance
       || get("parachute").stateFor(id)?.airborne || get("ragdoll").isActive(id)
       || Math.abs(p.y) > 1 || vehicles.isDriving(id)) return false;
     const approachTimeoutMs = initialDistance <= BOT_VEHICLE_SEARCH_RADIUS
       ? 22_000
       : clamp(22_000 + (initialDistance - BOT_VEHICLE_SEARCH_RADIUS) * 140, 22_000, 36_000);
+    const passengerId = options.passengerId ?? squadPartnerId(id) ?? null;
+    if (passengerId && passengerId !== id) {
+      if (states.has(passengerId)) release(passengerId, now, "join-partner");
+      if (vehicles.isDriving(passengerId)) vehicles.exit(passengerId, now, "join-partner");
+    }
     states.set(id, { phase: "approach", vehicleId, destination: { ...destination }, startedAt: now,
+      passengerId,
       approachTimeoutMs, initialApproachDistance: initialDistance,
       phaseAt: now, previousSteering: 0, lastProgressAt: now, lastPosition: { ...car }, recoveries: 0, attempts: 0,
       nextControlAt: now, lastControlAt: now });
@@ -196,8 +237,38 @@ export async function setup(ctx) {
     counters.assigned++;
     everAssigned.add(id);
     botState(id).vehicleControl = true;
+    if (destination.buildingId) {
+      botState(id).squadLootBuildingId = destination.buildingId;
+      if (passengerId && botState(passengerId)) {
+        botState(passengerId).squadLootBuildingId = destination.buildingId;
+      }
+    }
     setFootInput(id, {});
     return true;
+  }
+
+  function tryBoardSquadPassenger(id, state, car, now) {
+    const partnerId = state.passengerId ?? squadPartnerId(id) ?? null;
+    if (!partnerId || partnerId === id || typeof vehicles.enterPassenger !== "function") return false;
+    if (vehicles.isPassenger?.(partnerId)) return true;
+    const partnerEnt = entities.get(partnerId);
+    const partnerPos = transform(partnerId);
+    if (!partnerEnt?.alive || !partnerEnt.bot || !partnerPos || partnerPos.downed) return false;
+    if (states.has(partnerId)) release(partnerId, now, "join-partner");
+    if (vehicles.isDriving(partnerId)) vehicles.exit(partnerId, now, "join-partner");
+    if (distance(partnerPos, car) > 32) return false;
+    partnerPos.ragdollActive = false;
+    if (vehicles.enterPassenger(partnerId, car.id, now)) {
+      state.passengerId = partnerId;
+      if (botState(partnerId)) {
+        botState(partnerId).vehicleControl = true;
+        if (state.destination?.buildingId) {
+          botState(partnerId).squadLootBuildingId = state.destination.buildingId;
+        }
+      }
+      return true;
+    }
+    return false;
   }
 
   function stop(state, now, reason = "arrived") {
@@ -259,6 +330,7 @@ export async function setup(ctx) {
       state.route = routes.plan(car, state.destination);
       counters.entered++;
       everDrivers.add(id);
+      tryBoardSquadPassenger(id, state, car, now);
       return;
     }
     const goal = map.navigationWaypoint?.(p, car) ?? car;
@@ -266,8 +338,9 @@ export async function setup(ctx) {
       const door = map.doors.find(d => d.id === goal.doorId);
       if (door && distance(p, door) < 2.6) map.setDoorOpen(door.id, true, id, now);
     }
-    const error = angleDelta(headingTo(p, goal) - p.angle);
-    setFootInput(id, { forward: Math.abs(error) < .7 ? 1 : 0, turn: clamp(error * 1.8, -1, 1), sprint: distance(p, car) > 7 });
+    const desiredAngle = headingTo(p, goal);
+    const error = angleDelta(desiredAngle - p.angle);
+    setFootInput(id, { forward: Math.abs(error) < .85 ? 1 : 0.35, turn: clamp(error * 1.6, -1, 1), targetAngle: desiredAngle, sprint: distance(p, car) > 7 });
   }
 
   function nearbyCombatTarget(id, car, now) {
@@ -608,13 +681,14 @@ export async function setup(ctx) {
   function pedestrianAhead(id, car, ignoreEntityId = null) {
     const speed = Math.max(0, Number(car.forwardSpeed) || Number(car.speed) / 3.6 || 0);
     if (speed < 2) return null;
+    const driver = entities.get(id);
     const brakingDistance = speed * speed / (2 * CONSERVATIVE_BRAKE_DECELERATION);
-    const lookahead = clamp(brakingDistance + 14, 35, 220);
+    const lookahead = clamp(brakingDistance + 14, 32, 95);
     const forwardX = Math.sin(car.angle), forwardZ = -Math.cos(car.angle);
     const rightX = Math.cos(car.angle), rightZ = Math.sin(car.angle);
     const carVx = Number(car.linvel?.x) || forwardX * speed;
     const carVz = Number(car.linvel?.z) || forwardZ * speed;
-    const predictionHorizon = Math.min(6, lookahead / Math.max(speed, 1));
+    const predictionHorizon = Math.min(3.5, lookahead / Math.max(speed, 1));
     let best = null;
     for (const entity of entities.all()) {
       if (!entity?.alive || entity.id === id || entity.id === ignoreEntityId
@@ -623,13 +697,15 @@ export async function setup(ctx) {
       if (!p || Math.abs(Number(p.y) || 0) > 2.2) continue;
       const dx = p.x - car.x, dz = p.z - car.z;
       const ahead = dx * forwardX + dz * forwardZ;
-      if (ahead <= -2 || ahead > lookahead) continue;
+      if (ahead <= -1.5 || ahead > lookahead) continue;
       const signedLateral = dx * rightX + dz * rightZ;
       const lateral = Math.abs(signedLateral);
-      const closeSafety = ahead <= 18 && lateral <= 6.5;
+      const sameTeam = driver?.team != null && entity.team != null && driver.team === entity.team;
+      if (sameTeam && (ahead > 14 || lateral > 2.8)) continue;
+      const closeSafety = ahead <= 16 && lateral <= 4.2;
       if (!closeSafety && !routes.visible(car, p)) continue;
 
-      let distanceToConflict = (lateral <= 5.5 || closeSafety) ? Math.max(0, ahead) : Infinity;
+      let distanceToConflict = ((ahead <= 55 && lateral <= 3.5) || closeSafety) ? Math.max(0, ahead) : Infinity;
       let predicted = false, timeToConflict = null, closestDistance = null;
       const sample = pedestrianSamples.get(entity.id);
       if (sample && Math.hypot(sample.vx, sample.vz) > .4) {
@@ -639,7 +715,7 @@ export async function setup(ctx) {
           const time = clamp(-(dx * rvx + dz * rvz) / relativeSpeedSq, 0, predictionHorizon);
           const closestX = dx + rvx * time, closestZ = dz + rvz * time;
           const closest = Math.hypot(closestX, closestZ);
-          if (time >= .15 && time <= predictionHorizon && closest <= 5.4) {
+          if (time >= .15 && time <= predictionHorizon && closest <= 4.6) {
             distanceToConflict = Math.min(distanceToConflict, speed * time);
             predicted = true; timeToConflict = time; closestDistance = closest;
           }
@@ -717,6 +793,9 @@ export async function setup(ctx) {
   function drive(id, state, dt, now, trafficCars, humanPositions = []) {
     const car = vehicles.vehicleForDriver(id);
     if (!car || car.id !== state.vehicleId) { release(id, now, "driver-lost"); return; }
+    if (state.phase === "travel") {
+      tryBoardSquadPassenger(id, state, car, now);
+    }
     // A route can keep replanning and refreshing lastProgressAt while Rapier
     // reports nearly the same world position. Neither the ordinary recovery
     // nor the traffic-yield watchdog catches a zero-throttle obstacle in that
@@ -774,6 +853,22 @@ export async function setup(ctx) {
     if (state.phase === "brake") {
       vehicles.setInput(id, brakeInput(car));
       if (car.speed < .8 || (state.reason === "unsafe" && now - state.phaseAt > 4000)) {
+        const brakePassengers = new Set([
+          ...(car?.passengerIds ?? car?.passengers ?? []),
+          ...(state.passengerId ? [state.passengerId] : []),
+        ]);
+        for (const passengerId of brakePassengers) {
+          if (entities.get(passengerId)?.bot && vehicles.isPassenger?.(passengerId)) {
+            vehicles.exit(passengerId, now, "bot-dismount");
+            if (botState(passengerId)) {
+              botState(passengerId).vehicleControl = false;
+              botState(passengerId).nextThinkAt = 0;
+              if (state.destination?.buildingId) {
+                botState(passengerId).squadLootBuildingId = state.destination.buildingId;
+              }
+            }
+          }
+        }
         vehicles.exit(id, now, "bot-dismount"); counters.exited++;
         release(id, now, state.reason);
       }
@@ -867,21 +962,23 @@ export async function setup(ctx) {
     if (collisionRisk?.type?.includes("head-on") && traffic?.type !== "head-on") {
       traffic = { ...collisionRisk, type: "head-on" };
     }
-    if (traffic?.type === "crossing") {
-      state.crossingYieldUntil = Math.max(state.crossingYieldUntil ?? 0, now + (traffic.emergency ? 1800 : 1400));
+    if (traffic?.type === "crossing" && (traffic.emergency || (traffic.time <= 2.4 && traffic.distance < 45))) {
+      state.crossingYieldUntil = Math.max(state.crossingYieldUntil ?? 0, now + (traffic.emergency ? 900 : 500));
       state.crossingVehicleId = traffic.vehicleId;
     }
     const crossingHold = (state.crossingYieldUntil ?? 0) > now && traffic?.type !== "head-on";
     const obstruction = routes.clearDistance(car, car.angle, 180, ram?.vehicleId ?? null);
     let obstacleDistance = traffic ? Math.min(obstruction, Math.max(0, traffic.distance - (traffic.type === "crossing" ? (traffic.emergency ? 10 : 7) : traffic.type === "head-on" ? 9 : 3.5))) : obstruction;
-    if (collisionRisk) {
-      obstacleDistance = Math.min(obstacleDistance, Math.max(0, collisionRisk.distance - 16));
-      state.collisionYieldUntil = Math.max(state.collisionYieldUntil ?? 0, now + 1400);
-      state.collisionVehicleId = collisionRisk.vehicleId;
+    if (collisionRisk && collisionRisk.distance < 55 && collisionRisk.time <= 2.6) {
+      obstacleDistance = Math.min(obstacleDistance, Math.max(6, collisionRisk.distance - 12));
+      if (collisionRisk.distance < 36 && collisionRisk.time <= 1.8) {
+        state.collisionYieldUntil = Math.max(state.collisionYieldUntil ?? 0, now + 450);
+        state.collisionVehicleId = collisionRisk.vehicleId;
+      }
     } else if ((state.collisionYieldUntil ?? 0) > now) {
-      obstacleDistance = Math.min(obstacleDistance, 0);
+      obstacleDistance = Math.min(obstacleDistance, 14);
     }
-    if (crossingHold && traffic?.type !== "crossing") obstacleDistance = Math.min(obstacleDistance, 0);
+    if (crossingHold && traffic?.type !== "crossing") obstacleDistance = Math.min(obstacleDistance, 14);
     let drivePoint = ram?.point ?? path.point;
     if (parkedLead) {
       // Diagnostic only: an empty vehicle can block several directions, and
@@ -1203,6 +1300,93 @@ export async function setup(ctx) {
     return anchor ? { ...anchor, drivePurpose: "world-anchor" } : null;
   }
 
+  function buildingRaidDestinationFor(id, p, now, preferredBuildingId = null) {
+    const candidates = [];
+    for (const nb of map.navigationBuildings ?? []) {
+      const b = nb?.bounds ?? nb;
+      const bId = String(nb?.id ?? b?.id ?? "");
+      if (!b || !bId) continue;
+      candidates.push({ id: bId, ...b });
+    }
+    if (map.building) {
+      const wId = String(map.building.id ?? "warehouse");
+      if (!candidates.some((c) => c.id === wId)) {
+        candidates.push({ id: wId, ...map.building });
+      }
+    }
+    if (!candidates.length) return null;
+
+    const filtered = preferredBuildingId
+      ? candidates.filter((c) => c.id === String(preferredBuildingId))
+      : candidates.filter((c) => {
+        const cx = ((Number(c.minX) || 0) + (Number(c.maxX) || 0)) * 0.5;
+        const cz = ((Number(c.minZ) || 0) + (Number(c.maxZ) || 0)) * 0.5;
+        const d = distance(p, { x: cx, z: cz });
+        if (d < 65 || d > 420) return false;
+        const hasUnopened = (map.crates ?? []).some(
+          (crate) => crate && !crate.opened
+            && crate.x >= c.minX - 4.5 && crate.x <= c.maxX + 4.5
+            && crate.z >= c.minZ - 4.5 && crate.z <= c.maxZ + 4.5,
+        );
+        return hasUnopened;
+      });
+    if (!filtered.length) return null;
+
+    const chosen = preferredBuildingId
+      ? filtered[0]
+      : filtered[stableChoice(`${id}:raid:${Math.floor(now / 90_000)}`, filtered.length)];
+    if (!chosen) return null;
+    const center = {
+      x: ((Number(chosen.minX) || 0) + (Number(chosen.maxX) || 0)) * 0.5,
+      z: ((Number(chosen.minZ) || 0) + (Number(chosen.maxZ) || 0)) * 0.5,
+    };
+    const door = (map.doors ?? []).find(
+      (d) => d && d.x >= chosen.minX - 2.5 && d.x <= chosen.maxX + 2.5
+        && d.z >= chosen.minZ - 2.5 && d.z <= chosen.maxZ + 2.5,
+    );
+    const outX = door ? (door.x - center.x) : 0;
+    const outZ = door ? (door.z - center.z) : 1;
+    const outLen = Math.max(0.01, Math.hypot(outX, outZ));
+    const dropPoint = door
+      ? {
+        x: Number(door.x) + (outX / outLen) * 11,
+        y: 0,
+        z: Number(door.z) + (outZ / outLen) * 11,
+      }
+      : {
+        x: center.x,
+        y: 0,
+        z: Number(chosen.maxZ) + 11,
+      };
+    return {
+      ...dropPoint,
+      drivePurpose: "building-raid",
+      buildingId: chosen.id,
+    };
+  }
+
+  function assignSquadRaid(driverId, vehicleId, buildingId = "two-storey-house", now = Date.now(), options = {}) {
+    const p = transform(driverId);
+    if (!p) return false;
+    const destination = buildingRaidDestinationFor(driverId, p, now, buildingId);
+    if (!destination) return false;
+    const passengerId = options.passengerId ?? squadPartnerId(driverId) ?? null;
+    if (states.has(driverId)) release(driverId, now, "re-assign-raid");
+    if (vehicles.isDriving(driverId) && vehicles.vehicleForDriver(driverId)?.id !== vehicleId) {
+      vehicles.exit(driverId, now, "re-assign-raid");
+    }
+    if (passengerId) {
+      if (states.has(passengerId)) release(passengerId, now, "join-partner");
+      if (vehicles.isDriving(passengerId)) vehicles.exit(passengerId, now, "join-partner");
+    }
+    p.ragdollActive = false;
+    return assign(driverId, vehicleId, destination, now, {
+      minDistance: 20,
+      maxDistance: Math.max(BOT_VEHICLE_SEARCH_RADIUS, Number(options.maxDistance) || 180),
+      passengerId,
+    });
+  }
+
   function destinationFor(id, p, now) {
     const zone = battle.zoneSteeringTarget(id, now);
     if (zone && distance(p, zone) > 80) return { ...zone, drivePurpose: "zone" };
@@ -1214,6 +1398,10 @@ export async function setup(ctx) {
     const vehicleRelevantEnemy = targetEntity?.alive && (!targetEntity.bot || retaliating);
     if (vehicleRelevantEnemy && goal && distance(p, goal) > 80) {
       return { ...goal, drivePurpose: "combat-route", targetEntityId: targetEntity.id };
+    }
+    if (squadPartnerId(id) && stableChoice(`${id}:raid-pref`, 2) === 0) {
+      const raidGoal = buildingRaidDestinationFor(id, p, now);
+      if (raidGoal) return raidGoal;
     }
     // Ordinary driving should keep the whole 2 km world alive. Buildings are
     // local interests, not a global magnet for every driver. Pick a stable
@@ -1281,8 +1469,11 @@ export async function setup(ctx) {
     const nearestAvailableDistances = [];
     const warehousePriority = ctx.services.has("warehouse-priority") ? ctx.services.get("warehouse-priority") : null;
     const buildingNav = ctx.services.has("building-navigation") ? ctx.services.get("building-navigation") : null;
+    const reservedPassengers = new Set(
+      [...states.values()].map((s) => s.passengerId).filter(Boolean),
+    );
     for (const bot of bots.all()) {
-      if (!bot.alive || bot.humanSquad || states.has(bot.id) || vehicles.isPassenger?.(bot.id) || (cooldowns.get(bot.id) ?? 0) > now) continue;
+      if (!bot.alive || bot.humanSquad || states.has(bot.id) || reservedPassengers.has(bot.id) || vehicles.isPassenger?.(bot.id) || (cooldowns.get(bot.id) ?? 0) > now) continue;
       const p = transform(bot.id);
       if (!p || p.y > 1 || p.downed || get("parachute").stateFor(bot.id)?.airborne) continue;
       if (warehousePriority?.visitFor?.(bot.id) || buildingNav?.locationFor?.(p)?.building) continue;
@@ -1322,6 +1513,8 @@ export async function setup(ctx) {
         lastScan.withGoal++;
         if (!assign(id, pair.car.id, goal, now, { maxDistance: maximumDistance })) continue;
         usedBots.add(id); usedCars.add(pair.car.id);
+        const partnerId = squadPartnerId(id);
+        if (partnerId) usedBots.add(partnerId);
         assignedThisScan++; lastScan.assigned++;
       }
     };
@@ -1430,7 +1623,7 @@ export async function setup(ctx) {
     recentAttackers.delete(entityId);
     lastVehicleImpacts.delete(entityId);
   });
-  ctx.services.provide("bot-vehicles", { assign, tick,
+  ctx.services.provide("bot-vehicles", { assign, assignSquadRaid, buildingRaidDestinationFor, tick,
     stateFor(id) { const state = states.get(id); return state ? structuredClone(state) : null; },
     vehicleCooldownFor(vehicleId) { return vehicleCooldowns.get(vehicleId) ?? 0; },
     summary() {

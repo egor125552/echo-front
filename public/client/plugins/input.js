@@ -21,6 +21,8 @@ export function sampleKeyboardState(pressed, {
   selectDelta = 0,
   platePressed = false,
   stimulantPressed = false,
+  fastStimulantPressed = false,
+  turboStimulantPressed = false,
   parachutePressed = false,
   interactPressed = false,
 } = {}) {
@@ -36,6 +38,8 @@ export function sampleKeyboardState(pressed, {
     selectDelta,
     platePressed,
     stimulantPressed,
+    fastStimulantPressed,
+    turboStimulantPressed,
     parachutePressed,
     interactPressed,
   };
@@ -72,13 +76,15 @@ export async function setup(ctx) {
   let selectDelta = 0;
   let platePressed = false;
   let stimulantPressed = false;
+  let fastStimulantPressed = false;
+  let turboStimulantPressed = false;
   let parachutePressed = false;
   let interactPressed = false;
 
   const clickSuppression = new WeakMap();
   const handled = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
-    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE", "KeyN",
+    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE", "KeyN", "KeyU", "KeyT",
   ]);
   const opposite = { forward: "back", back: "forward", left: "right", right: "left" };
   const movementButtons = [...document.querySelectorAll("[data-touch-control]")];
@@ -188,6 +194,8 @@ export async function setup(ctx) {
     else if (action === "weapon-next") selectDelta = 1;
     else if (action === "armor-plate") platePressed = true;
     else if (action === "stimulant") stimulantPressed = true;
+    else if (action === "fast-stimulant") fastStimulantPressed = true;
+    else if (action === "turbo-stimulant") turboStimulantPressed = true;
     else if (action === "interact") interactPressed = true;
     else if (action === "parachute") parachutePressed = true;
     else if (
@@ -196,6 +204,7 @@ export async function setup(ctx) {
       || action === "navigation-face"
       || action === "map"
       || action === "menu"
+      || action === "shop"
     ) {
       emitTouch(action, true);
       if (action !== "parachute-status" && action !== "map" && action !== "menu") {
@@ -262,6 +271,8 @@ export async function setup(ctx) {
     selectDelta = 0;
     platePressed = false;
     stimulantPressed = false;
+    fastStimulantPressed = false;
+    turboStimulantPressed = false;
     parachutePressed = false;
     interactPressed = false;
     syncPressedState();
@@ -284,6 +295,8 @@ export async function setup(ctx) {
       if (event.code === "KeyR") reload = true;
       if (event.code === "KeyB") platePressed = true;
       if (event.code === "KeyN") stimulantPressed = true;
+      if (event.code === "KeyU") fastStimulantPressed = true;
+      if (event.code === "KeyT") turboStimulantPressed = true;
       if (event.code === "Space") parachutePressed = true;
       if (event.code === "KeyE") interactPressed = true;
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
@@ -415,6 +428,8 @@ export async function setup(ctx) {
       if (action === "weapon-next") selectDelta = 1;
       if (action === "armor-plate") platePressed = true;
       if (action === "stimulant") stimulantPressed = true;
+      if (action === "fast-stimulant") fastStimulantPressed = true;
+      if (action === "turbo-stimulant") turboStimulantPressed = true;
       if (action === "interact") interactPressed = true;
       emitTouch(action, true);
       notifyChanged(`touch:${action}`);
@@ -447,13 +462,23 @@ export async function setup(ctx) {
         turn: virtual.turn,
       };
       const sample = sampleInputState(pressed, mergedTouch, {
-        firePressed, reload, selectDelta, platePressed, stimulantPressed, parachutePressed, interactPressed,
+        firePressed,
+        reload,
+        selectDelta,
+        platePressed,
+        stimulantPressed,
+        fastStimulantPressed,
+        turboStimulantPressed,
+        parachutePressed,
+        interactPressed,
       });
       firePressed = false;
       reload = false;
       selectDelta = 0;
       platePressed = false;
       stimulantPressed = false;
+      fastStimulantPressed = false;
+      turboStimulantPressed = false;
       parachutePressed = false;
       interactPressed = false;
       return sample;

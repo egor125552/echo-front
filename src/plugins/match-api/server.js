@@ -7,7 +7,7 @@ export const manifest = {
   ],
   optional: [
     "armor", "weapon-progression", "opening-round", "aim-steering",
-    "health-regeneration", "tutorial-session",
+    "health-regeneration", "tutorial-session", "ai-enemy-decisions",
   ],
   capabilities: [
     "services.consume", "services.provide",
@@ -32,6 +32,9 @@ export async function setup(ctx) {
     : null;
   const tutorial = ctx.services.has("tutorial-session")
     ? ctx.services.get("tutorial-session")
+    : null;
+  const aiDecisions = ctx.services.has("ai-enemy-decisions")
+    ? ctx.services.get("ai-enemy-decisions")
     : null;
 
   botFill.ensure();
@@ -72,7 +75,7 @@ export async function setup(ctx) {
         armorPlateValue: 31.25,
         armorReserve: 5,
       } : {}),
-      weapons: ["pistol"],
+      weapons: ["pistol", "marksman", "sniper"],
     });
     botFill.ensure();
     opening?.arrangeForHuman(playerId);
@@ -142,10 +145,20 @@ export async function setup(ctx) {
     respawn.tick(now);
   }
 
+  function setEnemyAiMode(nextMode, now = Date.now()) {
+    return aiDecisions?.setMode?.(nextMode, now) ?? "standard";
+  }
+
+  function aiEnemiesState(now = Date.now()) {
+    return aiDecisions?.describe?.(now) ?? null;
+  }
+
   function snapshot(now = Date.now()) {
+    const aiEnemies = aiDecisions?.describe?.(now) ?? null;
     return {
       now,
       match: tdm.status(now),
+      ...(aiEnemies ? { aiEnemies } : {}),
       entities: entities.all().map((entity) => {
         const components = ctx.components.snapshot(entity.id);
         const transform = components.Transform ?? null;
@@ -197,5 +210,7 @@ export async function setup(ctx) {
     step,
     snapshot,
     snapshotFor,
+    setEnemyAiMode,
+    aiEnemiesState,
   });
 }

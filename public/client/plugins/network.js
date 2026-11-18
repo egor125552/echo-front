@@ -18,8 +18,16 @@ export function reconnectDelayForAttempt(attempt) {
   return RECONNECT_DELAYS_MS[index];
 }
 
+export const ENEMY_AI_MODE_KEY = "echo-front.enemy-ai-mode";
+
 function normalizeMode(value) {
   return value === "battle-royale" || value === "br" ? "battle-royale" : "tdm";
+}
+
+export function normalizeEnemyAiMode(value) {
+  return value === "ai" || value === "gemini" || value === "gemini-decision-1"
+    ? "ai"
+    : "standard";
 }
 
 function socketStateName(value) {
@@ -61,6 +69,10 @@ export async function setup(ctx) {
   let desiredRoom = null;
   let desiredMode = "tdm";
   let desiredTutorial = false;
+  let enemyAiMode = (() => {
+    try { return normalizeEnemyAiMode(localStorage.getItem(ENEMY_AI_MODE_KEY)); }
+    catch { return "standard"; }
+  })();
   let reconnectTimer = null;
   let reconnectAttempt = 0;
   let latestSnapshot = null;
@@ -154,7 +166,7 @@ export async function setup(ctx) {
     const mode = desiredMode;
     const tutorial = desiredTutorial;
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}&tutorial=${tutorial ? "1" : "0"}&snapshotProtocol=delta-v1`;
+    const url = `${protocol}//${location.host}/api/play?room=${encodeURIComponent(room)}&mode=${encodeURIComponent(mode)}&player=${encodeURIComponent(sessionId)}&tutorial=${tutorial ? "1" : "0"}&enemyAi=${encodeURIComponent(enemyAiMode)}&snapshotProtocol=delta-v1`;
     let ws;
     try {
       ws = new WebSocket(url);
@@ -319,15 +331,28 @@ export async function setup(ctx) {
     try { ws?.close(1000, "Client disconnect"); } catch {}
   }
 
+  function setEnemyAiMode(value) {
+    const next = normalizeEnemyAiMode(value);
+    enemyAiMode = next;
+    try { localStorage.setItem(ENEMY_AI_MODE_KEY, next); } catch {}
+    if (socket?.readyState === WebSocket.OPEN) {
+      send("settings", { enemyAiMode: next });
+    }
+    ctx.events.emit("enemy-ai:mode-changed", { mode: next });
+    return next;
+  }
+
   ctx.services.provide("network", {
     connect,
     disconnect,
     send,
+    setEnemyAiMode,
     get playerId() { return playerId; },
     get sessionId() { return sessionId; },
     get room() { return desiredRoom; },
     get mode() { return desiredMode; },
     get tutorial() { return desiredTutorial; },
+    get enemyAiMode() { return enemyAiMode; },
     get connected() { return socket?.readyState === WebSocket.OPEN; },
     get reconnecting() { return Boolean(desiredRoom && !this.connected); },
   });

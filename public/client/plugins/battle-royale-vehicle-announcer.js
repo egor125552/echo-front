@@ -59,6 +59,10 @@ export async function setup(ctx) {
   let lastNitroActive = false;
   let lastNitroReady = false;
   let lastNitroCooling = false;
+  let knownPassengerIds = new Set();
+  const knownEntityNames = new Map();
+  const pendingAnnouncements = [];
+  let queueTimer = null;
 
   function announce(text, interrupt = false) {
     if (!text || network.tutorial) return;
@@ -68,6 +72,31 @@ export async function setup(ctx) {
     }
     // Important announcements are latest-wins; speech-settings never builds a queue.
     speech.say(text, { interrupt });
+  }
+
+  function flushPendingAnnouncements() {
+    if (queueTimer) {
+      clearTimeout(queueTimer);
+      queueTimer = null;
+    }
+    if (!pendingAnnouncements.length) return;
+    const synthBusy = typeof window !== "undefined"
+      && Boolean(window.speechSynthesis?.speaking || window.speechSynthesis?.pending);
+    if (synthBusy) {
+      queueTimer = setTimeout(flushPendingAnnouncements, 260);
+      return;
+    }
+    const batch = pendingAnnouncements.splice(0, pendingAnnouncements.length);
+    const text = batch.join(". ");
+    announce(text, false);
+  }
+
+  function queuePassengerAnnouncement(text) {
+    if (!text || network.tutorial) return;
+    pendingAnnouncements.push(text);
+    if (!queueTimer) {
+      queueTimer = setTimeout(flushPendingAnnouncements, 280);
+    }
   }
 
   function announceEntered(name) {
@@ -117,19 +146,51 @@ export async function setup(ctx) {
     lastNitroCooling = next.cooling;
   }
 
+  function passengerDisplayName(entityId, explicitName = null) {
+    const clean = String(explicitName ?? "").trim()
+      || String(knownEntityNames.get(entityId) ?? "").trim();
+    return clean || "Напарник";
+  }
+
+  function syncPassengerDiff(vehicle) {
+    const nextIds = new Set(Array.isArray(vehicle?.passengerIds) ? vehicle.passengerIds : []);
+    for (const id of nextIds) {
+      if (id === network.playerId || knownPassengerIds.has(id)) continue;
+      knownPassengerIds.add(id);
+      queuePassengerAnnouncement(`${passengerDisplayName(id)} сел в машину`);
+    }
+    for (const id of [...knownPassengerIds]) {
+      if (nextIds.has(id)) continue;
+      knownPassengerIds.delete(id);
+      if (id !== network.playerId) {
+        queuePassengerAnnouncement(`${passengerDisplayName(id)} вышел из машины`);
+      }
+    }
+  }
+
   ctx.events.on("game:snapshot", (snapshot) => {
     if (snapshot?.mode !== "battle-royale") {
       announcedVehicleId = null;
       announcedDrivingVehicleId = null;
       drivingVehicleName = "машины";
+      knownPassengerIds.clear();
+      pendingAnnouncements.length = 0;
       resetNitroTracking();
       return;
+    }
+    if (Array.isArray(snapshot?.entities)) {
+      for (const e of snapshot.entities) {
+        if (e?.id && e?.name) knownEntityNames.set(e.id, e.name);
+      }
     }
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
     const fleet = Array.isArray(snapshot?.vehicles) ? snapshot.vehicles : [];
     if (!self) return;
 
-    const drivenVehicle = fleet.find((vehicle) => vehicle.driverId === network.playerId) ?? null;
+    const drivenVehicle = fleet.find((vehicle) => (
+      vehicle.driverId === network.playerId
+      || (Array.isArray(vehicle.passengerIds) && vehicle.passengerIds.includes(network.playerId))
+    )) ?? null;
     if (drivenVehicle) {
       drivingVehicleName = vehicleName(drivenVehicle);
       announcedVehicleId = drivenVehicle.id;
@@ -138,16 +199,24 @@ export async function setup(ctx) {
       // state that drives vehicle audio. Event delivery is not required.
       if (announcedDrivingVehicleId !== drivenVehicle.id) {
         announcedDrivingVehicleId = drivenVehicle.id;
-        announceEntered(drivingVehicleName);
+        knownPassengerIds = new Set(Array.isArray(drivenVehicle.passengerIds) ? drivenVehicle.passengerIds : []);
+        if (drivenVehicle.driverId === network.playerId) {
+          announceEntered(drivingVehicleName);
+        }
         resetNitroTracking(drivenVehicle.id);
+      } else {
+        syncPassengerDiff(drivenVehicle);
       }
-      followNitroSnapshot(drivenVehicle);
+      if (drivenVehicle.driverId === network.playerId) {
+        followNitroSnapshot(drivenVehicle);
+      }
       return;
     }
 
     if (announcedDrivingVehicleId != null) {
       announcedDrivingVehicleId = null;
       drivingVehicleName = "машины";
+      knownPassengerIds.clear();
       resetNitroTracking();
     }
 
@@ -178,6 +247,7 @@ export async function setup(ctx) {
         || (payload.vehicleKind === "supercar" ? "суперкар" : "внедорожник");
       announcedVehicleId = eventVehicleId ?? announcedVehicleId;
       announcedDrivingVehicleId = eventVehicleId ?? announcedDrivingVehicleId;
+      knownPassengerIds.clear();
       resetNitroTracking(eventVehicleId);
       if (!alreadySpoken) announceEntered(drivingVehicleName);
       return;
@@ -187,7 +257,26 @@ export async function setup(ctx) {
       announce(`Вы вышли из ${vehicleOutPhrase(name)}`, true);
       announcedDrivingVehicleId = null;
       drivingVehicleName = "машины";
+      knownPassengerIds.clear();
+      pendingAnnouncements.length = 0;
       resetNitroTracking();
+      return;
+    }
+    if (packet.event === "vehicle:passenger-entered" && payload.entityId && payload.entityId !== network.playerId) {
+      if (payload.driverId === network.playerId || (announcedDrivingVehicleId && payload.vehicleId === announcedDrivingVehicleId)) {
+        if (!knownPassengerIds.has(payload.entityId)) {
+          knownPassengerIds.add(payload.entityId);
+          queuePassengerAnnouncement(`${passengerDisplayName(payload.entityId, payload.entityName)} сел в машину`);
+        }
+      }
+      return;
+    }
+    if (packet.event === "vehicle:passenger-exited" && payload.entityId && payload.entityId !== network.playerId) {
+      if (payload.driverId === network.playerId || (announcedDrivingVehicleId && payload.vehicleId === announcedDrivingVehicleId)) {
+        if (knownPassengerIds.delete(payload.entityId) && payload.reason !== "interact") {
+          queuePassengerAnnouncement(`${passengerDisplayName(payload.entityId, payload.entityName)} вышел из машины`);
+        }
+      }
       return;
     }
     if (packet.event === "vehicle:nitro-start" && payload.driverId === network.playerId) {
@@ -230,6 +319,13 @@ export async function setup(ctx) {
     announcedVehicleId = null;
     announcedDrivingVehicleId = null;
     drivingVehicleName = "машины";
+    knownPassengerIds.clear();
+    knownEntityNames.clear();
+    pendingAnnouncements.length = 0;
+    if (queueTimer) {
+      clearTimeout(queueTimer);
+      queueTimer = null;
+    }
     resetNitroTracking();
   });
 }

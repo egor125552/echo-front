@@ -10,6 +10,15 @@ export const manifest = {
   capabilities: ["services.consume", "services.provide"],
 };
 
+const BOT_ACTUAL_TURN_SPEED = 2.6;
+
+function wrapAngle(value) {
+  let angle = Number(value) || 0;
+  while (angle > Math.PI) angle -= Math.PI * 2;
+  while (angle < -Math.PI) angle += Math.PI * 2;
+  return angle;
+}
+
 function normalizeDirection(direction) {
   const length = Math.hypot(direction.x, direction.z) || 1;
   return { x: direction.x / length, z: direction.z / length };
@@ -84,26 +93,64 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
   const forwardClearance = probeClearance(physics, botId, transform, desiredDirection);
   const blocked = forwardClearance < 0.95;
   const stuck = sampleStuck(botState, transform, now, movementMagnitude);
+  const currentlyAvoiding = (botState.avoidUntil ?? 0) > now;
 
-  if (blocked || stuck) {
-    const rightDirection = rotateDirection(desiredDirection, 0.9);
-    const leftDirection = rotateDirection(desiredDirection, -0.9);
+  if ((blocked && !currentlyAvoiding) || stuck) {
+    const rightDirection = rotateDirection(desiredDirection, 0.85);
+    const leftDirection = rotateDirection(desiredDirection, -0.85);
     const rightClearance = probeClearance(physics, botId, transform, rightDirection);
     const leftClearance = probeClearance(physics, botId, transform, leftDirection);
     const previous = botState.avoidDirection || botState.strafeDirection || 1;
-    botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.08
-      ? previous
-      : (rightClearance > leftClearance ? 1 : -1);
-    botState.avoidUntil = now + (stuck ? 900 : 650);
+    if ((botState.avoidFlipLockUntil ?? 0) <= now) {
+      botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.14
+        ? previous
+        : (rightClearance > leftClearance ? 1 : -1);
+    }
+    botState.avoidUntil = now + (stuck ? 950 : 750);
+  } else if (blocked && currentlyAvoiding) {
+    botState.avoidUntil = Math.max(botState.avoidUntil, now + 350);
   }
 
   if ((botState.avoidUntil ?? 0) <= now) return input;
 
-  let detour = rotateDirection(desiredDirection, (botState.avoidDirection || 1) * 1.15);
-  if (probeClearance(physics, botId, transform, detour) < 0.42) {
-    botState.avoidDirection *= -1;
-    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.35);
+  const side = botState.avoidDirection || 1;
+  let detour = rotateDirection(desiredDirection, side * 0.82);
+  let detourClearance = probeClearance(physics, botId, transform, detour);
+  if (detourClearance < 0.72) {
+    const wider = rotateDirection(desiredDirection, side * 1.2);
+    const widerClearance = probeClearance(physics, botId, transform, wider);
+    if (widerClearance > detourClearance) {
+      detour = wider;
+      detourClearance = widerClearance;
+    }
   }
+  if (detourClearance < 0.42 && (botState.avoidFlipLockUntil ?? 0) <= now) {
+    botState.avoidDirection = -side;
+    botState.avoidFlipLockUntil = now + 550;
+    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.25);
+  }
+
+  const preserveAim = Boolean(input.fireHeld || input.aimLock || Math.abs(input.strafe ?? 0) >= 0.25);
+  if (!preserveAim) {
+    const detourHeading = Math.atan2(detour.x, -detour.z);
+    const delta = wrapAngle(detourHeading - (Number(transform.angle) || 0));
+    const deadzone = 0.03;
+    let calmTurn = 0;
+    if (Math.abs(delta) > deadzone) {
+      const deadbeat = (Math.abs(delta) * 0.88) / (BOT_ACTUAL_TURN_SPEED * 0.12);
+      calmTurn = Math.sign(delta) * Math.min(0.75, (Math.abs(delta) * 1.55) / BOT_ACTUAL_TURN_SPEED, deadbeat);
+    }
+    const local = worldToLocal(transform.angle, detour);
+    return {
+      ...input,
+      forward: Math.abs(delta) > 1.1 ? 0.15 : Math.max(0.25, Math.min(0.78, Math.hypot(local.forward, local.strafe) * 0.78)),
+      strafe: Math.max(-0.35, Math.min(0.35, local.strafe * 0.4)),
+      turn: calmTurn,
+      targetAngle: detourHeading,
+      sprint: false,
+    };
+  }
+
   const local = worldToLocal(transform.angle, detour);
   return {
     ...input,

@@ -25,6 +25,7 @@ const FORWARDED_EVENTS = new Set([
   "battle-royale:started",
   "battle-royale:remaining",
   "battle-royale:eliminated",
+  "battle-royale:redeployed",
   "battle-royale:ended",
   "battle-royale:zone-damage",
   "battle-royale:zone-closing",
@@ -34,9 +35,12 @@ const FORWARDED_EVENTS = new Set([
   "parachute:landed",
   "vehicle:entered",
   "vehicle:exited",
+  "vehicle:passenger-entered",
+  "vehicle:passenger-exited",
   "vehicle:impact",
   "vehicle:driver-lost",
   "vehicle:despawned",
+  "squad:callout",
   "world:door",
   "loot:opened",
   "loot:picked",
@@ -45,9 +49,11 @@ const FORWARDED_EVENTS = new Set([
 function shouldForwardEvent(eventName) {
   const name = String(eventName ?? "");
   return FORWARDED_EVENTS.has(name)
+    || name.startsWith("ai-decisions:")
     || name.startsWith("navigation:")
     || name.startsWith("injury:")
     || name.startsWith("crate:")
+    || name.startsWith("shop:")
     || name.startsWith("tutorial:");
 }
 

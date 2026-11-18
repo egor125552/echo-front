@@ -1,14 +1,16 @@
+import { getSharedTacticalCombatNet } from "../../ai/tactical-combat-net.js";
+
 export const BOT_VISIBLE_MEMORY_MS = 10_000;
 export const BOT_DAMAGE_MEMORY_MS = 12_000;
 export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
 export const BOT_INVESTIGATION_REACHED_DISTANCE = 3.2;
-export const BOT_REACTION_MIN_MS = 280;
-export const BOT_REACTION_SPREAD_MS = 220;
-export const BOT_RETURN_FIRE_REACTION_MS = 140;
-export const BOT_BURST_MIN_MS = 460;
-export const BOT_BURST_SPREAD_MS = 350;
-export const BOT_BURST_PAUSE_MIN_MS = 180;
-export const BOT_BURST_PAUSE_SPREAD_MS = 280;
+export const BOT_REACTION_MIN_MS = 130;
+export const BOT_REACTION_SPREAD_MS = 110;
+export const BOT_RETURN_FIRE_REACTION_MS = 70;
+export const BOT_BURST_MIN_MS = 760;
+export const BOT_BURST_SPREAD_MS = 420;
+export const BOT_BURST_PAUSE_MIN_MS = 260;
+export const BOT_BURST_PAUSE_SPREAD_MS = 240;
 export const BOT_STAIR_ENTRY_OFFSET = 1.15;
 export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 export const BOT_GROUND_RAMP_ESCAPE_Y = 0.45;
@@ -21,8 +23,8 @@ export const manifest = {
     "bot-brain", "movement", "weapons", "entities", "spatial-grid", "battle-royale",
     "map-test-arena",
   ],
-  optional: ["battle-royale-tutorial", "armor"],
-  capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
+  optional: ["battle-royale-tutorial", "armor", "stimulants", "ai-enemy-decisions"],
+  capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
 
 function wrapAngle(value) {
@@ -55,20 +57,46 @@ function stableSeed(value) {
 
 const BOT_TURN_SPEED_RAD_PER_SEC = 2.6;
 
-function steeringTo(transform, target, thinkDelayMs = 120) {
+function steeringTo(transform, target, thinkDelayMs = 120, options = {}) {
   const dx = target.x - transform.x;
   const dz = target.z - transform.z;
+  const dist = Math.hypot(dx, dz);
+  if (!options.allowPointTurn && dist < 0.35) {
+    return {
+      turn: 0,
+      delta: 0,
+      aligned: true,
+      distance: dist,
+    };
+  }
   const desired = Math.atan2(dx, -dz);
   const delta = wrapAngle(desired - transform.angle);
-  const dtSec = Math.max(0.05, Math.min(0.25, (Number(thinkDelayMs) || 120) / 1000));
-  const maxTurnStep = BOT_TURN_SPEED_RAD_PER_SEC * dtSec;
-  const proportional = Math.max(-1, Math.min(1, delta * 2.1));
-  const deadbeatCap = maxTurnStep > 0 ? Math.abs(delta) / maxTurnStep : 1;
-  const turn = Math.sign(proportional) * Math.min(Math.abs(proportional), deadbeatCap);
+  const absDelta = Math.abs(delta);
+  const deadzone = Number(options.deadzone) >= 0 ? Number(options.deadzone) : 0.025;
+  const alignThreshold = Number(options.alignThreshold) || 0.34;
+  if (absDelta <= deadzone) {
+    return {
+      turn: 0,
+      targetAngle: desired,
+      delta,
+      aligned: true,
+      distance: dist,
+    };
+  }
+  const stepCount = Math.max(1, Math.ceil((Number(thinkDelayMs) || 120) / 50));
+  const effectiveSec = stepCount * 0.05;
+  const maxRate = Math.max(0.1, Math.min(1, Number(options.maxRate) || 1.0));
+  const gain = Number(options.gain) || 1.75;
+  const maxTurnStep = BOT_TURN_SPEED_RAD_PER_SEC * effectiveSec;
+  const deadbeatCap = maxTurnStep > 0 ? (absDelta * 0.9) / maxTurnStep : 1;
+  const proportional = Math.min(maxRate, (absDelta * gain) / BOT_TURN_SPEED_RAD_PER_SEC);
+  const turn = Math.sign(delta) * Math.min(proportional, deadbeatCap);
   return {
     turn,
-    aligned: Math.abs(delta) < 0.25,
-    distance: Math.hypot(dx, dz),
+    targetAngle: desired,
+    delta,
+    aligned: absDelta < alignThreshold,
+    distance: dist,
   };
 }
 
@@ -221,6 +249,255 @@ export async function setup(ctx) {
     : null;
   const getTeams = () => (ctx.services.has("teams") ? ctx.services.get("teams") : null);
   const getInjury = () => (ctx.services.has("injury") ? ctx.services.get("injury") : null);
+  const getStimulants = () => (ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null);
+  const getVehicles = () => (ctx.services.has("vehicles") ? ctx.services.get("vehicles") : null);
+  const getShop = () => (ctx.services.has("shop") ? ctx.services.get("shop") : null);
+  const getAiDecisions = () => (ctx.services.has("ai-enemy-decisions") ? ctx.services.get("ai-enemy-decisions") : null);
+  const combatNet = getSharedTacticalCombatNet();
+  const targetMotionSamples = new Map();
+
+  function observeHumanCombatEngagement(humanId, targetId, {
+    reward = 0.85,
+    weaponId = "rifle",
+    hitScored = true,
+    now = Date.now(),
+  } = {}) {
+    const humanEnt = humanId ? entities.get(humanId) : null;
+    if (!humanEnt || humanEnt.bot || !humanEnt.alive) return null;
+    const hTransform = ctx.components.get(humanId, "Transform");
+    const tTransform = targetId ? ctx.components.get(targetId, "Transform") : null;
+    if (!hTransform) return null;
+
+    const hpComp = ctx.components.get(humanId, "Health");
+    const armorComp = ctx.components.get(humanId, "Armor");
+    const inv = ctx.components.get(humanId, "Weapons");
+    const input = ctx.components.get(humanId, "Input") ?? {};
+    const selectedWep = inv?.items?.[inv.selected] ?? null;
+    const activeWepId = weaponId || selectedWep?.id || "rifle";
+    const wepDef = weapons.definitions?.[activeWepId] ?? null;
+    const stimsService = getStimulants();
+    const totalStims = stimsService ? (stimsService.totalCount?.(humanId) ?? stimsService.count(humanId)) : 0;
+    const reservePlates = Number(armorComp?.reserve ?? 0);
+    const enemyDist = tTransform ? distance3(hTransform, tTransform) : 24;
+    const targetArmorComp = targetId ? ctx.components.get(targetId, "Armor") : null;
+
+    let aimError = 0.05;
+    if (tTransform) {
+      const desiredAngle = Math.atan2(
+        (Number(tTransform.x) || 0) - (Number(hTransform.x) || 0),
+        -((Number(tTransform.z) || 0) - (Number(hTransform.z) || 0)),
+      );
+      let delta = desiredAngle - (Number(hTransform.angle) || 0);
+      while (delta > Math.PI) delta -= Math.PI * 2;
+      while (delta < -Math.PI) delta += Math.PI * 2;
+      aimError = Math.abs(delta);
+    }
+
+    const mates = squadTeammatesFor(humanId, { includeHuman: false, includeDowned: false });
+    const nearestAllyDist = mates.length > 0 && mates[0]?.transform
+      ? distance3(hTransform, mates[0].transform)
+      : 60;
+
+    return combatNet.learnFromHumanCombat({
+      selfHealthRatio: (Number(hpComp?.current) || 100) / Math.max(1, Number(hpComp?.maximum) || 100),
+      selfArmorRatio: (Number(armorComp?.current) || 0) / Math.max(1, Number(armorComp?.maximum) || 150),
+      enemyDistance: enemyDist,
+      visibleEnemyCount: 1,
+      standingAllies: mates.length,
+      nearestAllyDistance: nearestAllyDist,
+      weaponRange: Number(wepDef?.range) || 55,
+      ammoRatio: (Number(selectedWep?.ammo) || 15) / Math.max(1, Number(wepDef?.magazine) || 30),
+      targetArmorRatio: (Number(targetArmorComp?.current) || 0) / 150,
+      hasCoverOrBuilding: Boolean(buildingIdAt(hTransform)),
+      hasStimsOrPlates: Math.min(1, (totalStims + reservePlates) / 4),
+      elevationDiff: tTransform ? (Number(hTransform.y) || 0) - (Number(tTransform.y) || 0) : 0,
+      aimError,
+      lineOfSightClear: true,
+      targetIsHuman: true,
+    }, {
+      forward: Number(input.forward) || 0,
+      strafe: Number(input.strafe) || 0,
+      sprint: Boolean(input.sprint),
+      weaponId: activeWepId,
+      hitScored,
+      reward,
+    }, now);
+  }
+
+  ctx.events.on("weapon:fired", ({ entityId, weaponId, now } = {}) => {
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    const shooter = entityId ? entities.get(entityId) : null;
+    if (shooter && !shooter.bot && shooter.alive) {
+      const nearEnemy = perception.nearestEnemy?.(entityId, 115) ?? null;
+      observeHumanCombatEngagement(entityId, nearEnemy?.entityId ?? null, {
+        reward: 0.45,
+        weaponId,
+        hitScored: false,
+        now: tNow,
+      });
+    }
+  });
+
+  let lastDamageEventKey = "";
+  function handleDamageLearning({ attackerId, targetId, entityId, amount, requested, healthApplied, weaponId, now } = {}) {
+    const resolvedTargetId = targetId ?? entityId ?? null;
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    const eventKey = `${attackerId ?? ""}:${resolvedTargetId ?? ""}:${tNow}`;
+    if (eventKey === lastDamageEventKey) return;
+    lastDamageEventKey = eventKey;
+
+    const rawDmg = Number(amount ?? requested ?? healthApplied) || 20;
+    const dmgScale = Math.min(1.2, Math.max(0.15, rawDmg / 65));
+    const attacker = attackerId ? entities.get(attackerId) : null;
+    const target = resolvedTargetId ? entities.get(resolvedTargetId) : null;
+    const involvesHuman = Boolean((attacker && !attacker.bot) || (target && !target.bot));
+
+    if (attacker && !attacker.bot) {
+      observeHumanCombatEngagement(attackerId, resolvedTargetId, {
+        reward: 0.95 * dmgScale,
+        weaponId,
+        hitScored: true,
+        now: tNow,
+      });
+    }
+    if (attacker?.bot) {
+      combatNet.recordCombatOutcome(attackerId, 0.45 * dmgScale, tNow, { involvesHuman });
+    }
+    if (target?.bot) {
+      combatNet.recordCombatOutcome(resolvedTargetId, -0.35 * dmgScale, tNow, { involvesHuman });
+    }
+  }
+
+  ctx.events.on("combat:damage", handleDamageLearning);
+  ctx.events.on("health:damaged", handleDamageLearning);
+
+  ctx.events.on("injury:downed", ({ entityId, attackerId, weaponId, now } = {}) => {
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    const attacker = attackerId ? entities.get(attackerId) : null;
+    const target = entityId ? entities.get(entityId) : null;
+    const involvesHuman = Boolean((attacker && !attacker.bot) || (target && !target.bot));
+
+    if (attacker && !attacker.bot) {
+      observeHumanCombatEngagement(attackerId, entityId, {
+        reward: 1.65,
+        weaponId,
+        hitScored: true,
+        now: tNow,
+      });
+    }
+    if (attacker?.bot) {
+      combatNet.recordCombatOutcome(attackerId, 1.35, tNow, { involvesHuman });
+    }
+    if (target?.bot) {
+      combatNet.recordCombatOutcome(entityId, -1.15, tNow, { involvesHuman });
+    }
+  });
+
+  ctx.events.on("entity:died", ({ entityId, killerId, now } = {}) => {
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    const killer = killerId ? entities.get(killerId) : null;
+    const victim = entityId ? entities.get(entityId) : null;
+    const involvesHuman = Boolean((killer && !killer.bot) || (victim && !victim.bot));
+
+    if (killer && !killer.bot) {
+      observeHumanCombatEngagement(killerId, entityId, {
+        reward: 2.0,
+        hitScored: true,
+        now: tNow,
+      });
+    }
+    if (killer?.bot) {
+      combatNet.recordCombatOutcome(killerId, 1.85, tNow, { involvesHuman });
+    }
+    if (victim?.bot) {
+      combatNet.recordCombatOutcome(entityId, -1.6, tNow, { involvesHuman });
+    }
+  });
+
+  ctx.events.on("injury:team-revive-completed", ({ reviverId, now } = {}) => {
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    if (reviverId && entities.get(reviverId)?.bot) {
+      combatNet.recordCombatOutcome(reviverId, 1.0, tNow);
+    }
+  });
+
+  function estimateTargetVelocity(entityId, targetTransform, now) {
+    const vehicles = getVehicles();
+    if (vehicles) {
+      const v = vehicles.vehicleForDriver?.(entityId) ?? vehicles.vehicleForPassenger?.(entityId) ?? null;
+      if (v) {
+        const speed = Number(v.speed) || 0;
+        const heading = Number(v.heading ?? v.angle ?? 0);
+        return { vx: Math.sin(heading) * speed, vz: -Math.cos(heading) * speed };
+      }
+    }
+    const prev = targetMotionSamples.get(entityId);
+    const x = Number(targetTransform?.x) || 0;
+    const z = Number(targetTransform?.z) || 0;
+    let sampleVx = 0;
+    let sampleVz = 0;
+    if (prev && now > prev.at && now - prev.at <= 750) {
+      const dt = (now - prev.at) / 1000;
+      sampleVx = (x - prev.x) / dt;
+      sampleVz = (z - prev.z) / dt;
+    }
+    targetMotionSamples.set(entityId, { x, z, at: now });
+    const input = ctx.components.get(entityId, "Input");
+    if (input) {
+      const rawF = Number(input.forward) || 0;
+      const rawS = Number(input.strafe) || 0;
+      const mag = Math.hypot(rawF, rawS);
+      if (mag > 0.05) {
+        const scale = mag > 1 ? 1 / mag : 1;
+        const speed = Number.isFinite(targetTransform?.movementSpeed)
+          ? Math.max(0, targetTransform.movementSpeed)
+          : (input.sprint ? 5.4 : 3.25);
+        const angle = Number(targetTransform?.angle) || 0;
+        return {
+          vx: (Math.sin(angle) * rawF * scale + Math.cos(angle) * rawS * scale) * speed,
+          vz: (-Math.cos(angle) * rawF * scale + Math.sin(angle) * rawS * scale) * speed,
+        };
+      }
+    }
+    const sampleSpeed = Math.hypot(sampleVx, sampleVz);
+    if (sampleSpeed > 0.25 && sampleSpeed < 45) {
+      return { vx: sampleVx, vz: sampleVz };
+    }
+    return { vx: 0, vz: 0 };
+  }
+
+  function predictedAimTarget(botTransform, visibleEnemy, weaponDef, now) {
+    if (!visibleEnemy?.transform) return visibleEnemy?.transform ?? null;
+    const targetTransform = visibleEnemy.transform;
+    const muzzleVelocity = Number(weaponDef?.muzzleVelocity) || 0;
+    const dist = Math.max(0, Number(visibleEnemy.distance) || distance3(botTransform, targetTransform));
+    if (muzzleVelocity <= 0 || dist < 4) return targetTransform;
+    const vel = estimateTargetVelocity(visibleEnemy.entityId, targetTransform, now);
+    const speed = Math.hypot(vel.vx, vel.vz);
+    if (speed < 0.3) return targetTransform;
+    const leadSec = Math.min(0.32, (dist / muzzleVelocity) * 0.96);
+    return {
+      x: (Number(targetTransform.x) || 0) + vel.vx * leadSec,
+      y: Number(targetTransform.y) || 0,
+      z: (Number(targetTransform.z) || 0) + vel.vz * leadSec,
+    };
+  }
+
+  function aimOptionsForWeapon(weaponId) {
+    if (weaponId === "sniper") {
+      return { maxRate: 1.0, deadzone: 0.008, gain: 2.1, alignThreshold: 0.095, allowPointTurn: true };
+    }
+    if (weaponId === "marksman") {
+      return { maxRate: 1.0, deadzone: 0.01, gain: 2.0, alignThreshold: 0.145, allowPointTurn: true };
+    }
+    return { maxRate: 1.0, deadzone: 0.015, gain: 1.9, alignThreshold: 0.32, allowPointTurn: true };
+  }
+
+  function weaponStandoffRange(weaponId, fallbackRange = 8) {
+    if (weaponId === "sniper") return Math.max(30, fallbackRange);
+    if (weaponId === "marksman") return Math.max(20, fallbackRange);
+    return fallbackRange;
+  }
 
   function squadPartnerId(botId) {
     if (typeof perception.squadPartnerId === "function") {
@@ -356,6 +633,53 @@ export async function setup(ctx) {
     return shared;
   }
 
+  function shareOutnumberedCalloutWithSquad(botId, primaryEnemy, enemyCount, now) {
+    if (!primaryEnemy?.transform || enemyCount < 2) return false;
+    const selfTransform = ctx.components.get(botId, "Transform");
+    const selfState = ctx.components.get(botId, "Bot");
+    if (!selfTransform || !selfState) return false;
+    const mates = squadTeammatesFor(botId, { includeHuman: false, includeDowned: false });
+    const fallbackPartner = activeSquadPartner(botId);
+    if (fallbackPartner && !mates.some((m) => m.id === fallbackPartner.id)) {
+      mates.push(fallbackPartner);
+    }
+    const callout = {
+      fromId: botId,
+      targetEntityId: primaryEnemy.entityId,
+      enemyCount,
+      x: Number(primaryEnemy.transform.x) || 0,
+      y: Number(primaryEnemy.transform.y) || 0,
+      z: Number(primaryEnemy.transform.z) || 0,
+      at: now,
+      expiresAt: now + 9000,
+    };
+    selfState.outnumberedCallout = callout;
+    let alerted = 0;
+    for (const mate of mates) {
+      if (!mate?.state || distance3(selfTransform, mate.transform) > 145) continue;
+      rememberTarget(mate.state, primaryEnemy.entityId, primaryEnemy.transform, now, BOT_VISIBLE_MEMORY_MS);
+      mate.state.outnumberedCallout = { ...callout };
+      mate.state.squadCalloutFrom = botId;
+      mate.state.squadCalloutAt = now;
+      alerted += 1;
+    }
+    if (now >= (selfState.nextOutnumberedEmitAt ?? 0)) {
+      selfState.nextOutnumberedEmitAt = now + 4000;
+      ctx.events.emit("bot:squad-callout", {
+        botId,
+        kind: "outnumbered",
+        enemyCount,
+        targetEntityId: primaryEnemy.entityId,
+        alertedCount: alerted,
+        x: callout.x,
+        y: callout.y,
+        z: callout.z,
+        now,
+      });
+    }
+    return alerted > 0;
+  }
+
   function buildingIdAt(position) {
     if (!position) return null;
     if (ctx.services.has("building-navigation")) {
@@ -372,7 +696,641 @@ export async function setup(ctx) {
     ) {
       return String(b.id ?? "warehouse");
     }
+    for (const nb of map?.navigationBuildings ?? []) {
+      const bounds = nb?.bounds ?? nb;
+      if (
+        bounds
+        && Number(position.x) >= bounds.minX
+        && Number(position.x) <= bounds.maxX
+        && Number(position.z) >= bounds.minZ
+        && Number(position.z) <= bounds.maxZ
+      ) {
+        return String(nb.id ?? bounds.id ?? "building");
+      }
+    }
     return null;
+  }
+
+  function buildingBoundsForId(buildingId) {
+    if (!buildingId) return null;
+    const primaryId = String(map?.building?.id ?? "warehouse");
+    if (buildingId === primaryId && map?.building) {
+      return { id: primaryId, ...map.building };
+    }
+    for (const nb of map?.navigationBuildings ?? []) {
+      const id = String(nb?.id ?? nb?.bounds?.id ?? "");
+      if (id === String(buildingId)) {
+        const bounds = nb?.bounds ?? nb;
+        return bounds ? { id, ...bounds } : null;
+      }
+    }
+    return null;
+  }
+
+  function allKnownBuildings() {
+    const list = [];
+    const seen = new Set();
+    if (map?.building) {
+      const id = String(map.building.id ?? "warehouse");
+      seen.add(id);
+      list.push({ id, ...map.building });
+    }
+    for (const nb of map?.navigationBuildings ?? []) {
+      const id = String(nb?.id ?? nb?.bounds?.id ?? "");
+      const bounds = nb?.bounds ?? nb;
+      if (!id || seen.has(id) || !bounds) continue;
+      seen.add(id);
+      list.push({ id, ...bounds });
+    }
+    return list;
+  }
+
+  function cratesInBuilding(buildingBounds, { onlyUnopened = true } = {}) {
+    if (!buildingBounds || !Array.isArray(map?.crates)) return [];
+    const margin = 4.5;
+    return map.crates.filter((crate) => {
+      if (!crate || (onlyUnopened && crate.opened)) return false;
+      const x = Number(crate.x) || 0;
+      const z = Number(crate.z) || 0;
+      return (
+        x >= buildingBounds.minX - margin
+        && x <= buildingBounds.maxX + margin
+        && z >= buildingBounds.minZ - margin
+        && z <= buildingBounds.maxZ + margin
+      );
+    });
+  }
+
+  function tryOpenNearbyCrate(bot, transform, state, now) {
+    if (!Array.isArray(map?.crates) || !map.crates.length) return false;
+    const botEntity = entities.get(bot.id);
+    if (botEntity?.humanSquad) {
+      const human = entities.get(botEntity.humanSquad);
+      const humanTransform = human?.alive ? ctx.components.get(human.id, "Transform") : null;
+      if (humanTransform && !getInjury()?.isDowned(human.id) && distance3(transform, humanTransform) <= 3.6) {
+        // Let the human player open the crate right in front of them if they are next to it.
+        const humanNearCrate = map.crates.some(
+          (c) => c && !c.opened && distance2(humanTransform, c) <= 2.5 && distance2(transform, c) <= 2.5,
+        );
+        if (humanNearCrate) return false;
+      }
+    }
+    let bestCrate = null;
+    let bestDist = Infinity;
+    for (const crate of map.crates) {
+      if (!crate || crate.opened) continue;
+      const dy = Math.abs((Number(transform.y) || 0) - (Number(crate.y) || 0));
+      if (dy > 1.65) continue;
+      const d = distance2(transform, crate);
+      if (d <= 2.45 && d < bestDist) {
+        bestDist = d;
+        bestCrate = crate;
+      }
+    }
+    if (!bestCrate) return false;
+
+    bestCrate.opened = true;
+    const loot = bestCrate.loot ?? (String(bestCrate.id).includes("armor") ? "armor" : "rifle");
+    ctx.events.emit("loot:opened", {
+      crateId: bestCrate.id,
+      entityId: bot.id,
+      loot,
+      x: Number(bestCrate.x) || 0,
+      y: Number(bestCrate.y) || 0,
+      z: Number(bestCrate.z) || 0,
+      now,
+    });
+    ctx.events.emit("sound:spatial", {
+      entityId: bot.id,
+      key: "crate.open",
+      x: Number(bestCrate.x) || 0,
+      y: Number(bestCrate.y) || 0,
+      z: Number(bestCrate.z) || 0,
+      radius: 18,
+    });
+    if (loot === "juggernaut") {
+      if (botEntity) botEntity.juggernaut = true;
+      const hp = ctx.components.get(bot.id, "Health");
+      if (hp) {
+        hp.maximum = Math.max(Number(hp.maximum) || 200, 700);
+        hp.current = 700;
+        ctx.events.emit("health:changed", {
+          entityId: bot.id,
+          health: hp.current,
+          maximum: hp.maximum,
+        });
+      }
+      armorService?.grantJuggernautArmor?.(bot.id);
+      getStimulants()?.grantJuggernautStims?.(bot.id);
+      if (!weapons.grant(bot.id, "sniper")) weapons.restock?.(bot.id, "sniper", 20);
+      if (!weapons.grant(bot.id, "marksman")) weapons.restock?.(bot.id, "marksman", 48);
+      if (!weapons.grant(bot.id, "rifle")) weapons.restock?.(bot.id, "rifle", 90);
+      ctx.events.emit("juggernaut:equipped", {
+        entityId: bot.id,
+        crateId: bestCrate.id,
+        health: 700,
+        armor: 600,
+        x: Number(bestCrate.x) || 0,
+        y: Number(bestCrate.y) || 0,
+        z: Number(bestCrate.z) || 0,
+      });
+      ctx.events.emit("loot:picked", {
+        crateId: bestCrate.id,
+        entityId: bot.id,
+        loot: "juggernaut",
+        applied: true,
+        quantity: 12,
+      });
+    } else if (loot === "airdrop") {
+      armorService?.grantSatchel?.(bot.id);
+      armorService?.grantPlates?.(bot.id, 8);
+      if (!weapons.grant(bot.id, "sniper")) weapons.restock?.(bot.id, "sniper", 10);
+      if (!weapons.grant(bot.id, "marksman")) weapons.restock?.(bot.id, "marksman", 24);
+      weapons.restock?.(bot.id, "rifle", 60);
+      ctx.events.emit("loot:picked", {
+        crateId: bestCrate.id,
+        entityId: bot.id,
+        loot: "airdrop",
+        applied: true,
+        quantity: 8,
+      });
+    } else if (loot === "armor") {
+      const added = armorService?.grantPlates?.(bot.id, 3) ?? 0;
+      ctx.events.emit("loot:picked", {
+        crateId: bestCrate.id,
+        entityId: bot.id,
+        item: "armor-plates",
+        quantity: added || 3,
+      });
+    } else {
+      const targetWeaponId = loot === "marksman" || loot === "sniper" ? loot : "rifle";
+      const restockQty = targetWeaponId === "sniper" ? 10 : targetWeaponId === "marksman" ? 24 : 60;
+      const inv = ctx.components.get(bot.id, "Weapons");
+      const alreadyHasWeapon = Boolean(inv?.items?.some((item) => item.id === targetWeaponId));
+      if (!alreadyHasWeapon) {
+        weapons.grant(bot.id, targetWeaponId);
+        const updatedInv = ctx.components.get(bot.id, "Weapons");
+        const slot = updatedInv?.items?.findIndex((item) => item.id === targetWeaponId) ?? -1;
+        if (slot >= 0) weapons.select(bot.id, slot - (updatedInv.selected ?? 0));
+        ctx.events.emit("loot:picked", {
+          crateId: bestCrate.id,
+          entityId: bot.id,
+          loot: targetWeaponId,
+          weaponId: targetWeaponId,
+        });
+      } else {
+        const added = weapons.restock?.(bot.id, targetWeaponId, restockQty) ?? 0;
+        ctx.events.emit("loot:picked", {
+          crateId: bestCrate.id,
+          entityId: bot.id,
+          loot: targetWeaponId,
+          weaponId: targetWeaponId,
+          restocked: added,
+        });
+      }
+    }
+    if (state) {
+      state.lastLootedCrateId = bestCrate.id;
+      state.lastLootedAt = now;
+    }
+    return true;
+  }
+
+  function squadBuildingLootInterest(botId, transform, state, now) {
+    if (!Array.isArray(map?.crates) || !map.crates.length) return null;
+    const partner = activeSquadPartner(botId);
+    const role = squadRoleFor(botId);
+    const zoneRadiusEarly = Math.max(18, Number(battleRoyale.zoneRadiusAt?.(now)) || 400);
+    const zoneSafeEarly = Math.max(14, zoneRadiusEarly - Math.min(70, zoneRadiusEarly * 0.22));
+    const specialCrates = (map.crates ?? []).filter((c) => (
+      c
+      && !c.opened
+      && (c.juggernaut || c.loot === "juggernaut" || c.airdrop || c.loot === "airdrop")
+      && Math.hypot(Number(c.x) || 0, Number(c.z) || 0) <= zoneSafeEarly
+      && distance2(transform, c) <= (c.juggernaut || c.loot === "juggernaut" ? 195 : 165)
+    ));
+    if (specialCrates.length > 0) {
+      specialCrates.sort((a, b) => {
+        const aJug = Boolean(a.juggernaut || a.loot === "juggernaut");
+        const bJug = Boolean(b.juggernaut || b.loot === "juggernaut");
+        if (aJug !== bJug) return aJug ? -1 : 1;
+        return distance2(transform, a) - distance2(transform, b);
+      });
+      const chosenSpecial = specialCrates[0];
+      return {
+        kind: "squad-loot-interest",
+        buildingId: null,
+        crateId: chosenSpecial.id,
+        priorityVisit: true,
+        x: Number(chosenSpecial.x) || 0,
+        y: 0,
+        z: Number(chosenSpecial.z) || 0,
+        expiresAt: now + 3500,
+      };
+    }
+
+    let targetBuilding = null;
+
+    const preferredId = state?.squadLootBuildingId ?? partner?.state?.squadLootBuildingId ?? null;
+    if (preferredId) {
+      const bounds = buildingBoundsForId(preferredId);
+      if (bounds && cratesInBuilding(bounds, { onlyUnopened: true }).length > 0) {
+        targetBuilding = bounds;
+      }
+    }
+
+    if (!targetBuilding) {
+      let bestScore = Infinity;
+      for (const b of allKnownBuildings()) {
+        const unopened = cratesInBuilding(b, { onlyUnopened: true });
+        if (!unopened.length) continue;
+        const center = {
+          x: ((Number(b.minX) || 0) + (Number(b.maxX) || 0)) * 0.5,
+          z: ((Number(b.minZ) || 0) + (Number(b.maxZ) || 0)) * 0.5,
+        };
+        const d = distance2(transform, center);
+        if (d > 155) continue;
+        const score = d - unopened.length * 6;
+        if (score < bestScore) {
+          bestScore = score;
+          targetBuilding = b;
+        }
+      }
+    }
+
+    const zoneRadius = Math.max(18, Number(battleRoyale.zoneRadiusAt?.(now)) || 400);
+    const zoneSafeLimit = Math.max(14, zoneRadius - Math.min(70, zoneRadius * 0.22));
+
+    if (!targetBuilding) {
+      if (state) state.squadLootBuildingId = null;
+      const outdoorUnopened = (map.crates ?? []).filter((c) => (
+        c
+        && !c.opened
+        && Math.hypot(Number(c.x) || 0, Number(c.z) || 0) <= zoneSafeLimit
+        && distance2(transform, c) <= 115
+      ));
+      if (outdoorUnopened.length > 0) {
+        outdoorUnopened.sort((a, b) => distance3(transform, a) - distance3(transform, b));
+        const chosenOutdoor = role === "flanker" && outdoorUnopened.length > 1
+          ? outdoorUnopened[1]
+          : outdoorUnopened[0];
+        return {
+          kind: "squad-loot-interest",
+          buildingId: null,
+          crateId: chosenOutdoor.id,
+          priorityVisit: distance2(transform, chosenOutdoor) <= 55,
+          x: Number(chosenOutdoor.x) || 0,
+          y: Number(chosenOutdoor.y) || 0,
+          z: Number(chosenOutdoor.z) || 0,
+          expiresAt: now + 2200,
+        };
+      }
+      return null;
+    }
+
+    const unopened = cratesInBuilding(targetBuilding, { onlyUnopened: true });
+    if (!unopened.length) {
+      if (state) state.squadLootBuildingId = null;
+      return null;
+    }
+    if (state) state.squadLootBuildingId = targetBuilding.id;
+    if (partner?.state && distance3(transform, partner.transform) <= 95) {
+      partner.state.squadLootBuildingId = targetBuilding.id;
+    }
+
+    unopened.sort((a, b) => distance3(transform, a) - distance3(transform, b));
+    const chosenCrate = role === "flanker" && unopened.length > 1 ? unopened[1] : unopened[0];
+    return {
+      kind: "squad-loot-interest",
+      buildingId: targetBuilding.id,
+      crateId: chosenCrate.id,
+      priorityVisit: distance2(transform, chosenCrate) <= 65,
+      x: Number(chosenCrate.x) || 0,
+      y: Number(chosenCrate.y) || 0,
+      z: Number(chosenCrate.z) || 0,
+      expiresAt: now + 2200,
+    };
+  }
+
+  function tacticalFreeRoamInterest(botId, transform, state, now) {
+    if (!transform || !state) return null;
+    const botEntity = entities.get(botId);
+    const partner = activeSquadPartner(botId);
+    const role = squadRoleFor(botId);
+    const halfSize = Math.max(40, Number(map?.halfSize) || 400);
+    const margin = 14;
+    const zoneRadius = Math.max(18, Number(battleRoyale.zoneRadiusAt?.(now)) || halfSize);
+    const safeLimit = Math.max(
+      10,
+      Math.min(halfSize - margin, zoneRadius - Math.min(70, zoneRadius * 0.24)),
+    );
+
+    const clampToSafeZone = (pt) => {
+      let x = Math.max(-halfSize + margin, Math.min(halfSize - margin, Number(pt.x) || 0));
+      let z = Math.max(-halfSize + margin, Math.min(halfSize - margin, Number(pt.z) || 0));
+      const r = Math.hypot(x, z);
+      if (r > safeLimit && r > 0.01) {
+        const s = (safeLimit * 0.88) / r;
+        x *= s;
+        z *= s;
+      }
+      return { x, y: Number(pt.y) || 0, z };
+    };
+
+    const currentWp = state.freeRoamWaypoint;
+    const distToWp = currentWp ? distance2(transform, currentWp) : Infinity;
+    const wpOutsideZone = currentWp && Math.hypot(Number(currentWp.x) || 0, Number(currentWp.z) || 0) > safeLimit + 2;
+
+    if (!state.freeRoamLastPos || now - (state.freeRoamProgressAt ?? 0) >= 2400) {
+      const moved = state.freeRoamLastPos ? distance2(transform, state.freeRoamLastPos) : Infinity;
+      state.freeRoamLastPos = { x: Number(transform.x) || 0, z: Number(transform.z) || 0 };
+      state.freeRoamProgressAt = now;
+      if (moved < 0.85 && currentWp) {
+        state.freeRoamStalled = true;
+      }
+    }
+
+    const needNextWaypoint = !currentWp
+      || distToWp <= 3.5
+      || wpOutsideZone
+      || Boolean(state.freeRoamStalled)
+      || now >= (state.freeRoamUntil ?? 0);
+
+    if (needNextWaypoint) {
+      state.freeRoamStalled = false;
+      const baseStep = Math.max(
+        Number(state.patrolStep) || 0,
+        partner?.state && distance3(transform, partner.transform) <= 40
+          ? (Number(partner.state.patrolStep) || 0)
+          : 0,
+      ) + 1;
+      state.patrolStep = baseStep;
+      if (partner?.state && distance3(transform, partner.transform) <= 40) {
+        partner.state.patrolStep = baseStep;
+      }
+
+      const squadSeed = stableSeed(`${botEntity?.team || botId}:squad-roam`);
+      const routeProfile = squadSeed % 4;
+      const directionSign = squadSeed % 2 === 0 ? 1 : -1;
+      const currentHeading = Number(transform.angle) || 0;
+      const isForwardBiased = (pt) => {
+        const dx = (Number(pt.x) || 0) - (Number(transform.x) || 0);
+        const dz = (Number(pt.z) || 0) - (Number(transform.z) || 0);
+        if (Math.hypot(dx, dz) < 1) return true;
+        return Math.abs(wrapAngle(Math.atan2(dx, -dz) - currentHeading)) <= 1.45;
+      };
+      let chosen = null;
+      let activity = "zone-patrol";
+
+      // Distribute enemy squads across 4 distinct route profiles across the whole map:
+      // Profile 0: building-recon (visits warehouse, two-storey-house, loot-house, forest-hut)
+      // Profile 1: landmark-perimeter (patrols 35-70m outside buildings and shops)
+      // Profile 2: wide-map-expedition (patrols wide outer/mid sectors across the whole map, 55-88% of safeLimit)
+      // Profile 3: tactical-sweep (sweeps mid-sectors; if within 80m of a grounded player, checks a 30-58m perimeter around that sector)
+      if (!tutorial?.botsPassive?.() && routeProfile === 3) {
+        const humanTarget = entities.all().find((e) => (
+          e.alive && !e.bot && e.kind === "human" && !ctx.components.get(e.id, "Parachute")?.airborne
+        ));
+        const humanTransform = humanTarget ? ctx.components.get(humanTarget.id, "Transform") : null;
+        if (humanTransform) {
+          const distToHuman = distance3(transform, humanTransform);
+          const humanDistFromCenter = Math.hypot(Number(humanTransform.x) || 0, Number(humanTransform.z) || 0);
+          if (distToHuman <= 80 && humanDistFromCenter <= safeLimit + 18) {
+            let fallbackSector = null;
+            for (let sAttempt = 0; sAttempt < 4; sAttempt += 1) {
+              const sectorAngle = (((squadSeed % 360) + directionSign * (baseStep + sAttempt) * 52) * Math.PI) / 180;
+              const ringRadius = Math.min(safeLimit * 0.85, 28 + ((baseStep + sAttempt) % 3) * 14);
+              const raw = clampToSafeZone({
+                x: (Number(humanTransform.x) || 0) + Math.cos(sectorAngle) * ringRadius,
+                y: 0,
+                z: (Number(humanTransform.z) || 0) + Math.sin(sectorAngle) * ringRadius,
+              });
+              if (buildingIdAt(raw)) continue;
+              if (!fallbackSector) fallbackSector = raw;
+              if (isForwardBiased(raw)) {
+                chosen = raw;
+                activity = "sector-sweep";
+                break;
+              }
+            }
+            if (!chosen && fallbackSector) {
+              chosen = fallbackSector;
+              activity = "sector-sweep";
+            }
+          }
+        }
+      }
+
+      // Profile 0 (or periodic building check): visit buildings across the map
+      if (!chosen && (routeProfile === 0 || baseStep % 6 === 0)) {
+        const buildingsInZone = allKnownBuildings().filter((b) => {
+          const cx = ((Number(b.minX) || 0) + (Number(b.maxX) || 0)) * 0.5;
+          const cz = ((Number(b.minZ) || 0) + (Number(b.maxZ) || 0)) * 0.5;
+          return Math.hypot(cx, cz) <= safeLimit * 0.92;
+        });
+        if (buildingsInZone.length > 0) {
+          const targetB = buildingsInZone[(squadSeed + baseStep) % buildingsInZone.length];
+          const cx = ((Number(targetB.minX) || 0) + (Number(targetB.maxX) || 0)) * 0.5;
+          const cz = ((Number(targetB.minZ) || 0) + (Number(targetB.maxZ) || 0)) * 0.5;
+          chosen = {
+            x: cx + (role === "flanker" ? 2.4 : -2.4),
+            y: 0,
+            z: cz,
+          };
+          activity = "building-recon";
+        }
+      }
+
+      // Profile 1: patrol near landmarks/buildings (35-72m outside buildings across the map)
+      if (!chosen && routeProfile === 1) {
+        const buildingsInZone = allKnownBuildings().filter((b) => {
+          const cx = ((Number(b.minX) || 0) + (Number(b.maxX) || 0)) * 0.5;
+          const cz = ((Number(b.minZ) || 0) + (Number(b.maxZ) || 0)) * 0.5;
+          return Math.hypot(cx, cz) <= safeLimit * 0.92;
+        });
+        if (buildingsInZone.length > 0) {
+          const targetB = buildingsInZone[(squadSeed + baseStep * 2) % buildingsInZone.length];
+          const cx = ((Number(targetB.minX) || 0) + (Number(targetB.maxX) || 0)) * 0.5;
+          const cz = ((Number(targetB.minZ) || 0) + (Number(targetB.maxZ) || 0)) * 0.5;
+          const perimAngle = (((squadSeed % 360) + directionSign * baseStep * 68) * Math.PI) / 180;
+          const perimDist = 38 + ((squadSeed + baseStep * 11) % 32);
+          const candidate = clampToSafeZone({
+            x: cx + Math.cos(perimAngle) * perimDist,
+            y: 0,
+            z: cz + Math.sin(perimAngle) * perimDist,
+          });
+          if (!buildingIdAt(candidate)) {
+            chosen = candidate;
+            activity = "landmark-perimeter";
+          }
+        }
+      }
+
+      // Profile 2 & general multi-sector patrol across the whole map (inner, mid, and wide outer rings)
+      if (!chosen) {
+        let bestPatrolFallback = null;
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          const sectorAngle = (
+            (((squadSeed % 360) + directionSign * (baseStep * 52 + attempt * 38)) * Math.PI) / 180
+          );
+          const bandFrac = routeProfile === 2
+            ? (0.56 + (((squadSeed + baseStep + attempt) % 4) * 0.1))
+            : (0.28 + (((squadSeed + baseStep + attempt) % 5) * 0.14));
+          const patrolR = Math.max(8, Math.min(safeLimit * 0.88, safeLimit * bandFrac));
+          const lateral = role === "flanker" ? 3.2 : -1.6;
+          const candidate = clampToSafeZone({
+            x: Math.cos(sectorAngle) * patrolR - Math.sin(sectorAngle) * lateral,
+            y: 0,
+            z: Math.sin(sectorAngle) * patrolR + Math.cos(sectorAngle) * lateral,
+          });
+          if (!buildingIdAt(transform) && buildingIdAt(candidate)) continue;
+          if (distance2(transform, candidate) < Math.min(12, safeLimit * 0.35)) continue;
+          if (!bestPatrolFallback) bestPatrolFallback = candidate;
+          if (isForwardBiased(candidate)) {
+            chosen = candidate;
+            activity = routeProfile === 2 ? "wide-map-patrol" : "zone-patrol";
+            break;
+          }
+        }
+        if (!chosen && bestPatrolFallback) {
+          chosen = bestPatrolFallback;
+          activity = routeProfile === 2 ? "wide-map-patrol" : "zone-patrol";
+        }
+      }
+
+      if (!chosen) {
+        const fallbackAngle = (((squadSeed + baseStep * 95) % 360) * Math.PI) / 180;
+        const fallbackR = Math.max(6, safeLimit * 0.55);
+        chosen = clampToSafeZone({
+          x: Math.cos(fallbackAngle) * fallbackR,
+          y: 0,
+          z: Math.sin(fallbackAngle) * fallbackR,
+        });
+      }
+
+      state.freeRoamWaypoint = chosen;
+      state.freeRoamActivity = activity;
+      state.freeRoamUntil = now + 8500;
+      state.squadRoleActive = activity;
+    }
+
+    const wp = state.freeRoamWaypoint;
+    if (!wp) return null;
+    return {
+      kind: "free-roam-interest",
+      patrolActivity: state.freeRoamActivity ?? "zone-patrol",
+      continuousPatrol: true,
+      patrolSprint: distance2(transform, wp) > 20,
+      x: Number(wp.x) || 0,
+      y: Number(wp.y) || 0,
+      z: Number(wp.z) || 0,
+      expiresAt: state.freeRoamUntil ?? (now + 4000),
+    };
+  }
+
+  function buildingAmbushBehavior(bot, transform, state, standingEnemies, baseInterest, distantContact, memory, now) {
+    if (standingEnemies.length > 0) return false;
+    const currentBuildingId = buildingIdAt(transform);
+    if (!currentBuildingId) {
+      if (state.squadRoleActive === "ambush") state.squadRoleActive = null;
+      state.ambushReady = false;
+      return false;
+    }
+    const buildingBounds = buildingBoundsForId(currentBuildingId);
+    if (!buildingBounds) return false;
+
+    const teams = getTeams();
+    const injury = getInjury();
+    const ownTeam = Number(teams?.teamOf(bot.id)) || 0;
+    let approachingPos = null;
+    for (const candidate of entities.all()) {
+      if (!candidate?.alive || candidate.id === bot.id) continue;
+      if (ownTeam > 0 && (Number(teams?.teamOf(candidate.id)) || 0) === ownTeam) continue;
+      if (injury?.isDowned(candidate.id)) continue;
+      const cTransform = ctx.components.get(candidate.id, "Transform");
+      if (!cTransform) continue;
+      if (buildingIdAt(cTransform) === currentBuildingId) continue;
+      const d = distance3(transform, cTransform);
+      if (d <= 34) {
+        approachingPos = cTransform;
+        break;
+      }
+    }
+    if (!approachingPos) {
+      const signal = memory?.transform
+        ?? distantContact
+        ?? (baseInterest?.kind === "sound-interest" ? baseInterest : null);
+      if (signal && buildingIdAt(signal) !== currentBuildingId && distance3(transform, signal) <= 36) {
+        approachingPos = signal;
+      }
+    }
+    if (!approachingPos) {
+      if (state.squadRoleActive === "ambush" && now >= (state.ambushUntil ?? 0)) {
+        state.squadRoleActive = null;
+        state.ambushReady = false;
+      }
+      return false;
+    }
+
+    const buildingDoors = (map.doors ?? []).filter((door) => {
+      if (!door) return false;
+      return (
+        door.x >= buildingBounds.minX - 2.5
+        && door.x <= buildingBounds.maxX + 2.5
+        && door.z >= buildingBounds.minZ - 2.5
+        && door.z <= buildingBounds.maxZ + 2.5
+        && Math.abs((Number(door.y) || 0) - (Number(transform.y) || 0)) <= 1.6
+      );
+    });
+    const entrance = buildingDoors.sort((a, b) => distance2(approachingPos, a) - distance2(approachingPos, b))[0]
+      ?? {
+        id: `${currentBuildingId}:entrance`,
+        x: ((Number(buildingBounds.minX) || 0) + (Number(buildingBounds.maxX) || 0)) * 0.5,
+        y: Number(transform.y) || 0,
+        z: Number(buildingBounds.maxZ) || 0,
+      };
+    const center = {
+      x: ((Number(buildingBounds.minX) || 0) + (Number(buildingBounds.maxX) || 0)) * 0.5,
+      z: ((Number(buildingBounds.minZ) || 0) + (Number(buildingBounds.maxZ) || 0)) * 0.5,
+    };
+    const inX = (center.x - entrance.x);
+    const inZ = (center.z - entrance.z);
+    const inLen = Math.max(0.01, Math.hypot(inX, inZ));
+    const ux = inX / inLen;
+    const uz = inZ / inLen;
+    const sideSign = squadRoleFor(bot.id) === "flanker" ? -1 : 1;
+    const rightX = -uz * sideSign;
+    const rightZ = ux * sideSign;
+    const ambushPoint = {
+      x: Number(entrance.x) + ux * 2.1 + rightX * 1.85,
+      y: Number(transform.y) || 0,
+      z: Number(entrance.z) + uz * 2.1 + rightZ * 1.85,
+    };
+
+    state.squadRoleActive = "ambush";
+    state.ambushDoorId = entrance.id ?? null;
+    state.ambushUntil = now + 4500;
+    const distToCorner = distance2(transform, ambushPoint);
+    if (distToCorner > 1.15) {
+      state.ambushReady = false;
+      return moveTowardPosition(bot, transform, state, ambushPoint, now, {
+        sprint: false,
+        thinkDelay: 100,
+        stopDistance: 0.9,
+      });
+    }
+    state.ambushReady = true;
+    const steering = steeringTo(transform, entrance, 95);
+    movement.setInput(bot.id, {
+      forward: 0,
+      strafe: 0,
+      turn: steering.turn,
+      targetAngle: steering.targetAngle,
+      sprint: false,
+      fireHeld: false,
+    });
+    state.nextThinkAt = now + 95;
+    return true;
   }
 
   function buildingLocationAt(position) {
@@ -391,7 +1349,26 @@ export async function setup(ctx) {
 
   function squadRallyInterest(botId, transform, now) {
     const botEntity = entities.get(botId);
+    const selfState = ctx.components.get(botId, "Bot");
     const allMates = squadTeammatesFor(botId, { includeHuman: true, includeDowned: false });
+    const activeCallout = (selfState?.outnumberedCallout?.expiresAt > now ? selfState.outnumberedCallout : null)
+      ?? allMates.map((m) => m.state?.outnumberedCallout).find((c) => c && c.expiresAt > now)
+      ?? null;
+    if (activeCallout && activeCallout.fromId !== botId) {
+      const d = distance3(transform, activeCallout);
+      if (d > 5.5 && d <= 145) {
+        return {
+          kind: "squad-rally-interest",
+          partnerId: activeCallout.fromId,
+          partnerGoal: "outnumbered-converge",
+          priorityVisit: true,
+          x: Number(activeCallout.x) || 0,
+          y: Number(activeCallout.y) || 0,
+          z: Number(activeCallout.z) || 0,
+          expiresAt: now + 1800,
+        };
+      }
+    }
     const humanMate = allMates.find((m) => !m.entity.bot);
     if (humanMate) {
       const distToHuman = distance3(transform, humanMate.transform);
@@ -399,34 +1376,62 @@ export async function setup(ctx) {
       const humanLoc = buildingLocationAt(humanMate.transform);
       const selfBuilding = selfLoc.buildingId;
       const humanBuilding = humanLoc.buildingId;
-      const differentFloor = Math.abs((Number(transform.y) || 0) - (Number(humanMate.transform.y) || 0)) > 1.1;
+      const midStairClimb = (Number(transform.y) || 0) > 0.15 && (Number(transform.y) || 0) < 3.05;
+      const differentFloor = Math.abs((Number(transform.y) || 0) - (Number(humanMate.transform.y) || 0)) > 1.1
+        || midStairClimb;
       const onStair = Boolean(selfLoc.regionId && (selfLoc.regionId === "stair" || selfLoc.regionId.startsWith("stair:")));
       const separatedByStructure = selfBuilding !== humanBuilding
         || differentFloor
         || (onStair && selfLoc.regionId !== humanLoc.regionId);
-      if (separatedByStructure || distToHuman >= 6.5) {
+      const hx = Number(humanMate.transform.x) || 0;
+      const hz = Number(humanMate.transform.z) || 0;
+      if (selfState) {
+        if (!selfState.escortLeaderAnchor) {
+          selfState.escortLeaderAnchor = {
+            x: hx,
+            z: hz,
+            angle: Number(humanMate.transform.angle) || 0,
+          };
+        } else {
+          const movedDx = hx - selfState.escortLeaderAnchor.x;
+          const movedDz = hz - selfState.escortLeaderAnchor.z;
+          if (Math.hypot(movedDx, movedDz) >= 0.9) {
+            selfState.escortLeaderAnchor = {
+              x: hx,
+              z: hz,
+              angle: Math.atan2(movedDx, -movedDz),
+            };
+          }
+        }
+      }
+      const engageEscort = separatedByStructure
+        || distToHuman >= 4.2
+        || (Boolean(selfState?.escortMoving) && distToHuman > 2.75);
+      if (selfState) selfState.escortMoving = engageEscort;
+      if (engageEscort) {
         const slot = Number(botEntity?.squadSlot) || 0;
-        const baseAngle = Number(humanMate.transform.angle) || 0;
+        const baseAngle = selfState?.escortLeaderAnchor?.angle ?? (Number(humanMate.transform.angle) || 0);
         const formAngle = baseAngle + (slot === 0 ? -0.95 : slot === 1 ? 0.95 : Math.PI);
-        const radius = separatedByStructure ? 2.2 : 4.6;
+        const radius = separatedByStructure ? 2.0 : 2.65;
         const candidate = {
-          x: (Number(humanMate.transform.x) || 0) + Math.sin(formAngle) * radius,
+          x: hx + Math.sin(formAngle) * radius,
           y: Number(humanMate.transform.y) || 0,
-          z: (Number(humanMate.transform.z) || 0) - Math.cos(formAngle) * radius,
+          z: hz - Math.cos(formAngle) * radius,
         };
         const candidateBuilding = buildingIdAt(candidate);
         const safePoint = candidateBuilding === humanBuilding
           ? candidate
           : {
-            x: Number(humanMate.transform.x) || 0,
+            x: hx,
             y: Number(humanMate.transform.y) || 0,
-            z: Number(humanMate.transform.z) || 0,
+            z: hz,
           };
         return {
           kind: "squad-rally-interest",
           partnerId: humanMate.id,
           partnerGoal: "escort-human",
           separatedByStructure,
+          patrolSprint: !separatedByStructure && distToHuman >= 4.4,
           distToHuman,
           x: safePoint.x,
           y: safePoint.y,
@@ -437,7 +1442,6 @@ export async function setup(ctx) {
       return null;
     }
     const partner = activeSquadPartner(botId);
-    const selfState = ctx.components.get(botId, "Bot");
     if (partner) {
       const dist = distance3(transform, partner.transform);
       const partnerDecision = brain.commitmentFor?.(partner.id, now) ?? null;
@@ -512,28 +1516,6 @@ export async function setup(ctx) {
     } else if (selfState) {
       selfState.squadRallyPartnerActive = false;
     }
-    if (!tutorial?.botsPassive?.()) {
-      const humanTarget = entities.all().find((e) => (
-        e.alive && !e.bot && e.kind === "human" && !ctx.components.get(e.id, "Parachute")?.airborne
-      ));
-      const humanTransform = humanTarget ? ctx.components.get(humanTarget.id, "Transform") : null;
-      if (humanTransform) {
-        const distToHuman = distance3(transform, humanTransform);
-        if (distToHuman >= 22 && distToHuman <= 135) {
-          const seed = stableSeed(`${botEntity?.team || botId}:patrol`);
-          const approachAngle = ((seed % 360) * Math.PI) / 180;
-          return {
-            kind: "squad-rally-interest",
-            partnerId: humanTarget.id,
-            partnerGoal: "sector-patrol",
-            x: (Number(humanTransform.x) || 0) + Math.cos(approachAngle) * 18,
-            y: Number(humanTransform.y) || 0,
-            z: (Number(humanTransform.z) || 0) + Math.sin(approachAngle) * 18,
-            expiresAt: now + 2200,
-          };
-        }
-      }
-    }
     return null;
   }
 
@@ -548,17 +1530,39 @@ export async function setup(ctx) {
     };
   }
 
-  function fireInBurst(botId, state, allowed, now) {
-    if (!allowed) return false;
+  function fireInBurst(botId, state, allowed, now, { fireChoice = null } = {}) {
+    if (!allowed || fireChoice === "hold_fire") return false;
     const inventory = ctx.components.get(botId, "Weapons");
     const selected = inventory?.items?.[inventory.selected];
-    if (selected?.id !== "pistol") return true;
-    if (now >= (state.nextShotAt ?? 0)) {
-      const variation = stableSeed(botId + ":" + state.burstCycle + ":pistol-tap");
-      weapons.fire(botId, now, { pressed: true });
-      state.nextShotAt = now + 125 + (variation % 95);
+    const weaponDef = weapons.definitions?.[selected?.id] ?? null;
+    if (fireChoice === "single_tap") {
+      if (now >= (state.nextShotAt ?? 0)) {
+        const variation = stableSeed(botId + ":" + state.burstCycle + ":" + (selected?.id ?? "single"));
+        if (weapons.fire(botId, now, { pressed: true })) {
+          state.nextShotAt = now + (selected?.id === "sniper"
+            ? 1140 + (variation % 160)
+            : selected?.id === "marksman"
+              ? 300 + (variation % 65)
+              : 280 + (variation % 70));
+        }
+      }
+      return false;
     }
-    // A pistol bot sends individual shots instead of a held-auto input.
+    if (weaponDef?.automatic) return true;
+    if (now >= (state.nextShotAt ?? 0)) {
+      const variation = stableSeed(botId + ":" + state.burstCycle + ":" + (selected?.id ?? "semi"));
+      const fired = weapons.fire(botId, now, { pressed: true });
+      if (fired) {
+        if (selected?.id === "sniper") {
+          state.nextShotAt = now + 1140 + (variation % 160);
+        } else if (selected?.id === "marksman") {
+          state.nextShotAt = now + 260 + (variation % 65);
+        } else {
+          state.nextShotAt = now + 85 + (variation % 55);
+        }
+      }
+    }
+    // Non-automatic weapons fire discrete semi-auto / bolt-action shots.
     return false;
   }
 
@@ -649,10 +1653,16 @@ export async function setup(ctx) {
         }
       }
     }
-    const steering = steeringTo(transform, preciseRoute, thinkDelay);
-    const headingError = Math.abs(wrapAngle(
-      Math.atan2(preciseRoute.x - transform.x, -(preciseRoute.z - transform.z)) - transform.angle,
-    ));
+    const isTraversal = preciseRoute.kind === "stair" || preciseRoute.kind === "door";
+    const steering = steeringTo(
+      transform,
+      preciseRoute,
+      thinkDelay,
+      isTraversal
+        ? { maxRate: 0.92, deadzone: 0.015, gain: 1.85, allowPointTurn: true }
+        : { maxRate: 0.74, deadzone: 0.025, gain: 1.5 },
+    );
+    const headingError = Math.abs(steering.delta);
     let forward;
     if (preciseRoute.kind === "stair") {
       forward = headingError > 0.28
@@ -672,6 +1682,7 @@ export async function setup(ctx) {
       forward,
       strafe: 0,
       turn: steering.turn,
+      targetAngle: steering.targetAngle,
       sprint: preciseRoute.kind !== "stair" && forward >= 0.8 && steering.distance > 18,
       fireHeld: false,
     }, now);
@@ -683,6 +1694,9 @@ export async function setup(ctx) {
     sprint = false,
     thinkDelay = 150,
     stopDistance = 1.5,
+    sprintDistance = 5,
+    faceTargetOnArrival = false,
+    calm = true,
   } = {}) {
     if (!target) return false;
     const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
@@ -691,11 +1705,17 @@ export async function setup(ctx) {
       : null;
     route = normalizeRouteForTarget(transform, target, route, upperY);
     if (routeToward(bot, transform, state, route, now, thinkDelay)) return true;
-    const steering = steeringTo(transform, target, thinkDelay);
-    const headingError = Math.abs(wrapAngle(
-      Math.atan2(target.x - transform.x, -(target.z - transform.z)) - transform.angle,
-    ));
-    const forward = steering.distance <= stopDistance
+    const steering = steeringTo(
+      transform,
+      target,
+      thinkDelay,
+      calm
+        ? { maxRate: 0.72, deadzone: 0.03, gain: 1.45, allowPointTurn: faceTargetOnArrival }
+        : { maxRate: 0.95, deadzone: 0.02, gain: 1.75, allowPointTurn: faceTargetOnArrival },
+    );
+    const arrived = steering.distance <= stopDistance;
+    const headingError = Math.abs(steering.delta);
+    const forward = arrived
       ? 0
       : (headingError > 1.05 || (headingError > 0.55 && steering.distance < 3.5))
         ? 0
@@ -703,8 +1723,9 @@ export async function setup(ctx) {
     setNavigatedInput(bot, transform, state, {
       forward,
       strafe: 0,
-      turn: steering.turn,
-      sprint: sprint && forward >= 0.8 && steering.distance > 5,
+      turn: arrived && !faceTargetOnArrival ? 0 : steering.turn,
+      targetAngle: arrived && !faceTargetOnArrival ? null : steering.targetAngle,
+      sprint: !arrived && sprint && forward >= 0.8 && steering.distance > sprintDistance,
       fireHeld: false,
     }, now);
     state.nextThinkAt = now + thinkDelay;
@@ -718,7 +1739,21 @@ export async function setup(ctx) {
     rememberTarget(state, visible.entityId, visible.transform, now, BOT_VISIBLE_MEMORY_MS);
     shareTargetWithSquadmate(bot.id, visible.entityId, visible.transform, now, BOT_VISIBLE_MEMORY_MS);
 
+    const targetArmor = armorService?.describe?.(visible.entityId)?.current
+      ?? (ctx.components.get(visible.entityId, "Armor")?.current ?? 0);
+    const activeWeapon = selectBestWeaponForRange(bot.id, visible.distance, { targetArmor, now });
+    const activeWeaponId = activeWeapon?.id ?? null;
+    const isSniper = activeWeaponId === "sniper";
+    const isMarksman = activeWeaponId === "marksman";
+    const isPrecisionWeapon = isSniper || isMarksman;
+
     const partner = activeSquadPartner(bot.id);
+    const hasOutnumberedCallout = Boolean(
+      state.outnumberedCallout
+      && state.outnumberedCallout.expiresAt > now
+      && partner
+      && distance3(transform, partner.transform) > 10,
+    );
     const partnerTargetingSame = Boolean(
       partner
       && distance3(transform, partner.transform) <= 48
@@ -726,35 +1761,99 @@ export async function setup(ctx) {
         || brain.commitmentFor?.(partner.id, now)?.targetEntityId === visible.entityId),
     );
     const role = squadRoleFor(bot.id);
+    const aiCmdPre = decision.aiCmd ?? null;
     let effectiveTactic = decision.tactic;
     let desiredRange = Math.max(4, Number(decision.desiredRange) || 8);
-    if (partnerTargetingSame) {
+    if (!aiCmdPre && !hasOutnumberedCallout) {
+      if (isSniper) desiredRange = Math.max(desiredRange, 38);
+      else if (isMarksman) desiredRange = Math.max(desiredRange, 24);
+    }
+
+    const selfHpComp = ctx.components.get(bot.id, "Health");
+    const selfArmorComp = ctx.components.get(bot.id, "Armor");
+    const activeWepDef = weapons.definitions?.[activeWeaponId] ?? null;
+    const stimsService = getStimulants();
+    const totalStims = stimsService ? (stimsService.totalCount?.(bot.id) ?? stimsService.count(bot.id)) : 0;
+    const reservePlates = Number(selfArmorComp?.reserve ?? 0);
+    const targetEnt = entities.get(visible.entityId);
+    const targetVel = estimateTargetVelocity(visible.entityId, visible.transform, now);
+    const targetSpeed = Math.hypot(targetVel.vx, targetVel.vz);
+    const preSteering = steeringTo(transform, visible.transform, 90);
+    const netDecision = combatNet.decideForBot(bot.id, {
+      selfHealthRatio: (Number(selfHpComp?.current) || 100) / Math.max(1, Number(selfHpComp?.maximum) || 100),
+      selfArmorRatio: (Number(selfArmorComp?.current) || 0) / Math.max(1, Number(selfArmorComp?.maximum) || 150),
+      enemyDistance: visible.distance,
+      visibleEnemyCount: visibleEnemies.length,
+      standingAllies: partner ? 1 : 0,
+      nearestAllyDistance: partner ? distance3(transform, partner.transform) : 60,
+      weaponRange: Number(activeWepDef?.range) || 55,
+      ammoRatio: (Number(activeWeapon?.ammo) || 0) / Math.max(1, Number(activeWepDef?.magazine) || 30),
+      targetArmorRatio: targetArmor / 150,
+      hasCoverOrBuilding: Boolean(buildingIdAt(transform)),
+      hasStimsOrPlates: Math.min(1, (totalStims + reservePlates) / 4),
+      elevationDiff: (Number(transform.y) || 0) - (Number(visible.transform?.y) || 0),
+      altitude: Math.max(0, Number(transform.y) || 0),
+      verticalSpeed: Math.abs(Number(transform.verticalVelocity) || 0),
+      landingDistance: 0,
+      aimError: Math.abs(preSteering.delta),
+      targetSpeed,
+      lineOfSightClear: true,
+      targetIsHuman: Boolean(targetEnt && !targetEnt.bot),
+    }, now);
+    state.lastNeuralAction = netDecision.action;
+    state.lastNeuralConfidence = netDecision.confidence;
+    state.lastNeuralFireMode = netDecision.fireMode;
+    state.lastNeuralFireConfidence = netDecision.fireConfidence;
+
+    if (hasOutnumberedCallout && !aiCmdPre) {
+      effectiveTactic = "press";
+      desiredRange = 8;
+    } else if (partnerTargetingSame && !aiCmdPre) {
       const selfDist = distance3(transform, visible.transform);
       const partnerDist = distance3(partner.transform, visible.transform);
-      const isLeadBreacher = selfDist + 1.5 < partnerDist || (Math.abs(selfDist - partnerDist) <= 1.5 && role === "breacher");
+      const isLeadBreacher = !isPrecisionWeapon
+        && (selfDist + 1.5 < partnerDist || (Math.abs(selfDist - partnerDist) <= 1.5 && role === "breacher"));
       state.strafeDirection = isLeadBreacher ? 1 : -1;
       const preserveRescueRole = state.squadCoordinatedAt === now
         && (state.squadRoleActive === "cover" || state.squadRoleActive === "medic-defending");
       state.squadCoordinatedAt = now;
       if (!preserveRescueRole) {
-        state.squadRoleActive = isLeadBreacher ? "breacher" : "flanker";
+        state.squadRoleActive = isPrecisionWeapon
+          ? "overwatch"
+          : (isLeadBreacher ? "breacher" : "flanker");
       }
-      if (isLeadBreacher) {
+      if (isPrecisionWeapon) {
+        effectiveTactic = selfDist < desiredRange - 3 ? "space" : "flank";
+      } else if (isLeadBreacher) {
         effectiveTactic = "press";
         desiredRange = Math.max(4.5, desiredRange - 1.8);
       } else {
         effectiveTactic = "flank";
         desiredRange = desiredRange + 2.2;
       }
+    } else if (!aiCmdPre) {
+      if (netDecision.action === "press_aggressive" || netDecision.action === "squad_focus_push") {
+        effectiveTactic = "press";
+        desiredRange = isPrecisionWeapon ? Math.max(18, desiredRange - 4) : Math.max(5.5, desiredRange - 2.5);
+      } else if (netDecision.action === "flank_wide") {
+        effectiveTactic = "flank";
+      } else if (netDecision.action === "hold_precision") {
+        effectiveTactic = "hold";
+      } else if (netDecision.action === "kite_space" || netDecision.action === "tactical_reset") {
+        effectiveTactic = "space";
+        desiredRange = Math.max(desiredRange, isPrecisionWeapon ? 30 : 16);
+      }
     }
 
     if (bot.humanSquad) {
       const human = entities.get(bot.humanSquad);
       const humanTransform = human?.alive ? ctx.components.get(human.id, "Transform") : null;
+      const maxLeashFromHuman = isPrecisionWeapon ? 34 : 22;
+      const maxTargetFromHuman = isPrecisionWeapon ? 55 : 36;
       if (
         humanTransform
-        && distance3(transform, humanTransform) > 22
-        && distance3(humanTransform, visible.transform) > 36
+        && distance3(transform, humanTransform) > maxLeashFromHuman
+        && distance3(humanTransform, visible.transform) > maxTargetFromHuman
       ) {
         return moveTowardPosition(bot, transform, state, humanTransform, now, {
           sprint: true,
@@ -764,10 +1863,35 @@ export async function setup(ctx) {
       }
     }
 
-    const steering = steeringTo(transform, visible.transform);
-    const aimed = steering.aligned && visible.distance <= 32;
+    const inv = ctx.components.get(bot.id, "Weapons");
+    const selectedWeapon = inv?.items?.[inv.selected] ?? null;
+    const selectedDef = weapons.definitions?.[selectedWeapon?.id] ?? null;
+    const fireRange = Math.max(48, Number(selectedDef?.range) || 48);
+    const aiCmd = decision.aiCmd ?? null;
+    const neuralSteadyAim = netDecision.fireMode === "precision_tap";
+    const thinkDelay = isPrecisionWeapon || aiCmd?.paceChoice === "steady_aim" || neuralSteadyAim ? 80 : 95;
+    const aimPoint = predictedAimTarget(transform, visible, selectedDef, now);
+    const baseAimOpts = aimOptionsForWeapon(selectedWeapon?.id);
+    const aimOpts = (aiCmd?.paceChoice === "steady_aim" || neuralSteadyAim)
+      ? { ...baseAimOpts, deadzone: Math.min(baseAimOpts.deadzone, 0.008), gain: Math.max(baseAimOpts.gain, 2.25) }
+      : baseAimOpts;
+    const steering = steeringTo(transform, aimPoint, thinkDelay, aimOpts);
+    const neuralFireChoice = aiCmd?.fireChoice
+      ?? (netDecision.fireMode === "full_auto_suppression"
+        ? "suppress_auto"
+        : netDecision.fireMode === "precision_tap"
+          ? "single_tap"
+          : netDecision.fireMode === "hold_fire_acquire" && Math.abs(steering.delta) > 0.22
+            ? "hold_fire"
+            : "controlled_burst");
+    const aimed = steering.aligned && visible.distance <= fireRange;
     const reacted = reactionReady(bot.id, state, visible.entityId, now);
-    const fireHeld = fireInBurst(bot.id, state, reacted && aimed && burstAllowsFire(bot.id, state, now), now);
+    const burstAllowed = isSniper || neuralFireChoice === "suppress_auto"
+      ? true
+      : burstAllowsFire(bot.id, state, now);
+    const fireHeld = fireInBurst(bot.id, state, reacted && aimed && burstAllowed, now, {
+      fireChoice: neuralFireChoice,
+    });
 
     // If the target is on another floor or across a building doorway, route legs
     // along the stair/door waypoint while keeping aim and weapon fire on the enemy.
@@ -791,37 +1915,70 @@ export async function setup(ctx) {
         forward: Math.max(-0.85, Math.min(0.85, localLegs.forward * 0.82)),
         strafe: combatRoute.kind === "stair" ? 0 : Math.max(-0.75, Math.min(0.75, localLegs.strafe * 0.75)),
         turn: steering.turn,
+        targetAngle: steering.targetAngle,
         sprint: false,
         fireHeld,
       });
-      state.nextThinkAt = now + 95;
+      state.nextThinkAt = now + thinkDelay;
       return true;
     }
 
     let forward = 0.12;
     let strafe = 0;
-    if (effectiveTactic === "flank") {
-      forward = steering.distance > desiredRange + 6 ? 0.92 : (steering.distance > desiredRange + 2 ? 0.68 : 0.22);
-      strafe = steering.distance > desiredRange + 6 ? state.strafeDirection * 0.38 : state.strafeDirection * 0.92;
-    } else if (effectiveTactic === "space") {
-      forward = steering.distance < desiredRange ? -0.68 : 0.08;
-      strafe = state.strafeDirection * 0.5;
-    } else {
-      forward = steering.distance > desiredRange + 1.5
-        ? 1
-        : steering.distance < desiredRange - 1.5
-          ? -0.38
-          : 0.16;
-      if (Math.abs(steering.distance - desiredRange) < 4) strafe = state.strafeDirection * 0.52;
+    const targetDist = Number(visible.distance) || steering.distance;
+    if (isPrecisionWeapon && targetDist < desiredRange - 3 && !aiCmd && !hasOutnumberedCallout) {
+      effectiveTactic = "space";
     }
+    if (effectiveTactic === "hold") {
+      forward = 0;
+      strafe = state.strafeDirection * 0.26;
+    } else if (effectiveTactic === "flank") {
+      forward = targetDist > desiredRange + 6 ? 0.92 : (targetDist > desiredRange + 2 ? 0.72 : 0.18);
+      strafe = targetDist > desiredRange + 6 ? state.strafeDirection * 0.34 : state.strafeDirection * 0.68;
+    } else if (effectiveTactic === "space") {
+      forward = targetDist < desiredRange ? -0.78 : 0.06;
+      strafe = state.strafeDirection * (isPrecisionWeapon ? 0.48 : 0.42);
+    } else {
+      forward = targetDist > desiredRange + 2
+        ? 1
+        : targetDist < desiredRange - 2
+          ? -0.42
+          : 0.1;
+      if (Math.abs(targetDist - desiredRange) < 5) strafe = state.strafeDirection * 0.44;
+    }
+
+    // Precision aim settle: steady footing right before squeezing a Sniper/Marksman shot.
+    const boltAlmostReady = now >= (state.nextShotAt ?? 0) - 200;
+    let sprint = targetDist > desiredRange + 8 && (effectiveTactic === "press" || effectiveTactic === "flank");
+    if (aiCmd?.paceChoice === "steady_aim") {
+      forward *= 0.34;
+      strafe *= 0.3;
+      sprint = false;
+    } else if (aiCmd?.paceChoice === "tactical_strafe") {
+      if (Math.abs(strafe) < 0.5) strafe = state.strafeDirection * 0.64;
+      sprint = false;
+    } else if (aiCmd?.paceChoice === "sprint_push" && forward > 0.6 && Math.abs(steering.delta) < 0.78) {
+      sprint = effectiveTactic !== "hold" && effectiveTactic !== "space";
+    }
+    if (isSniper && targetDist <= fireRange && boltAlmostReady && Math.abs(steering.delta) < 0.25) {
+      forward *= 0.25;
+      strafe *= 0.22;
+      sprint = false;
+    } else if (isMarksman && aimed && targetDist >= 16) {
+      strafe *= 0.55;
+      sprint = false;
+    }
+
     setNavigatedInput(bot, transform, state, {
       forward,
       strafe,
       turn: steering.turn,
-      sprint: steering.distance > desiredRange + 8 && (effectiveTactic === "press" || effectiveTactic === "flank"),
+      targetAngle: steering.targetAngle,
+      sprint,
       fireHeld,
+      aimLock: true,
     }, now);
-    state.nextThinkAt = now + 95;
+    state.nextThinkAt = now + thinkDelay;
     return true;
   }
 
@@ -832,17 +1989,27 @@ export async function setup(ctx) {
     if (attacker) {
       rememberTarget(state, attacker.entityId, attacker.transform, now, BOT_VISIBLE_MEMORY_MS);
       shareTargetWithSquadmate(bot.id, attacker.entityId, attacker.transform, now, BOT_VISIBLE_MEMORY_MS);
-      const steering = steeringTo(transform, attacker.transform);
+      const evadeInv = ctx.components.get(bot.id, "Weapons");
+      const evadeSelected = evadeInv?.items?.[evadeInv.selected] ?? null;
+      const evadeDef = weapons.definitions?.[evadeSelected?.id] ?? null;
+      const evadeAimPoint = predictedAimTarget(transform, attacker, evadeDef, now);
+      const steering = steeringTo(transform, evadeAimPoint, 95, aimOptionsForWeapon(evadeSelected?.id));
       const reacted = reactionReady(bot.id, state, attacker.entityId, now);
+      const evadeRange = Math.max(28, Number(evadeDef?.range) || 28);
+      const evadeBurst = evadeSelected?.id === "sniper" || decision.aiCmd?.fireChoice === "suppress_auto"
+        ? true
+        : burstAllowsFire(bot.id, state, now);
       const fireHeld = fireInBurst(bot.id, state,
-        reacted && steering.aligned && attacker.distance <= 28
-          && burstAllowsFire(bot.id, state, now), now);
+        reacted && steering.aligned && attacker.distance <= evadeRange
+          && evadeBurst, now, { fireChoice: decision.aiCmd?.fireChoice ?? null });
       setNavigatedInput(bot, transform, state, {
         forward: -0.72,
         strafe: state.strafeDirection * 0.48,
         turn: steering.turn,
+        targetAngle: steering.targetAngle,
         sprint: false,
         fireHeld,
+        aimLock: true,
       }, now);
       state.nextThinkAt = now + 95;
       return true;
@@ -854,6 +2021,7 @@ export async function setup(ctx) {
       sprint: true,
       thinkDelay: 105,
       stopDistance: 1.5,
+      calm: false,
     });
   }
 
@@ -894,18 +2062,51 @@ export async function setup(ctx) {
     });
   }
 
+  function executeEscortOverwatch(bot, transform, state, humanTransform, now) {
+    const slot = Number(bot?.squadSlot) || 0;
+    const baseAngle = state.escortLeaderAnchor?.angle ?? (Number(humanTransform?.angle) || 0);
+    const sectorOffset = slot === 0 ? -0.58 : slot === 1 ? 0.58 : 2.65;
+    const scanSweep = Math.sin(now / 3600 + slot * 2.1) * 0.16;
+    const targetHeading = wrapAngle(baseAngle + sectorOffset + scanSweep);
+    const delta = wrapAngle(targetHeading - (Number(transform.angle) || 0));
+    const turn = Math.abs(delta) <= 0.04
+      ? 0
+      : Math.sign(delta) * Math.min(0.42, (Math.abs(delta) * 1.1) / BOT_TURN_SPEED_RAD_PER_SEC, (Math.abs(delta) * 0.85) / (BOT_TURN_SPEED_RAD_PER_SEC * 0.15));
+    state.squadRoleActive = "escort-overwatch";
+    movement.setInput(bot.id, {
+      forward: 0,
+      strafe: 0,
+      turn,
+      targetAngle: targetHeading,
+      sprint: false,
+      fireHeld: false,
+    });
+    state.nextThinkAt = now + 150;
+    return true;
+  }
+
   function executeRoam(bot, transform, state, now) {
     const seed = Number.parseInt(String(bot.id).replace(/\D/g, ""), 10) || 1;
-    const phase = (Math.floor(now / 2200) + seed) % 7;
-    const turn = phase < 2 ? state.wanderTurn : phase === 6 ? -state.wanderTurn : 0;
+    if (!Number.isFinite(state.roamHeading) || now >= (state.roamHeadingUntil ?? 0)) {
+      const step = (state.roamHeadingStep ?? 0) + 1;
+      state.roamHeadingStep = step;
+      const variation = (((stableSeed(`${bot.id}:roam:${step}`) % 100) / 100) * 2 - 1) * 0.42;
+      state.roamHeading = wrapAngle((Number(transform.angle) || 0) + variation);
+      state.roamHeadingUntil = now + 5200 + (seed % 4) * 600;
+    }
+    const delta = wrapAngle(state.roamHeading - (Number(transform.angle) || 0));
+    const turn = Math.abs(delta) <= 0.035
+      ? 0
+      : Math.sign(delta) * Math.min(0.45, (Math.abs(delta) * 1.2) / BOT_TURN_SPEED_RAD_PER_SEC, (Math.abs(delta) * 0.85) / (BOT_TURN_SPEED_RAD_PER_SEC * 0.25));
     setNavigatedInput(bot, transform, state, {
-      forward: 0.82,
-      strafe: phase === 5 ? state.strafeDirection * 0.25 : 0,
+      forward: Math.abs(delta) > 0.95 ? 0.2 : 0.85,
+      strafe: 0,
       turn,
-      sprint: phase === 3,
+      targetAngle: state.roamHeading,
+      sprint: false,
       fireHeld: false,
     }, now);
-    state.nextThinkAt = now + 300;
+    state.nextThinkAt = now + 220;
     return true;
   }
 
@@ -966,7 +2167,7 @@ export async function setup(ctx) {
     return { active: true, route, target, committed: false };
   }
 
-  function enemyHasStandingTeammateNearby(enemyId, maxDist = 45) {
+  function enemyHasStandingTeammateNearby(enemyId, maxDist = 200) {
     const teams = getTeams();
     const injury = getInjury();
     const enemyTeam = Number(teams?.teamOf(enemyId)) || 0;
@@ -985,7 +2186,68 @@ export async function setup(ctx) {
 
   function hasRifleEquippedOrOwned(entityId) {
     const inv = ctx.components.get(entityId, "Weapons");
-    return Boolean(inv?.items?.some((item) => item.id === "rifle"));
+    return Boolean(inv?.items?.some((item) => item.id === "rifle" || item.id === "marksman" || item.id === "sniper"));
+  }
+
+  function selectBestWeaponForRange(botId, distanceMeters = null, { targetArmor = 0, now = Date.now() } = {}) {
+    const inv = ctx.components.get(botId, "Weapons");
+    if (!inv?.items?.length || inv.items.length < 2) return inv?.items?.[inv?.selected ?? 0] ?? null;
+    const usable = inv.items
+      .map((item, idx) => ({
+        item,
+        idx,
+        def: weapons.definitions?.[item.id] ?? null,
+        readyNow: item.ammo > 0 && !(Number(item.reloadUntil) > now),
+      }))
+      .filter(({ item }) => (item.ammo > 0 || item.reserve > 0));
+    if (!usable.length) return inv.items[inv.selected] ?? null;
+
+    // Out of direct engagement: keep primary long-range/automatic weapon drawn so brain/stance stays ready.
+    if (!Number.isFinite(distanceMeters)) {
+      const idlePriority = ["sniper", "marksman", "rifle", "pistol"];
+      for (const id of idlePriority) {
+        const match = usable.find((entry) => entry.item.id === id);
+        if (match) {
+          if (inv.selected !== match.idx) weapons.select(botId, match.idx - inv.selected);
+          return inv.items[inv.selected];
+        }
+      }
+      return inv.items[inv.selected] ?? null;
+    }
+
+    const armoredTarget = (Number(targetArmor) || 0) > 0;
+    const sniperEntry = usable.find((entry) => entry.item.id === "sniper");
+
+    let priority;
+    if (armoredTarget && distanceMeters >= 14 && sniperEntry?.readyNow) {
+      // Open with Sniper against armored targets to shatter all armor plates in one hit.
+      priority = ["sniper", "marksman", "rifle", "pistol"];
+    } else if (distanceMeters >= 34) {
+      priority = ["sniper", "marksman", "rifle", "pistol"];
+    } else if (distanceMeters >= 18) {
+      priority = ["marksman", "sniper", "rifle", "pistol"];
+    } else if (distanceMeters >= 12) {
+      priority = ["rifle", "marksman", "sniper", "pistol"];
+    } else {
+      priority = ["rifle", "marksman", "pistol", "sniper"];
+    }
+
+    const inRangeUsable = usable.filter((entry) => (Number(entry.def?.range) || 28) >= distanceMeters * 0.92);
+    const pool = inRangeUsable.length > 0 ? inRangeUsable : usable;
+
+    // Prefer a weapon that can fire immediately rather than one mid-reload at close/mid range.
+    for (const requireReady of [true, false]) {
+      for (const id of priority) {
+        const match = pool.find((entry) => entry.item.id === id && (!requireReady || entry.readyNow));
+        if (match) {
+          if (inv.selected !== match.idx) {
+            weapons.select(botId, match.idx - inv.selected);
+          }
+          return inv.items[inv.selected];
+        }
+      }
+    }
+    return inv.items[inv.selected] ?? null;
   }
 
   function coordinateSquadRescue(bot, transform, state, standingEnemies, now) {
@@ -1062,11 +2324,15 @@ export async function setup(ctx) {
         state.squadRoleActive = "medic-defending";
         state.squadTargetAllyId = primaryAlly.entityId;
         state.squadCoordinatedAt = now;
+        const rescueInv = ctx.components.get(bot.id, "Weapons");
+        const rescueWeaponId = rescueInv?.items?.[rescueInv.selected]?.id ?? "pistol";
+        const rescueRange = weaponStandoffRange(rescueWeaponId, 7);
         return executeEngage(bot, transform, state, {
           goal: "engage",
           targetEntityId: immediateThreat.entityId,
-          desiredRange: 7,
-          tactic: "press",
+          desiredRange: rescueRange,
+          tactic: Number(immediateThreat.distance) < rescueRange - 2 ? "space" : "press",
+          aiCmd: getAiDecisions()?.commandFor?.(bot.id, now) ?? null,
         }, standingEnemies, now);
       }
 
@@ -1083,6 +2349,7 @@ export async function setup(ctx) {
           forward: 0,
           strafe: 0,
           turn: steering.turn,
+          targetAngle: steering.targetAngle,
           sprint: false,
           fireHeld: false,
         });
@@ -1120,11 +2387,15 @@ export async function setup(ctx) {
       state.squadRoleActive = "cover";
       state.squadTargetAllyId = primaryAlly.entityId;
       state.squadCoordinatedAt = now;
+      const coverInv = ctx.components.get(bot.id, "Weapons");
+      const coverWeaponId = coverInv?.items?.[coverInv.selected]?.id ?? "pistol";
+      const coverRange = weaponStandoffRange(coverWeaponId, 8);
       return executeEngage(bot, transform, state, {
         goal: "engage",
         targetEntityId: targetEnemy.entityId,
-        desiredRange: 8,
-        tactic: "press",
+        desiredRange: coverRange,
+        tactic: Number(targetEnemy.distance) < coverRange - 2 ? "space" : "press",
+        aiCmd: getAiDecisions()?.commandFor?.(bot.id, now) ?? null,
       }, standingEnemies, now);
     }
 
@@ -1165,6 +2436,7 @@ export async function setup(ctx) {
         forward: 0,
         strafe: 0,
         turn: steering.turn,
+        targetAngle: steering.targetAngle,
         sprint: false,
         fireHeld: false,
       });
@@ -1179,30 +2451,148 @@ export async function setup(ctx) {
     });
   }
 
+  function coordinateSquadBuyback(bot, transform, state, standingEnemies, now) {
+    if (tutorial?.botsPassive?.()) return false;
+    if (standingEnemies.length > 0) return false;
+    const shopService = getShop();
+    if (!shopService) return false;
+    const deadMates = shopService.deadTeammatesFor?.(bot.id) ?? [];
+    if (!deadMates.length) return false;
+
+    const targetDead = deadMates[0];
+    const buybackCost = Number(shopService.constants?.BUYBACK_COST) || 1500;
+    const stations = shopService.stations?.() ?? [];
+    if (!stations.length) return false;
+
+    const zoneRadius = Math.max(18, Number(battleRoyale.zoneRadiusAt?.(now)) || 400);
+    const zoneLimit = Math.max(12, zoneRadius - Math.min(40, zoneRadius * 0.15));
+    const safeShops = stations
+      .filter((s) => Math.hypot(Number(s.x) || 0, Number(s.z) || 0) <= zoneLimit)
+      .sort((a, b) => distance2(transform, a) - distance2(transform, b));
+    const targetShop = safeShops[0] ?? stations.slice().sort((a, b) => distance2(transform, a) - distance2(transform, b))[0];
+    if (!targetShop) return false;
+
+    const standingMates = squadTeammatesFor(bot.id, { includeHuman: true, includeDowned: false });
+    const allTeamStandings = [{ id: bot.id, entity: entities.get(bot.id), transform }, ...standingMates];
+    const richCollectors = allTeamStandings.filter((m) => (
+      m.entity?.bot && (shopService.balanceOf?.(m.id) ?? 0) >= buybackCost
+    ));
+
+    if ((shopService.balanceOf?.(bot.id) ?? 0) >= buybackCost) {
+      richCollectors.sort((a, b) => distance2(a.transform, targetShop) - distance2(b.transform, targetShop));
+      if (richCollectors.length > 0 && richCollectors[0].id !== bot.id) {
+        return false;
+      }
+      state.squadRoleActive = "buyback-run";
+      const distToShop = distance3(transform, targetShop);
+      if (distToShop <= 3.6) {
+        movement.setInput(bot.id, {});
+        const bought = shopService.buy(bot.id, {
+          shopId: targetShop.id,
+          itemId: "buyback",
+          targetId: targetDead.id,
+        }, now);
+        if (bought?.ok) state.squadRoleActive = null;
+        state.nextThinkAt = now + 110;
+        return true;
+      }
+      return moveTowardPosition(bot, transform, state, targetShop, now, {
+        sprint: true,
+        thinkDelay: 85,
+        stopDistance: 2.0,
+        sprintDistance: 2.5,
+      });
+    }
+
+    if (richCollectors.length > 0) return false;
+
+    const unopenedCrates = (map?.crates ?? [])
+      .filter((c) => c && !c.opened && Math.hypot(Number(c.x) || 0, Number(c.z) || 0) <= zoneLimit)
+      .sort((a, b) => distance3(transform, a) - distance3(transform, b));
+    if (unopenedCrates.length > 0 && distance2(transform, unopenedCrates[0]) <= 155) {
+      state.squadRoleActive = "loot-for-buyback";
+      tryOpenNearbyCrate(bot, transform, state, now);
+      if (!unopenedCrates[0].opened) {
+        return moveTowardPosition(bot, transform, state, unopenedCrates[0], now, {
+          sprint: true,
+          thinkDelay: 90,
+          stopDistance: 1.5,
+          sprintDistance: 2.5,
+        });
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   function think(bot, now) {
     const transform = ctx.components.get(bot.id, "Transform");
     const state = ctx.components.get(bot.id, "Bot");
     if (!transform || !state) return;
 
     const injury = getInjury();
+    const stimulants = getStimulants();
     if (injury?.isDowned(bot.id)) {
+      if (!state.downedSince) state.downedSince = now;
       const downedState = injury.stateFor(bot.id);
+      if (stimulants?.isUsing(bot.id)) {
+        state.squadRoleActive = "self-revive";
+        movement.setInput(bot.id, {});
+        state.nextThinkAt = now + 80;
+        return;
+      }
       if (downedState?.reviverId) {
         movement.setInput(bot.id, {});
         state.nextThinkAt = now + 80;
         return;
       }
       const standingAllies = squadTeammatesFor(bot.id, { includeHuman: true, includeDowned: false });
-      if (standingAllies.length > 0) {
-        standingAllies.sort((a, b) => distance3(transform, a.transform) - distance3(transform, b.transform));
-        const nearestAlly = standingAllies[0];
-        const dist = distance3(transform, nearestAlly.transform);
-        if (dist > 2.0 && dist <= 38) {
+      standingAllies.sort((a, b) => distance3(transform, a.transform) - distance3(transform, b.transform));
+      const nearestAlly = standingAllies[0] ?? null;
+      const nearestAllyDist = nearestAlly ? distance3(transform, nearestAlly.transform) : Infinity;
+      const allyUnderFire = standingAllies.some((a) => (
+        ["cover", "medic-defending", "breacher", "flanker"].includes(a.state?.squadRoleActive)
+        || (a.state?.lastDamagedAt && now - a.state.lastDamagedAt <= 2500)
+      ));
+      const nearbyStandingEnemies = typeof perception.visibleEnemies === "function"
+        ? perception.visibleEnemies(bot.id, 35, { now, limit: 4 }).some((e) => !injury.isDowned(e.entityId))
+        : false;
+      const downedElapsedMs = Math.max(0, now - (state.downedSince ?? now));
+      const selfReviveDelayMs = bot.humanSquad ? 850 : 1400;
+      let totalStims = stimulants
+        ? (stimulants.totalCount?.(bot.id) ?? stimulants.count(bot.id))
+        : 0;
+      if (bot.humanSquad && stimulants && totalStims <= 0 && !downedState?.reviverId && downedElapsedMs >= 1200) {
+        stimulants.grant?.(bot.id, 1);
+        totalStims = stimulants.totalCount?.(bot.id) ?? stimulants.count(bot.id);
+      }
+      const shouldSelfRevive = stimulants
+        && totalStims > 0
+        && !downedState?.reviverId
+        && (
+          (bot.humanSquad && (standingAllies.length === 0 || nearestAllyDist > 22))
+          || downedElapsedMs >= selfReviveDelayMs
+        );
+      if (shouldSelfRevive) {
+        movement.setInput(bot.id, {});
+        const used = stimulants.useAny
+          ? stimulants.useAny(bot.id, now)
+          : stimulants.start(bot.id, now);
+        if (used) {
+          state.squadRoleActive = "self-revive";
+          state.nextThinkAt = now + 80;
+          return;
+        }
+      }
+      if (nearestAlly && (!stimulants || totalStims <= 0)) {
+        if (nearestAllyDist > 2.0 && nearestAllyDist <= 38) {
           const steering = steeringTo(transform, nearestAlly.transform);
           movement.setInput(bot.id, {
             forward: 0.85,
             strafe: 0,
             turn: steering.turn,
+            targetAngle: steering.targetAngle,
             sprint: false,
             fireHeld: false,
           });
@@ -1211,59 +2601,208 @@ export async function setup(ctx) {
         }
       }
       movement.setInput(bot.id, {});
-      state.nextThinkAt = now + 120;
+      state.nextThinkAt = now + 80;
       return;
+    }
+    state.downedSince = null;
+
+    const vehicles = getVehicles();
+    if (bot.humanSquad && vehicles) {
+      const leader = entities.get(bot.humanSquad);
+      const leaderVehicle = leader?.alive
+        ? (vehicles.vehicleForDriver?.(leader.id) ?? vehicles.vehicleForPassenger?.(leader.id) ?? null)
+        : null;
+      if (vehicles.isPassenger?.(bot.id)) {
+        const currentVehicle = vehicles.vehicleForPassenger?.(bot.id) ?? null;
+        if (!leaderVehicle || !currentVehicle || leaderVehicle.id !== currentVehicle.id) {
+          vehicles.exitPassenger?.(bot.id, now, "leader-exited");
+          state.boardingVehicleId = null;
+          state.boardingVehicleSince = 0;
+        } else {
+          state.squadRoleActive = "vehicle-passenger";
+          state.boardingVehicleId = currentVehicle.id;
+          movement.setInput(bot.id, {});
+          state.nextThinkAt = now + 110;
+          return;
+        }
+      }
+      if (leaderVehicle && !vehicles.isDriving?.(bot.id)) {
+        const passengerCount = Array.isArray(leaderVehicle.passengerIds) ? leaderVehicle.passengerIds.length : 0;
+        const capacity = Number(vehicles.passengerCapacity ?? 3);
+        const ragdoll = ctx.services.has("ragdoll") ? ctx.services.get("ragdoll") : null;
+        const canRide = passengerCount < capacity
+          && !ctx.components.get(bot.id, "Parachute")?.airborne
+          && !ragdoll?.isActive?.(bot.id);
+        if (canRide) {
+          if (armorService?.isPlating(bot.id)) armorService.cancelPlating(bot.id, "board-vehicle");
+          if (injury?.isRevivingTeammate(bot.id)) injury.pauseTeamRevive(bot.id, "board-vehicle", now);
+          if (stimulants?.isUsing(bot.id)) stimulants.cancel(bot.id, "board-vehicle");
+          if (state.boardingVehicleId !== leaderVehicle.id) {
+            state.boardingVehicleId = leaderVehicle.id;
+            state.boardingVehicleSince = now;
+          }
+          const distToCar = distance3(transform, leaderVehicle);
+          const carSpeed = Number(leaderVehicle.speed) || 0;
+          const boardReach = carSpeed >= 2.2 || now - (state.boardingVehicleSince ?? now) >= 2400 ? 14 : 4.2;
+          if (distToCar <= boardReach && vehicles.enterPassenger?.(bot.id, leaderVehicle.id, now)) {
+            state.squadRoleActive = "vehicle-passenger";
+            movement.setInput(bot.id, {});
+            state.nextThinkAt = now + 110;
+            return;
+          }
+          state.squadRoleActive = "board-vehicle";
+          moveTowardPosition(bot, transform, state, leaderVehicle, now, {
+            sprint: true,
+            thinkDelay: 80,
+            stopDistance: 1.5,
+            sprintDistance: 2.0,
+          });
+          if (distance3(transform, leaderVehicle) <= boardReach && vehicles.enterPassenger?.(bot.id, leaderVehicle.id, now)) {
+            state.squadRoleActive = "vehicle-passenger";
+            movement.setInput(bot.id, {});
+            state.nextThinkAt = now + 110;
+          }
+          return;
+        }
+      } else {
+        state.boardingVehicleId = null;
+        state.boardingVehicleSince = 0;
+      }
     }
 
     if (now >= (state.tacticUntil ?? 0)) {
       state.strafeDirection = -(state.strafeDirection || 1);
       const seed = Number.parseInt(String(bot.id).replace(/\D/g, ""), 10) || 1;
-      state.tacticUntil = now + 700 + (seed % 5) * 140;
+      state.tacticUntil = now + 1850 + (seed % 5) * 320;
     }
 
     const inventory = ctx.components.get(bot.id, "Weapons");
-    const selected = inventory?.items?.[inventory.selected] ?? null;
-    if (selected && selected.ammo <= 4 && selected.reserve > 0) {
-      weapons.reload(bot.id, now);
-    }
-
+    const preSelected = inventory?.items?.[inventory.selected] ?? null;
+    const preMaxRange = (inventory?.items ?? []).reduce((best, item) => (
+      Math.max(best, Number(weapons.definitions?.[item.id]?.range) || 0)
+    ), 48);
+    const scanRange = Math.max(48, Math.min(160, preMaxRange));
     const allVisibleEnemies = typeof perception.visibleEnemies === "function"
-      ? perception.visibleEnemies(bot.id, 28, { now, limit: 8 })
-      : [perception.nearestVisibleEnemy(bot.id, 28, { now })].filter(Boolean);
+      ? perception.visibleEnemies(bot.id, scanRange, { now, limit: 8 })
+      : [perception.nearestVisibleEnemy(bot.id, scanRange, { now })].filter(Boolean);
     const standingEnemies = injury
       ? allVisibleEnemies.filter((e) => !injury.isDowned(e.entityId))
       : allVisibleEnemies;
-    const finishableDownedEnemies = injury
-      ? allVisibleEnemies.filter((e) => injury.isDowned(e.entityId) && !enemyHasStandingTeammateNearby(e.entityId, 45))
+    const downedVisibleEnemies = injury
+      ? allVisibleEnemies.filter((e) => injury.isDowned(e.entityId))
       : [];
-    const visibleEnemies = standingEnemies.length > 0 ? standingEnemies : finishableDownedEnemies;
+    const finishableDownedEnemies = downedVisibleEnemies.filter(
+      (e) => !enemyHasStandingTeammateNearby(e.entityId, 200),
+    );
+    const primaryPreview = standingEnemies[0] ?? finishableDownedEnemies[0] ?? null;
+    const primaryArmor = primaryPreview
+      ? (armorService?.describe?.(primaryPreview.entityId)?.current
+        ?? (ctx.components.get(primaryPreview.entityId, "Armor")?.current ?? 0))
+      : 0;
+    const selected = selectBestWeaponForRange(bot.id, primaryPreview?.distance ?? null, {
+      targetArmor: primaryArmor,
+      now,
+    }) ?? preSelected;
+    if (selected && selected.reserve > 0) {
+      const proactiveCap = selected.id === "sniper" ? 2 : selected.id === "marksman" ? 4 : 3;
+      const shouldReloadNow = selected.ammo <= 0
+        || (standingEnemies.length === 0 && selected.ammo <= proactiveCap);
+      if (shouldReloadNow) {
+        weapons.reload(bot.id, now);
+      }
+    }
+
+    const armorState = armorService?.describe(bot.id) ?? null;
+    const needsArmorPlating = Boolean(
+      armorState
+      && (armorState.plating
+        || (armorState.reservePlates > 0 && armorState.current <= armorState.maximum - armorState.plateValue * 0.5)),
+    );
+    const hp = ctx.components.get(bot.id, "Health");
+    const minReserveStims = bot.humanSquad ? 1 : 0;
+    const needsStimHeal = Boolean(
+      stimulants
+      && (stimulants.isUsing(bot.id) || ((stimulants.totalCount?.(bot.id) ?? stimulants.count(bot.id)) > minReserveStims && hp && hp.current < hp.maximum * 0.65)),
+    );
+    const hasUnopenedCrateNearby = Array.isArray(map?.crates) && map.crates.some(
+      (c) => c && !c.opened && distance2(transform, c) <= 35,
+    );
+    const calmPostKnockdown = standingEnemies.length === 0
+      && downedVisibleEnemies.length > 0
+      && (needsArmorPlating || needsStimHeal || hasUnopenedCrateNearby);
+
+    if (calmPostKnockdown) {
+      state.squadRoleActive = "post-knockdown-loot";
+    }
+    const visibleEnemies = standingEnemies.length > 0
+      ? standingEnemies
+      : (calmPostKnockdown ? [] : finishableDownedEnemies);
+
+    if (standingEnemies.length >= 2) {
+      shareOutnumberedCalloutWithSquad(bot.id, standingEnemies[0], standingEnemies.length, now);
+    } else if (standingEnemies.length === 1 && enemyHasStandingTeammateNearby(standingEnemies[0].entityId, 24)) {
+      shareOutnumberedCalloutWithSquad(bot.id, standingEnemies[0], 2, now);
+    }
 
     if (visibleEnemies.length) {
       const primary = visibleEnemies[0];
       rememberTarget(state, primary.entityId, primary.transform, now, BOT_VISIBLE_MEMORY_MS);
       shareTargetWithSquadmate(bot.id, primary.entityId, primary.transform, now, BOT_VISIBLE_MEMORY_MS);
+      state.combatFocus = {
+        entityId: primary.entityId,
+        x: Number(primary.transform.x) || 0,
+        y: Number(primary.transform.y) || 0,
+        z: Number(primary.transform.z) || 0,
+        until: now + 650,
+      };
     }
 
     if (coordinateSquadRescue(bot, transform, state, standingEnemies, now)) {
       return;
     }
 
+    if (coordinateSquadBuyback(bot, transform, state, standingEnemies, now)) {
+      return;
+    }
+
+    const rallyInterest = !visibleEnemies.length ? squadRallyInterest(bot.id, transform, now) : null;
+    const escortingAcrossStructure = Boolean(bot.humanSquad && rallyInterest?.separatedByStructure);
+
+    if (!standingEnemies.length && !escortingAcrossStructure) {
+      tryOpenNearbyCrate(bot, transform, state, now);
+    }
+
     if (!visibleEnemies.length && armorService) {
-      const armorState = armorService.describe(bot.id);
-      if (
-        armorState
-        && !armorState.plating
-        && armorState.reservePlates > 0
-        && armorState.current <= armorState.maximum - armorState.plateValue * 0.5
-      ) {
-        armorService.startFullPlating(bot.id, now);
+      if (escortingAcrossStructure && armorService.isPlating(bot.id)) {
+        armorService.cancelPlating(bot.id, "escort-regroup");
+      } else if (!escortingAcrossStructure) {
+        const freshArmorState = armorService.describe(bot.id);
+        if (
+          freshArmorState
+          && !freshArmorState.plating
+          && freshArmorState.reservePlates > 0
+          && freshArmorState.current <= freshArmorState.maximum - freshArmorState.plateValue * 0.5
+        ) {
+          armorService.startFullPlating(bot.id, now);
+        }
       }
     } else if (visibleEnemies.length && armorService?.isPlating(bot.id)) {
       armorService.cancelPlating(bot.id, "combat");
     }
 
+    if (
+      !standingEnemies.length
+      && !escortingAcrossStructure
+      && needsStimHeal
+      && stimulants
+      && !stimulants.isUsing(bot.id)
+    ) {
+      if (stimulants.useAny) stimulants.useAny(bot.id, now);
+      else stimulants.start(bot.id, now);
+    }
+
     let memory = rememberedTarget(state, entities, now);
-    if (memory && injury?.isDowned(memory.entityId) && enemyHasStandingTeammateNearby(memory.entityId, 45)) {
+    if (memory && injury?.isDowned(memory.entityId) && (calmPostKnockdown || enemyHasStandingTeammateNearby(memory.entityId, 200))) {
       clearMemory(state);
       memory = null;
     }
@@ -1275,8 +2814,9 @@ export async function setup(ctx) {
     let distantContact = null;
     if (!visibleEnemies.length && typeof perception.nearestVisibleEnemy === "function") {
       if ((state.nextDistantContactAt ?? 0) <= now) {
-        const fresh = perception.nearestVisibleEnemy(bot.id, 105, { now });
-        const freshValid = fresh && (!injury?.isDowned(fresh.entityId) || !enemyHasStandingTeammateNearby(fresh.entityId, 45));
+        const contactScanRange = Math.max(105, Math.min(155, preMaxRange));
+        const fresh = perception.nearestVisibleEnemy(bot.id, contactScanRange, { now });
+        const freshValid = fresh && (!injury?.isDowned(fresh.entityId) || (!calmPostKnockdown && !enemyHasStandingTeammateNearby(fresh.entityId, 200)));
         state.nextDistantContactAt = now + 350;
         state.distantContact = freshValid && fresh?.transform ? {
           entityId: fresh.entityId,
@@ -1298,7 +2838,6 @@ export async function setup(ctx) {
     if (distantContact && bot.humanSquad) {
       shareTargetWithSquadmate(bot.id, distantContact.entityId, distantContact, now, 2200);
     }
-    const rallyInterest = !visibleEnemies.length ? squadRallyInterest(bot.id, transform, now) : null;
     if (bot.humanSquad && !visibleEnemies.length && rallyInterest && memory) {
       const humanEntity = entities.get(bot.humanSquad);
       const humanTransform = humanEntity?.alive ? ctx.components.get(humanEntity.id, "Transform") : null;
@@ -1314,12 +2853,52 @@ export async function setup(ctx) {
     const baseInterest = !visibleEnemies.length && !bot.humanSquad
       ? (contactInterest ?? interest.targetFor(bot.id, transform, now))
       : contactInterest;
+
+    if (!bot.humanSquad && buildingAmbushBehavior(
+      bot,
+      transform,
+      state,
+      standingEnemies,
+      baseInterest,
+      distantContact,
+      memory,
+      now,
+    )) {
+      return;
+    }
+
+    const squadLootInterest = !visibleEnemies.length && !bot.humanSquad
+      ? squadBuildingLootInterest(bot.id, transform, state, now)
+      : null;
+
+    if (calmPostKnockdown && squadLootInterest) {
+      moveTowardPosition(bot, transform, state, squadLootInterest, now, {
+        sprint: false,
+        thinkDelay: 120,
+        stopDistance: 1.4,
+      });
+      tryOpenNearbyCrate(bot, transform, state, now);
+      return;
+    }
+
+    const freeRoamInterest = !visibleEnemies.length && !bot.humanSquad
+      ? tacticalFreeRoamInterest(bot.id, transform, state, now)
+      : null;
+
+    const prioritizeHumanEscort = Boolean(
+      bot.humanSquad
+      && rallyInterest?.partnerGoal === "escort-human"
+      && (rallyInterest.separatedByStructure || Number(rallyInterest.distToHuman) >= 7.5),
+    );
     const interestTarget = !visibleEnemies.length
-      ? (contactInterest
+      ? ((prioritizeHumanEscort ? rallyInterest : null)
+        ?? contactInterest
+        ?? (rallyInterest?.partnerGoal === "outnumbered-converge" ? rallyInterest : null)
         ?? (bot.humanSquad && rallyInterest ? rallyInterest : null)
+        ?? (squadLootInterest?.priorityVisit ? squadLootInterest : null)
         ?? (baseInterest?.kind === "sound-interest" || baseInterest?.priorityVisit
           ? baseInterest
-          : (rallyInterest ?? baseInterest)))
+          : (rallyInterest ?? squadLootInterest ?? freeRoamInterest ?? baseInterest)))
       : null;
     const previousDecision = brain.commitmentFor(bot.id);
     const traversal = traversalFor(
@@ -1341,13 +2920,18 @@ export async function setup(ctx) {
     if (finalShowdown && (!zoneTarget || zoneTarget.distance <= matchState.zone.radius)) {
       if (visibleEnemies.length) {
         const nearest = visibleEnemies[0];
+        const sdInv = ctx.components.get(bot.id, "Weapons");
+        const sdWeaponId = sdInv?.items?.[sdInv.selected]?.id ?? "pistol";
+        const sdRange = weaponStandoffRange(sdWeaponId, 7);
         if (executeEngage(bot, transform, state, {
           goal: "engage", targetEntityId: nearest.entityId,
-          desiredRange: 7, tactic: "press",
+          desiredRange: sdRange,
+          tactic: Number(nearest.distance) < sdRange - 2 ? "space" : "press",
         }, visibleEnemies, now)) return;
       } else {
         const nearest = perception.nearestEnemy?.(bot.id, 140, { humanPriority: 1 });
-        if (nearest?.transform) {
+        const nearestValid = nearest && (!injury?.isDowned(nearest.entityId) || !enemyHasStandingTeammateNearby(nearest.entityId, 200));
+        if (nearestValid && nearest?.transform) {
           if (moveTowardPosition(bot, transform, state, nearest.transform, now, {
             sprint: true, thinkDelay: 135, stopDistance: 8,
           })) return;
@@ -1355,7 +2939,12 @@ export async function setup(ctx) {
       }
     }
 
-    const decision = brain.decide(bot.id, {
+    const aiDecisions = ctx.services.has("ai-enemy-decisions")
+      ? ctx.services.get("ai-enemy-decisions")
+      : null;
+    const aiCmd = aiDecisions?.commandFor?.(bot.id, now) ?? null;
+
+    let decision = brain.decide(bot.id, {
       visibleEnemies,
       memory,
       zoneTarget,
@@ -1363,6 +2952,140 @@ export async function setup(ctx) {
       traversal,
       investigationReached,
     }, now);
+
+    if (aiCmd && decision) {
+      if (aiCmd.moveChoice === "retreat_heal") {
+        const armorState = armorService?.describe?.(bot.id);
+        if (armorService && armorState && !armorState.plating && armorState.reservePlates > 0 && armorState.current < armorState.maximum * 0.7) {
+          armorService.startFullPlating(bot.id, now);
+        }
+      }
+      if (aiCmd.moveChoice === "move_zone" && zoneTarget) {
+        decision = { goal: "zone", target: zoneTarget, aiCmd };
+      } else if (aiCmd.moveChoice === "regroup_squad" && !visibleEnemies.length) {
+        const humanAlly = bot.humanSquad ? entities.get(bot.humanSquad) : null;
+        const humanAllyTransform = humanAlly?.alive ? ctx.components.get(humanAlly.id, "Transform") : null;
+        const standMates = squadTeammatesFor(bot.id, { includeHuman: true, includeDowned: false });
+        const rallyDest = humanAllyTransform ?? standMates[0]?.transform ?? null;
+        if (rallyDest && distance3(transform, rallyDest) > 5.5) {
+          decision = {
+            goal: "investigate",
+            target: {
+              kind: "squad-rally-interest",
+              partnerGoal: "escort-human",
+              x: Number(rallyDest.x) || 0,
+              y: Number(rallyDest.y) || 0,
+              z: Number(rallyDest.z) || 0,
+            },
+            aiCmd,
+          };
+        } else {
+          decision = { ...decision, aiCmd };
+        }
+      } else if (visibleEnemies.length) {
+        let chosen = visibleEnemies[0];
+        if (aiCmd.targetChoice === "attacker" && state.lastDamagedById && (now - (state.lastDamagedAt ?? 0) <= 5000)) {
+          chosen = visibleEnemies.find((e) => e.entityId === state.lastDamagedById) ?? chosen;
+        } else if (aiCmd.targetChoice === "priority_threat" || aiCmd.targetChoice === "human_player") {
+          if (aiCmd.isAlly || bot.humanSquad) {
+            const allyHuman = bot.humanSquad ? entities.get(bot.humanSquad) : null;
+            const allyHumanTransform = allyHuman?.alive ? ctx.components.get(allyHuman.id, "Transform") : null;
+            if (allyHumanTransform) {
+              chosen = [...visibleEnemies].sort((a, b) => (
+                distance3(a.transform, allyHumanTransform) - distance3(b.transform, allyHumanTransform)
+              ))[0] ?? chosen;
+            }
+          } else {
+            chosen = visibleEnemies.find((e) => !entities.get(e.entityId)?.bot) ?? chosen;
+          }
+        } else if (aiCmd.targetChoice === "weakest") {
+          chosen = [...visibleEnemies].sort((a, b) => {
+            const aTotal = (ctx.components.get(a.entityId, "Health")?.current ?? 200)
+              + (ctx.components.get(a.entityId, "Armor")?.current ?? 0);
+            const bTotal = (ctx.components.get(b.entityId, "Health")?.current ?? 200)
+              + (ctx.components.get(b.entityId, "Armor")?.current ?? 0);
+            return aTotal - bTotal || a.distance - b.distance;
+          })[0] ?? chosen;
+        }
+        if (aiCmd.moveChoice === "retreat_heal") {
+          decision = {
+            goal: "evade",
+            targetEntityId: chosen.entityId,
+            returnFire: aiCmd.fireChoice !== "hold_fire",
+            moveTarget: zoneTarget ?? null,
+            aiCmd,
+          };
+        } else {
+          let tactic = decision.tactic ?? "flank";
+          let desiredRange = decision.desiredRange ?? 10;
+          if (aiCmd.moveChoice === "advance_direct") {
+            tactic = "press";
+            desiredRange = 5.5;
+          } else if (aiCmd.moveChoice === "flank_left") {
+            state.strafeDirection = -1;
+            tactic = "flank";
+          } else if (aiCmd.moveChoice === "flank_right") {
+            state.strafeDirection = 1;
+            tactic = "flank";
+          } else if (aiCmd.moveChoice === "hold_cover") {
+            tactic = "hold";
+            desiredRange = Math.max(8, Number(chosen.distance) || 12);
+          } else if (aiCmd.moveChoice === "kite_back") {
+            tactic = "space";
+            desiredRange = Math.max(22, Number(desiredRange) || 22);
+          } else if (aiCmd.moveChoice === "regroup_squad") {
+            tactic = "flank";
+            desiredRange = Math.max(8, Number(desiredRange) || 10);
+          }
+          decision = {
+            goal: "engage",
+            targetEntityId: chosen.entityId,
+            desiredRange,
+            tactic,
+            aiCmd,
+          };
+        }
+      } else {
+        decision = { ...decision, aiCmd };
+      }
+    }
+
+    const focusActive = Boolean(
+      !visibleEnemies.length
+      && state.combatFocus?.until > now
+      && entities.get(state.combatFocus.entityId)?.alive
+      && !injury?.isDowned(state.combatFocus.entityId),
+    );
+    if (focusActive && !escortingAcrossStructure && !zoneTarget && !rallyInterest?.partnerGoal?.startsWith("outnumbered") && !aiCmd) {
+      const steering = steeringTo(transform, state.combatFocus, 95, { maxRate: 0.85, deadzone: 0.02, gain: 1.75 });
+      setNavigatedInput(bot, transform, state, {
+        forward: steering.distance > 14 ? 0.65 : 0,
+        strafe: 0,
+        turn: steering.turn,
+        targetAngle: steering.targetAngle,
+        sprint: false,
+        fireHeld: false,
+        aimLock: true,
+      }, now);
+      state.nextThinkAt = now + 95;
+      return;
+    }
+
+    if (
+      bot.humanSquad
+      && !visibleEnemies.length
+      && !rallyInterest
+      && !memory
+      && !distantContact
+      && !zoneTarget
+    ) {
+      const humanEntity = entities.get(bot.humanSquad);
+      const humanTransform = humanEntity?.alive ? ctx.components.get(humanEntity.id, "Transform") : null;
+      if (humanTransform && distance3(transform, humanTransform) <= 5.5) {
+        executeEscortOverwatch(bot, transform, state, humanTransform, now);
+        return;
+      }
+    }
 
     if (!decision) return;
     if (decision.goal === "traverse" && routeToward(bot, transform, state, decision.route, now, 95)) return;
@@ -1374,20 +3097,33 @@ export async function setup(ctx) {
     }
     if (decision.goal === "hunt" && executeHunt(bot, transform, state, decision, now)) return;
     if ((decision.goal === "investigate" || decision.goal === "search") && decision.target) {
+      const isEscort = decision.target.partnerGoal === "escort-human";
+      const isContinuous = Boolean(
+        decision.target.continuousPatrol
+        || decision.target.kind === "free-roam-interest"
+        || decision.target.kind === "explore-interest",
+      );
       if (moveTowardPosition(bot, transform, state, decision.target, now, {
-        sprint: decision.goal === "investigate" && decision.target.kind === "sound-interest",
-        thinkDelay: decision.goal === "search" ? 120 : (decision.target.kind === "sound-interest" ? 105 : 165),
-        stopDistance: decision.goal === "search" ? 1.25 : 1.7,
+        sprint: (decision.goal === "investigate" && decision.target.kind === "sound-interest")
+          || Boolean(decision.target.patrolSprint)
+          || (isContinuous && distance2(transform, decision.target) > 20),
+        thinkDelay: isEscort ? 85 : (decision.goal === "search" ? 120 : (decision.target.kind === "sound-interest" ? 105 : 140)),
+        stopDistance: isEscort ? 1.25 : (isContinuous ? 0.25 : (decision.goal === "search" ? 1.25 : 1.7)),
+        sprintDistance: isEscort ? 2.2 : 5,
       })) return;
     }
     executeRoam(bot, transform, state, now);
   }
 
   const api = {
+    combatNet,
+    neuralNetSummary: () => combatNet.summary(),
     squadPartnerId,
     squadRoleFor,
     squadTeammatesFor,
     activeSquadPartner: (botId) => activeSquadPartner(botId),
+    tryOpenNearbyCrate: (bot, transform, state, now = Date.now()) => tryOpenNearbyCrate(bot, transform, state, now),
+    squadBuildingLootInterest: (botId, transform, state, now = Date.now()) => squadBuildingLootInterest(botId, transform, state, now),
     tick(_dt, now = Date.now()) {
       if (!battleRoyale.isActive()) return;
       if (tutorial) {
@@ -1423,7 +3159,8 @@ export async function setup(ctx) {
       for (const bot of bots.all()) {
         if (!bot.alive) continue;
         const state = ctx.components.get(bot.id, "Bot");
-        if (!state || state.vehicleControl || now < (state.nextThinkAt ?? 0)) continue;
+        if (!state || state.vehicleControl) continue;
+        if (!getInjury()?.isDowned(bot.id) && now < (state.nextThinkAt ?? 0)) continue;
         think(bot, now);
       }
     },

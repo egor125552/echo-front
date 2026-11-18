@@ -96,6 +96,8 @@ export async function setup(ctx) {
         if (!entityId
           || entityId === vehicle.driverId
           || entityId === before?.driverId
+          || vehicles.isPassenger?.(entityId)
+          || (vehicle.passengerIds ?? vehicle.passengers ?? []).includes(entityId)
           || ragdoll.isActive(entityId)) return;
         const entity = entities.get(entityId);
         if (!entity?.alive) return;

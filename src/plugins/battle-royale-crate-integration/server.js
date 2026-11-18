@@ -20,6 +20,7 @@ const PUSH_AUDIO_RADIUS = 46;
 const PUSH_AUDIO_STALL_SPEED = 0.055;
 const PUSH_AUDIO_RESUME_SPEED = 0.13;
 const PUSH_AUDIO_STALL_MS = 280;
+export const MAX_PUSH_AUDIO_DURATION_MS = 5000;
 
 function finite(value, fallback = 0) {
   const number = Number(value);
@@ -51,9 +52,11 @@ export async function setup(ctx) {
         forward: 0,
         pushed: false,
         startedCrateId: null,
+        pushAudioStartedAt: 0,
         lastAudioUpdateAt: 0,
         lowMotionSince: null,
         audioSuppressed: false,
+        maxDurationReached: false,
       };
       states.set(playerId, state);
     }
@@ -102,6 +105,8 @@ export async function setup(ctx) {
     state.forward = 0;
     state.lowMotionSince = null;
     state.audioSuppressed = false;
+    state.maxDurationReached = false;
+    state.pushAudioStartedAt = 0;
     return stopPushAudio(playerId, now, reason);
   }
 
@@ -220,6 +225,16 @@ export async function setup(ctx) {
 
         state.pushed = true;
         const speed = Math.max(0, finite(pushed.speed));
+        if (
+          state.startedCrateId
+          && state.pushAudioStartedAt > 0
+          && now - state.pushAudioStartedAt >= MAX_PUSH_AUDIO_DURATION_MS
+        ) {
+          stopPushAudio(playerId, now, "max-duration");
+          state.audioSuppressed = true;
+          state.maxDurationReached = true;
+          continue;
+        }
         if (speed <= PUSH_AUDIO_STALL_SPEED) {
           if (state.lowMotionSince == null) state.lowMotionSince = now;
           if (!state.audioSuppressed && now - state.lowMotionSince >= PUSH_AUDIO_STALL_MS) {
@@ -228,7 +243,7 @@ export async function setup(ctx) {
           }
         } else {
           state.lowMotionSince = null;
-          if (state.audioSuppressed && speed >= PUSH_AUDIO_RESUME_SPEED) {
+          if (state.audioSuppressed && !state.maxDurationReached && speed >= PUSH_AUDIO_RESUME_SPEED) {
             state.audioSuppressed = false;
             state.startedCrateId = null;
           }
@@ -239,6 +254,7 @@ export async function setup(ctx) {
         if (state.startedCrateId !== pushed.crateId) {
           if (state.startedCrateId) stopPushAudio(playerId, now, "switched-crate");
           state.startedCrateId = pushed.crateId;
+          state.pushAudioStartedAt = now;
           state.lastAudioUpdateAt = now;
           ctx.events.emit("crate:push-start", spatialPayload({
             entityId: playerId,
@@ -246,6 +262,7 @@ export async function setup(ctx) {
             material: "metal",
             speed,
             force: pushed.force,
+            maxDurationMs: MAX_PUSH_AUDIO_DURATION_MS,
             x: pushed.x,
             y: pushed.y,
             z: pushed.z,
@@ -259,6 +276,8 @@ export async function setup(ctx) {
             material: "metal",
             speed,
             force: pushed.force,
+            elapsedMs: Math.max(0, now - (state.pushAudioStartedAt || now)),
+            maxDurationMs: MAX_PUSH_AUDIO_DURATION_MS,
             x: pushed.x,
             y: pushed.y,
             z: pushed.z,

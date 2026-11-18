@@ -50,8 +50,31 @@ export async function setup(ctx) {
     return best;
   }
 
+  function visibleEnemies(botId, maxDistance = 28, { limit = 6, humanPriority = 1 } = {}) {
+    const transform = ctx.components.get(botId, "Transform");
+    if (!transform) return [];
+    const results = [];
+    for (const enemy of teams.enemiesOf(botId)) {
+      const target = ctx.components.get(enemy.id, "Transform");
+      if (!target) continue;
+      const distance = Math.hypot(target.x - transform.x, target.z - transform.z);
+      if (distance > maxDistance) continue;
+      if (!physics.lineOfSight(transform, target, botId, enemy.id)) continue;
+      results.push({
+        entityId: enemy.id,
+        entity: enemy,
+        transform: target,
+        distance,
+        score: rankEnemy(enemy, distance, humanPriority),
+      });
+    }
+    results.sort((a, b) => a.score - b.score);
+    return results.slice(0, Math.max(1, Math.floor(Number(limit) || 6)));
+  }
+
   ctx.services.provide("bot-perception", {
     nearestEnemy,
     nearestVisibleEnemy,
+    visibleEnemies,
   });
 }

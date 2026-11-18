@@ -1,5 +1,6 @@
 export const SNAPSHOT_INTERVAL_MS = 125;
 export const ENTITY_INTEREST_RADIUS = 125;
+export const JUGGERNAUT_HEALTH = 700;
 
 export const manifest = {
   id: "match-api",
@@ -8,7 +9,7 @@ export const manifest = {
     "entities", "movement", "weapons", "teams", "map-test-arena",
     "battle-royale", "bot-fill", "bot-combat", "battle-royale-vehicle-fleet",
   ],
-  optional: ["armor", "aim-steering", "health-regeneration", "battle-royale-tutorial"],
+  optional: ["armor", "aim-steering", "health-regeneration", "battle-royale-tutorial", "ai-enemy-decisions"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read", "events.on", "events.emit",
@@ -41,11 +42,31 @@ export async function setup(ctx) {
   const tutorial = ctx.services.has("battle-royale-tutorial")
     ? ctx.services.get("battle-royale-tutorial")
     : null;
+  const aiDecisions = ctx.services.has("ai-enemy-decisions")
+    ? ctx.services.get("ai-enemy-decisions")
+    : null;
   let humanSerial = 0;
   const expiredHumanSessions = new Set();
 
   botFill.ensure();
   const spectatorTargets = new Map();
+  const entityKills = new Map();
+  const teamKills = new Map();
+
+  ctx.events.on("entity:spawned", ({ entityId }) => {
+    entityKills.set(entityId, 0);
+  });
+
+  ctx.events.on("entity:died", ({ entityId, killerId }) => {
+    if (!killerId || killerId === entityId) return;
+    const victimTeam = Number(teams.teamOf(entityId)) || 0;
+    const killerTeam = Number(teams.teamOf(killerId)) || 0;
+    if (victimTeam > 0 && victimTeam === killerTeam) return;
+    entityKills.set(killerId, (entityKills.get(killerId) ?? 0) + 1);
+    if (killerTeam > 0) {
+      teamKills.set(killerTeam, (teamKills.get(killerTeam) ?? 0) + 1);
+    }
+  });
 
   function acousticOcclusion(listener, source) {
     if (!listener || !source || typeof map.acousticOcclusionBetween !== "function") return null;
@@ -71,8 +92,20 @@ export async function setup(ctx) {
   function spectatorTargetFor(playerId) {
     const player = entities.get(playerId);
     if (!player || player.alive || battleRoyale.status().phase === "ended") return null;
+    const ownTeam = Number(teams.teamOf(playerId)) || 0;
     const currentId = spectatorTargets.get(playerId);
     const current = currentId ? entities.get(currentId) : null;
+    const sameTeamCurrent = current?.alive && (ownTeam <= 0 || (Number(teams.teamOf(current.id)) || 0) === ownTeam);
+    if (sameTeamCurrent) return current;
+    if (ownTeam > 0) {
+      const aliveMate = entities.all().find((entity) => (
+        entity.alive && entity.id !== playerId && (Number(teams.teamOf(entity.id)) || 0) === ownTeam
+      ));
+      if (aliveMate) {
+        spectatorTargets.set(playerId, aliveMate.id);
+        return aliveMate;
+      }
+    }
     if (current?.alive) return current;
     const reference = ctx.components.get(playerId, "Transform");
     const next = nearestAliveEntity(reference, playerId);
@@ -128,15 +161,19 @@ export async function setup(ctx) {
       });
     const chosen = candidates.slice(-3);
     const recruited = [];
+    const stimService = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
     chosen.forEach((bot, idx) => {
       bot.team = team;
       bot.squadId = squadId;
       bot.humanSquad = playerId;
       bot.squadSlot = idx;
       bot.name = `Напарник ${idx + 1}`;
+      stimService?.setCount?.(bot.id, 1);
       const teamComp = ctx.components.get(bot.id, "Team");
       if (teamComp) teamComp.id = team;
-      if (idx < 2) weapons.grant(bot.id, "rifle");
+      if (idx === 0) weapons.grant(bot.id, "rifle");
+      else if (idx === 1) weapons.grant(bot.id, "marksman");
+      else if (idx === 2) weapons.grant(bot.id, "sniper");
       if (humanTransform) {
         const angle = (idx * Math.PI * 2) / Math.max(1, chosen.length);
         movement.teleport(bot.id, {
@@ -259,10 +296,11 @@ export async function setup(ctx) {
     let applied = false;
     let quantity = 0;
     let restocked = false;
-    if (result.loot === "rifle") {
-      applied = weapons.grant(playerId, "rifle");
+    if (result.loot === "rifle" || result.loot === "marksman" || result.loot === "sniper") {
+      const restockAmount = result.loot === "sniper" ? 10 : result.loot === "marksman" ? 24 : 60;
+      applied = weapons.grant(playerId, result.loot);
       if (!applied) {
-        quantity = weapons.restock?.(playerId, "rifle", 60) ?? 0;
+        quantity = weapons.restock?.(playerId, result.loot, restockAmount) ?? 0;
         restocked = quantity > 0;
         applied = restocked;
       }
@@ -270,6 +308,53 @@ export async function setup(ctx) {
     if (result.loot === "armor") {
       quantity = armorService?.grantPlates(playerId, armorCratePlateCount(result.crateId)) ?? 0;
       applied = quantity > 0;
+    }
+    if (result.loot === "airdrop") {
+      const grantedSniper = weapons.grant(playerId, "sniper");
+      if (!grantedSniper) {
+        weapons.restock?.(playerId, "sniper", 10);
+      }
+      const grantedMarksman = weapons.grant(playerId, "marksman");
+      if (!grantedMarksman) {
+        weapons.restock?.(playerId, "marksman", 24);
+      }
+      weapons.restock?.(playerId, "rifle", 60);
+      const satchelGranted = Boolean(armorService?.grantSatchel?.(playerId));
+      const platesAdded = armorService?.grantPlates?.(playerId, 8) ?? 0;
+      quantity = platesAdded;
+      applied = Boolean(grantedSniper || grantedMarksman || satchelGranted || platesAdded > 0);
+    }
+    if (result.loot === "juggernaut") {
+      const entity = entities.get(playerId);
+      if (entity) entity.juggernaut = true;
+      const healthComp = ctx.components.get(playerId, "Health");
+      if (healthComp) {
+        healthComp.maximum = Math.max(Number(healthComp.maximum) || 200, JUGGERNAUT_HEALTH);
+        healthComp.current = JUGGERNAUT_HEALTH;
+        ctx.events.emit("health:changed", {
+          entityId: playerId,
+          health: healthComp.current,
+          maximum: healthComp.maximum,
+        });
+      }
+      armorService?.grantJuggernautArmor?.(playerId);
+      if (!weapons.grant(playerId, "sniper")) weapons.restock?.(playerId, "sniper", 20);
+      else weapons.restock?.(playerId, "sniper", 15);
+      if (!weapons.grant(playerId, "marksman")) weapons.restock?.(playerId, "marksman", 48);
+      else weapons.restock?.(playerId, "marksman", 36);
+      if (!weapons.grant(playerId, "rifle")) weapons.restock?.(playerId, "rifle", 90);
+      else weapons.restock?.(playerId, "rifle", 60);
+      quantity = 12;
+      applied = true;
+      ctx.events.emit("juggernaut:equipped", {
+        entityId: playerId,
+        crateId: result.crateId,
+        health: JUGGERNAUT_HEALTH,
+        armor: 600,
+        x: result.x,
+        y: result.y,
+        z: result.z,
+      });
     }
     ctx.events.emit("loot:picked", {
       entityId: playerId,
@@ -364,12 +449,17 @@ export async function setup(ctx) {
     const semanticPosition = drivenVehicle
       ? { x: drivenVehicle.x, y: 0, z: drivenVehicle.z }
       : position;
+    const teamId = ctx.components.get(entity.id, "Team")?.id ?? 0;
+    const personalKills = entityKills.get(entity.id) ?? 0;
+    const totalSquadKills = teamId > 0 ? Math.max(personalKills, teamKills.get(teamId) ?? 0) : personalKills;
     const view = {
       id: entity.id,
       name: entity.name,
       bot: entity.bot,
       alive: entity.alive,
-      team: ctx.components.get(entity.id, "Team")?.id ?? 0,
+      team: teamId,
+      kills: personalKills,
+      squadKills: totalSquadKills,
       x: position.x,
       y: position.y,
       z: position.z,
@@ -386,6 +476,7 @@ export async function setup(ctx) {
       armorReserve: armorDescription?.reservePlates ?? null,
       armorReserveMax: armorDescription?.reserveCapacity ?? null,
       armorSatchel: armorDescription?.hasSatchel ?? false,
+      juggernaut: Boolean(entity.juggernaut),
       plating: armorDescription?.plating ?? false,
       weapon: selected?.id ?? null,
       weapons: inventory?.items?.map((item) => item.id) ?? [],
@@ -406,6 +497,10 @@ export async function setup(ctx) {
           x: crate.x,
           y: crate.y ?? 0,
           z: crate.z,
+          loot: crate.loot ?? null,
+          airdrop: Boolean(crate.airdrop),
+          juggernaut: Boolean(crate.juggernaut || crate.loot === "juggernaut"),
+          airdropPhase: crate.airdropPhase ?? null,
           opened: Boolean(crate.opened),
           occlusion: listener ? (acousticOcclusion(listener, crate) ?? 0) : 0,
         }))
@@ -413,12 +508,22 @@ export async function setup(ctx) {
     };
   }
 
+  function setEnemyAiMode(nextMode, now = Date.now()) {
+    return aiDecisions?.setMode?.(nextMode, now) ?? "standard";
+  }
+
+  function aiEnemiesState(now = Date.now()) {
+    return aiDecisions?.describe?.(now) ?? null;
+  }
+
   function snapshot(now = Date.now()) {
+    const aiEnemies = aiDecisions?.describe?.(now) ?? null;
     return {
       now,
       mode: "battle-royale",
       map: mapSnapshot(),
       match: battleRoyale.status(now),
+      ...(aiEnemies ? { aiEnemies } : {}),
       entities: entities.all().map(entity => entitySnapshot(entity, now)),
     };
   }
@@ -447,12 +552,14 @@ export async function setup(ctx) {
       if (distance2(listenerTransform, transform) <= radius) visible.push(entitySnapshot(entity, now));
     }
     const tutorialState = tutorial?.describe?.(playerId) ?? null;
+    const aiEnemies = aiDecisions?.describe?.(now) ?? null;
     return {
       now,
       mode: "battle-royale",
       map: mapSnapshot(listenerTransform),
       match: battleRoyale.status(now),
       ...(tutorialState ? { tutorial: tutorialState } : {}),
+      ...(aiEnemies ? { aiEnemies } : {}),
       playerPlacement: battleRoyale.placementOf(playerId),
       spectator: spectatorTarget ? {
         active: true,
@@ -465,28 +572,64 @@ export async function setup(ctx) {
 
   function eventsForPlayer(playerId, packets = []) {
     const spectatorTarget = spectatorTargetFor(playerId);
-    const self = spectatorTarget
-      ? ctx.components.get(spectatorTarget.id, "Transform")
-      : ctx.components.get(playerId, "Transform");
+    const listenerId = spectatorTarget?.id ?? playerId;
+    const self = ctx.components.get(listenerId, "Transform");
+    const ownTeam = Number(teams.teamOf(listenerId)) || 0;
+    const listenerVehicleId = vehicles?.vehicleForDriver?.(listenerId)?.id
+      ?? vehicles?.vehicleForPassenger?.(listenerId)?.id
+      ?? null;
     const globalEvents = new Set([
       "battle-royale:deployment",
       "battle-royale:started",
       "battle-royale:remaining",
       "battle-royale:ended",
       "battle-royale:zone-closing",
+      "crate:airdrop-incoming",
+      "crate:airdrop-landed",
+      "crate:airdrop-opened",
+      "crate:juggernaut-incoming",
+      "crate:juggernaut-landed",
+      "juggernaut:equipped",
     ]);
     const selected = packets.filter((packet) => {
       const payload = packet.payload ?? {};
+      if (packet.event.startsWith("ai-decisions:")) return true;
       if (globalEvents.has(packet.event)) return true;
       if (packet.event === "feedback:sound") return payload.recipientId === playerId;
       if (packet.event === "movement:blocked") return payload.recipientId === playerId;
       if (packet.event.startsWith("ragdoll:")) return payload.entityId === playerId;
       if (packet.event === "battle-royale:zone-damage") return payload.entityId === playerId;
-      if (packet.event.startsWith("armor:")) return payload.entityId === playerId;
+      if (packet.event.startsWith("armor:")) {
+        if (payload.entityId === playerId || payload.entityId === listenerId) return true;
+        if (packet.event === "armor:changed") {
+          return ownTeam > 0 && payload.entityId && (Number(teams.teamOf(payload.entityId)) || 0) === ownTeam;
+        }
+        if (self && Number.isFinite(payload.x) && Number.isFinite(payload.z)) {
+          return distance2(self, payload) <= Number(payload.radius ?? 34) + 4;
+        }
+        return ownTeam > 0 && payload.entityId && (Number(teams.teamOf(payload.entityId)) || 0) === ownTeam;
+      }
       if (packet.event === "weapon:selected" || packet.event === "weapon:unlocked") return payload.entityId === playerId;
       if (packet.event === "loot:picked") return payload.entityId === playerId;
       if (packet.event === "combat:damage") return payload.targetId === playerId || payload.attackerId === playerId;
-      if (packet.event === "entity:died") return payload.entityId === playerId || payload.killerId === playerId;
+      if (packet.event === "entity:died") {
+        if (payload.entityId === playerId || payload.killerId === playerId) return true;
+        if (ownTeam > 0 && payload.killerId && (Number(teams.teamOf(payload.killerId)) || 0) === ownTeam) return true;
+        return ownTeam > 0 && payload.entityId && (Number(teams.teamOf(payload.entityId)) || 0) === ownTeam;
+      }
+      if (packet.event === "vehicle:passenger-entered" || packet.event === "vehicle:passenger-exited") {
+        if (payload.entityId === listenerId || payload.driverId === listenerId) return true;
+        if (listenerVehicleId && payload.vehicleId === listenerVehicleId) return true;
+        return ownTeam > 0 && payload.entityId && (Number(teams.teamOf(payload.entityId)) || 0) === ownTeam;
+      }
+      if (packet.event === "squad:callout") {
+        if (payload.recipientId === playerId || payload.killerId === listenerId) return true;
+        if (ownTeam > 0 && (payload.targetTeamId === ownTeam || payload.teamId === ownTeam)) return true;
+        if (self && Number.isFinite(payload.x) && Number.isFinite(payload.z)) {
+          return distance2(self, payload) <= Number(payload.radius ?? 65);
+        }
+        return false;
+      }
       if (!self) return false;
       if (packet.event === "sound:spatial") {
         if (payload.entityId === playerId) return true;
@@ -495,13 +638,22 @@ export async function setup(ctx) {
       if (packet.event === "weapon:fired") return payload.entityId === playerId || distance2(self, payload) <= 125;
       if (packet.event === "world:door") return payload.entityId === playerId || distance2(self, payload) <= 35;
       if (packet.event === "loot:opened") return payload.entityId === playerId || distance2(self, payload) <= 28;
-      if (packet.event === "battle-royale:eliminated") return payload.entityId === playerId || payload.killerId === playerId;
+      if (packet.event === "battle-royale:eliminated") {
+        if (payload.entityId === playerId || payload.killerId === playerId) return true;
+        return ownTeam > 0 && payload.killerId && (Number(teams.teamOf(payload.killerId)) || 0) === ownTeam;
+      }
       return false;
     });
 
     if (!self) return selected;
     return selected.map((packet) => {
-      if (packet.event !== "sound:spatial" && packet.event !== "loot:opened") return packet;
+      if (
+        packet.event !== "sound:spatial"
+        && packet.event !== "loot:opened"
+        && packet.event !== "crate:airdrop-landed"
+        && packet.event !== "crate:juggernaut-landed"
+        && !packet.event.startsWith("armor:")
+      ) return packet;
       const payload = packet.payload ?? {};
       if (!Number.isFinite(payload.x) || !Number.isFinite(payload.z)) return packet;
       const occlusion = acousticOcclusion(self, payload);
@@ -525,5 +677,7 @@ export async function setup(ctx) {
     snapshot,
     snapshotFor,
     eventsForPlayer,
+    setEnemyAiMode,
+    aiEnemiesState,
   });
 }

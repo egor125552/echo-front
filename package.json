@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --ip 0.0.0.0 --port 3000 --show-interactive-dev-session=false",
-    "start": "wrangler dev --ip 0.0.0.0 --port 3000 --show-interactive-dev-session=false",
+    "dev": "CLOUDFLARE_INCLUDE_PROCESS_ENV=true wrangler dev --ip 0.0.0.0 --port 3000 --show-interactive-dev-session=false",
+    "start": "CLOUDFLARE_INCLUDE_PROCESS_ENV=true wrangler dev --ip 0.0.0.0 --port 3000 --show-interactive-dev-session=false",
     "build": "wrangler deploy --dry-run --outdir=dist",
     "lint": "node --test scripts/check-client-plugin-bootstrap.mjs",
     "deploy": "wrangler deploy",
@@ -27,6 +27,7 @@
   "dependencies": {
     "@dimforge/rapier3d": "0.19.3",
     "@dimforge/rapier3d-compat": "0.19.3",
+    "@google/genai": "^3.4.0",
     "xstate": "5.32.5"
   },
   "devDependencies": {

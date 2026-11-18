@@ -33,6 +33,43 @@ const DEFINITIONS = {
     soundRadius: 110,
     reloadMs: 1550,
   },
+  marksman: {
+    id: "marksman",
+    name: "Винтовка",
+    automatic: false,
+    holdRepeat: true,
+    magazine: 15,
+    reserve: 90,
+    damage: 68,
+    armorDamageMultiplier: 1.65,
+    rpm: 240,
+    range: 92,
+    muzzleVelocity: 400,
+    projectileMass: 0.012,
+    projectileRadius: 0.0055,
+    soundKey: "weapon.marksman",
+    soundRadius: 170,
+    reloadMs: 1500,
+  },
+  sniper: {
+    id: "sniper",
+    name: "Снайперка",
+    automatic: false,
+    holdRepeat: false,
+    magazine: 6,
+    reserve: 36,
+    damage: 165,
+    shattersArmor: true,
+    armorDamageMultiplier: 2.2,
+    rpm: 54,
+    range: 155,
+    muzzleVelocity: 560,
+    projectileMass: 0.025,
+    projectileRadius: 0.0075,
+    soundKey: "weapon.sniper",
+    soundRadius: 240,
+    reloadMs: 1850,
+  },
 };
 
 export const manifest = {
@@ -140,8 +177,10 @@ export async function setup(ctx) {
     }
     if (weapon.reloadUntil > now || weapon.ammo <= 0) return false;
     const minimumDelay = 60000 / definition.rpm;
-    // Physical taps of the pistol bypass the hold-repeat cadence, not the magazine.
-    if ((!pressed || definition.automatic) && now - weapon.lastFireAt < minimumDelay) return false;
+    // Physical taps bypass hold-repeat cadence on semi-auto sidearms, not bolt-action rechambers.
+    if ((!pressed || definition.automatic || !definition.holdRepeat) && now - weapon.lastFireAt < minimumDelay) {
+      return false;
+    }
     // A held input can arrive in the same server tick as its initial press.
     if (now === weapon.lastFireAt) return false;
 
@@ -156,11 +195,15 @@ export async function setup(ctx) {
       y: 0,
       z: -Math.cos(transform.angle),
     };
+    const targetingOptions = {
+      muzzleVelocity: definition.muzzleVelocity,
+      weaponId: weapon.id,
+    };
     const resolved = targeting?.resolveShot
-      ? targeting.resolveShot(entityId, baseDirection, definition.range)
+      ? targeting.resolveShot(entityId, baseDirection, definition.range, targetingOptions)
       : {
           direction: targeting
-            ? targeting.adjustDirection(entityId, baseDirection, definition.range)
+            ? targeting.adjustDirection(entityId, baseDirection, definition.range, targetingOptions)
             : baseDirection,
           targetId: null,
         };

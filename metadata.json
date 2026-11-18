@@ -1,5 +1,6 @@
 {
   "name": "Echo Front",
   "description": "Сетевой пространственный аудиошутер с командным боем, королевской битвой и поддержкой VoiceOver.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

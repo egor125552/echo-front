@@ -172,6 +172,42 @@ export default {
       return room.fetch(request);
     }
 
+    if (url.pathname === "/api/ai-enemies") {
+      const headers = { "Cache-Control": "no-store" };
+      const budgetRoom = env.MATCH_ROOM.getByName("__ai-budget__");
+      if (request.method === "GET") {
+        const budgetRes = await budgetRoom.fetch(new Request("https://internal/internal/ai-budget"));
+        const budget = await budgetRes.json();
+        const rawRoom = url.searchParams.get("room");
+        let roomState = null;
+        if (rawRoom) {
+          const mode = normalizeGameMode(url.searchParams.get("mode"));
+          const room = env.MATCH_ROOM.getByName(`${mode}:${rawRoom.slice(0, 64)}`);
+          const roomRes = await room.fetch(new Request("https://internal/internal/ai-enemies"));
+          roomState = await roomRes.json();
+        }
+        return Response.json({
+          ok: true,
+          model: "gemini-decision-1",
+          ...budget,
+          ...(roomState ? { room: roomState } : {}),
+        }, { headers });
+      }
+      if (request.method === "POST") {
+        let body = {};
+        try { body = await request.json(); } catch {}
+        const rawRoom = String(body?.room || url.searchParams.get("room") || "public").slice(0, 64);
+        const mode = normalizeGameMode(body?.mode || url.searchParams.get("mode"));
+        const room = env.MATCH_ROOM.getByName(`${mode}:${rawRoom}`);
+        return room.fetch(new Request("https://internal/internal/ai-enemies", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }));
+      }
+      return Response.json({ ok: false, error: "Method not allowed" }, { status: 405, headers });
+    }
+
     if (url.pathname === "/api/play") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response("WebSocket required", { status: 426 });

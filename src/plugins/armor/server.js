@@ -62,16 +62,28 @@ export async function setup(ctx) {
     ctx.events.emit("armor:changed", { entityId, ...state });
   }
 
+  function entityPosition(entityId) {
+    const t = ctx.components.get(entityId, "Transform");
+    return {
+      x: Number(t?.x) || 0,
+      y: Number(t?.y) || 0,
+      z: Number(t?.z) || 0,
+      radius: 34,
+    };
+  }
+
   function cancelPlating(entityId, reason = "cancelled") {
     const active = plating.get(entityId);
     if (!active) return false;
     plating.delete(entityId);
     autoPlating.delete(entityId);
+    const pos = entityPosition(entityId);
     ctx.events.emit("armor:plating-cancelled", {
       entityId,
       reason,
       targetPlate: active.targetPlate,
       reservePlates: armorState(entityId)?.reserve ?? 0,
+      ...pos,
     });
     return true;
   }
@@ -90,12 +102,19 @@ export async function setup(ctx) {
       targetPlate,
     };
     plating.set(entityId, active);
+    const pos = entityPosition(entityId);
     ctx.events.emit("armor:plating-started", {
       entityId,
       targetPlate,
       reservePlates: armor.reserve,
       startedAt: active.startedAt,
       completesAt: active.completesAt,
+      ...pos,
+    });
+    ctx.events.emit("sound:spatial", {
+      entityId,
+      key: "armor.plate.start",
+      ...pos,
     });
     return true;
   }
@@ -129,6 +148,20 @@ export async function setup(ctx) {
     return true;
   }
 
+  function grantJuggernautArmor(entityId) {
+    const entity = entities.get(entityId);
+    const armor = armorState(entityId);
+    if (!entity?.alive || !armor) return false;
+    armor.plateValue = 75;
+    armor.maximum = 600;
+    armor.current = 600;
+    armor.hasSatchel = true;
+    armor.reserveCapacity = 12;
+    armor.reserve = 12;
+    emitChanged(entityId);
+    return true;
+  }
+
   function tick(now = Date.now()) {
     for (const [entityId, active] of [...plating]) {
       if (now < active.completesAt) continue;
@@ -144,6 +177,7 @@ export async function setup(ctx) {
       armor.reserve -= 1;
       armor.current = clampArmor(armor.current + armor.plateValue, armor.maximum);
       const state = describe(entityId);
+      const pos = entityPosition(entityId);
       emitChanged(entityId);
       ctx.events.emit("armor:plating-completed", {
         entityId,
@@ -153,6 +187,12 @@ export async function setup(ctx) {
         maximum: state.maximum,
         reservePlates: state.reservePlates,
         reserveCapacity: state.reserveCapacity,
+        ...pos,
+      });
+      ctx.events.emit("sound:spatial", {
+        entityId,
+        key: "armor.plate.complete",
+        ...pos,
       });
       if (autoPlating.has(entityId) && !startPlating(entityId, now)) {
         autoPlating.delete(entityId);
@@ -201,17 +241,62 @@ export async function setup(ctx) {
   });
 
   ctx.events.on("combat:damage:before", (packet) => {
+    const target = entities.get(packet.targetId);
     const armor = armorState(packet.targetId);
-    if (!armor || armor.current <= 0 || packet.remaining <= 0) return;
+    if (!target?.alive || !armor || armor.current <= 0 || packet.remaining <= 0) return;
+
+    const weaponDef = packet.weaponId && ctx.services.has("weapons")
+      ? ctx.services.get("weapons")?.definitions?.[packet.weaponId]
+      : null;
+    const armorMultiplier = Math.max(
+      1,
+      Number(packet.armorDamageMultiplier ?? weaponDef?.armorDamageMultiplier) || 1,
+    );
+    const shattersArmor = Boolean(packet.shattersArmor ?? weaponDef?.shattersArmor);
 
     cancelPlating(packet.targetId, "damaged");
     const before = armor.current;
-    const absorbed = Math.min(armor.current, packet.remaining);
-    armor.current -= absorbed;
-    packet.remaining = Math.max(0, packet.remaining - absorbed);
-    packet.armorAbsorbed = absorbed;
+
+    if (armorMultiplier === 1 && !shattersArmor) {
+      const absorbed = Math.min(armor.current, packet.remaining);
+      armor.current -= absorbed;
+      packet.remaining = Math.max(0, packet.remaining - absorbed);
+      packet.armorAbsorbed = absorbed;
+      packet.armorBroke = before > 0 && armor.current <= 0;
+      emitChanged(packet.targetId);
+      if (packet.armorBroke) {
+        const pos = entityPosition(packet.targetId);
+        ctx.events.emit("sound:spatial", {
+          entityId: packet.targetId,
+          key: "armor.break",
+          ...pos,
+        });
+      }
+      return;
+    }
+
+    const rawArmorDamage = Math.round(packet.remaining * armorMultiplier);
+    const brokenArmor = shattersArmor
+      ? before
+      : Math.min(armor.current, rawArmorDamage);
+    const damageConsumedByArmor = Math.min(
+      packet.remaining,
+      Math.round(brokenArmor / armorMultiplier),
+    );
+
+    armor.current = Math.max(0, armor.current - brokenArmor);
+    packet.remaining = Math.max(0, packet.remaining - damageConsumedByArmor);
+    packet.armorAbsorbed = brokenArmor;
     packet.armorBroke = before > 0 && armor.current <= 0;
     emitChanged(packet.targetId);
+    if (packet.armorBroke) {
+      const pos = entityPosition(packet.targetId);
+      ctx.events.emit("sound:spatial", {
+        entityId: packet.targetId,
+        key: "armor.break",
+        ...pos,
+      });
+    }
   }, { priority: 100 });
 
   ctx.events.on("respawn:before", ({ entityId }) => {
@@ -232,6 +317,7 @@ export async function setup(ctx) {
     describe,
     grantPlates,
     grantSatchel,
+    grantJuggernautArmor,
     isPlating(entityId) {
       return plating.has(entityId);
     },

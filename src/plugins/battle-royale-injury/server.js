@@ -31,7 +31,19 @@ export async function setup(ctx) {
   const states = new Map();
   const isDowned = id => Boolean(states.get(id)?.downed);
   const stateFor = id => states.get(id) ?? null;
-  const emit = (name, entityId, extra = {}) => ctx.events.emit(`injury:${name}`, { entityId, ...extra });
+  const emit = (name, entityId, extra = {}) => {
+    const t = ctx.components.get(entityId, "Transform");
+    const teamId = Number(teams.teamOf(entityId)) || 0;
+    ctx.events.emit(`injury:${name}`, {
+      entityId,
+      teamId,
+      x: Number(t?.x) || 0,
+      y: Number(t?.y) || 0,
+      z: Number(t?.z) || 0,
+      radius: 36,
+      ...extra,
+    });
+  };
 
   function isBotEntity(entity) {
     if (!entity) return false;
@@ -56,6 +68,32 @@ export async function setup(ctx) {
     return false;
   }
 
+  function hasAliveHumanTeammate(entityId) {
+    const self = entities.get(entityId);
+    if (self?.humanSquad) {
+      const leader = entities.get(self.humanSquad);
+      if (leader?.alive) return true;
+    }
+    const ownTeam = Number(teams.teamOf(entityId)) || 0;
+    if (ownTeam <= 0) return false;
+    for (const other of entities.all()) {
+      if (!other?.alive || other.id === entityId) continue;
+      if ((Number(teams.teamOf(other.id)) || 0) !== ownTeam) continue;
+      if (!isBotEntity(other)) return true;
+    }
+    return false;
+  }
+
+  function hasAliveTeammate(entityId) {
+    const ownTeam = Number(teams.teamOf(entityId)) || 0;
+    if (ownTeam <= 0) return false;
+    for (const other of entities.all()) {
+      if (!other?.alive || other.id === entityId) continue;
+      if ((Number(teams.teamOf(other.id)) || 0) === ownTeam) return true;
+    }
+    return false;
+  }
+
   function wipeOrphanedDownedBots(teamId, killerId = null, now = Date.now()) {
     const team = Number(teamId) || 0;
     if (team <= 0) return;
@@ -63,7 +101,12 @@ export async function setup(ctx) {
     if (!teamMembers.length) return;
     const anyHumanAlive = teamMembers.some(e => !isBotEntity(e));
     const anyStanding = teamMembers.some(e => !isDowned(e.id));
-    if (anyHumanAlive || anyStanding) return;
+    const stimulants = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
+    const anyBotWithStim = stimulants && teamMembers.some(
+      e => ((stimulants.totalCount?.(e.id) ?? stimulants.count(e.id)) > 0 || stimulants.isUsing?.(e.id))
+        && (Boolean(e.humanSquad) || Boolean(e.juggernaut) || Boolean(e.allowSoloSelfRevive) || teamMembers.length >= 2),
+    );
+    if (anyHumanAlive || anyStanding || anyBotWithStim) return;
     for (const member of teamMembers) {
       if (!member.alive || !isBotEntity(member) || !isDowned(member.id)) continue;
       const st = states.get(member.id);
@@ -162,6 +205,11 @@ export async function setup(ctx) {
   function startTeamRevive(reviverId, targetId = null, now = Date.now()) {
     const resolvedTargetId = targetId ?? nearestDownedTeammate(reviverId, TEAM_REVIVE_RANGE)?.entityId ?? null;
     if (!resolvedTargetId || !canReviveNow(reviverId, resolvedTargetId)) return false;
+    const stimulants = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
+    if (stimulants?.isUsing?.(reviverId)) return false;
+    if (stimulants?.isUsing?.(resolvedTargetId)) {
+      stimulants.cancel(resolvedTargetId, "team-revive");
+    }
     const state = stateFor(resolvedTargetId);
     if (!state?.downed) return false;
     if (state.reviverId === reviverId) return true;
@@ -172,12 +220,24 @@ export async function setup(ctx) {
     state.reviverId = reviverId;
     state.reviveUpdatedAt = now;
     state.lastBleedAt = Math.max(state.lastBleedAt ?? now, now);
+    const targetTransform = ctx.components.get(resolvedTargetId, "Transform");
     emit("team-revive-started", resolvedTargetId, {
       reviverId,
       progressMs: Math.round(state.reviveProgressMs ?? 0),
       durationMs: TEAM_REVIVE_DURATION_MS,
       now,
     });
+    if (targetTransform) {
+      ctx.events.emit("sound:spatial", {
+        entityId: resolvedTargetId,
+        reviverId,
+        key: "injury.revive.start",
+        x: Number(targetTransform.x) || 0,
+        y: Number(targetTransform.y) || 0,
+        z: Number(targetTransform.z) || 0,
+        radius: 36,
+      });
+    }
     return true;
   }
 
@@ -195,12 +255,21 @@ export async function setup(ctx) {
     const weaponId = packet.source?.weaponId ?? null;
     const inTutorial = ctx.services.has("battle-royale-tutorial");
     const canDownHuman = !bot && entity.kind === "human";
+    const stimulants = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
+    const hasStim = stimulants
+      ? ((stimulants.totalCount?.(entity.id) ?? stimulants.count(entity.id)) > 0)
+      : false;
     const canDownSquadBot = bot
       && !inTutorial
       && !airborne
       && weaponId !== "fall-impact"
       && weaponId !== "zone"
-      && hasStandingTeammate(entity.id);
+      && (
+        hasStandingTeammate(entity.id)
+        || hasAliveHumanTeammate(entity.id)
+        || (hasAliveTeammate(entity.id) && hasStim)
+        || (Boolean(entity.juggernaut || entity.allowSoloSelfRevive) && hasStim)
+      );
 
     if (!canDownHuman && !canDownSquadBot) return;
 
@@ -228,13 +297,69 @@ export async function setup(ctx) {
     const plates = ctx.components.get(entity.id, "Armor");
     if (plates) plates.current = 0;
     movement.setInput(entity.id, {});
+    const entityTeam = Number(teams.teamOf(entity.id)) || 0;
+    const attackerId = packet.source?.attackerId ?? null;
+    const attackerTeam = attackerId ? (Number(teams.teamOf(attackerId)) || 0) : 0;
     emit("downed", entity.id, {
       health: DOWNED_HEALTH,
       maximum: DOWNED_HEALTH,
-      attackerId: packet.source?.attackerId ?? null,
+      attackerId,
       weaponId,
+      teamId: entityTeam,
+      entityName: entity.name ?? null,
       now: packet.now,
     });
+    if (transform && !inTutorial) {
+      const attackerIsHumanSquad = Boolean(
+        attackerId
+        && (entities.get(attackerId)?.kind === "human" || entities.get(attackerId)?.humanSquad),
+      );
+      if (attackerIsHumanSquad && attackerTeam > 0 && attackerTeam !== entityTeam) {
+        ctx.events.emit("squad:callout", {
+          kind: "enemy-downed",
+          text: "Он ранен.",
+          speakerId: attackerId,
+          speakerName: entities.get(attackerId)?.name ?? null,
+          subjectId: entity.id,
+          subjectName: entity.name ?? null,
+          teamId: attackerTeam,
+          targetTeamId: attackerTeam,
+          killerId: attackerId,
+          x: Number(transform.x) || 0,
+          y: Number(transform.y) || 0,
+          z: Number(transform.z) || 0,
+          radius: 120,
+          now: packet.now,
+        });
+      } else {
+        const standingMate = entities.all().find((other) => (
+          other?.alive
+          && other.id !== entity.id
+          && entityTeam > 0
+          && (Number(teams.teamOf(other.id)) || 0) === entityTeam
+          && !isDowned(other.id)
+          && isBotEntity(other)
+        ));
+        if (standingMate) {
+          const mateTransform = ctx.components.get(standingMate.id, "Transform");
+          ctx.events.emit("squad:callout", {
+            kind: "enemy-downed",
+            text: "Он ранен.",
+            speakerId: standingMate.id,
+            speakerName: standingMate.name ?? null,
+            subjectId: entity.id,
+            subjectName: entity.name ?? null,
+            teamId: entityTeam,
+            killerId: attackerId,
+            x: Number(mateTransform?.x ?? transform.x) || 0,
+            y: Number(mateTransform?.y ?? transform.y) || 0,
+            z: Number(mateTransform?.z ?? transform.z) || 0,
+            radius: 65,
+            now: packet.now,
+          });
+        }
+      }
+    }
     if (transform && !ragdoll.isActive(entity.id)) {
       ctx.events.emit("sound:spatial", {
         entityId: entity.id,
@@ -256,6 +381,8 @@ export async function setup(ctx) {
     const st = states.get(entityId);
     const wasDowned = Boolean(st?.downed);
     if (st) st.downed = false;
+    const entity = entities.get(entityId);
+    const ownTeam = Number(teams.teamOf(entityId)) || 0;
     const transform = ctx.components.get(entityId, "Transform");
     const airborne = Boolean(ctx.components.get(entityId, "Parachute")?.airborne);
     if (transform && !airborne && !ragdoll.isActive(entityId) && (!wasDowned || (!st?.wiping && weaponId !== "bleed-out"))) {
@@ -272,20 +399,73 @@ export async function setup(ctx) {
       });
     }
     if (st?.wiping) return;
-    wipeOrphanedDownedBots(teams.teamOf(entityId), killerId ?? null, now);
+    if (!ctx.services.has("battle-royale-tutorial") && ownTeam > 0) {
+      const survivingBotMate = entities.all().find((other) => (
+        other?.alive
+        && other.id !== entityId
+        && (Number(teams.teamOf(other.id)) || 0) === ownTeam
+        && isBotEntity(other)
+      ));
+      const humanOnTeam = entities.all().some((other) => (
+        other?.alive && !isBotEntity(other) && (Number(teams.teamOf(other.id)) || 0) === ownTeam
+      ));
+      if (humanOnTeam) {
+        ctx.events.emit("squad:callout", {
+          kind: "teammate-died",
+          text: "Напарник умер.",
+          speakerId: entityId,
+          speakerName: entity?.name ?? null,
+          subjectId: entityId,
+          subjectName: entity?.name ?? null,
+          teamId: ownTeam,
+          targetTeamId: ownTeam,
+          killerId: killerId ?? null,
+          x: Number(transform?.x) || 0,
+          y: Number(transform?.y) || 0,
+          z: Number(transform?.z) || 0,
+          radius: 140,
+          now,
+        });
+      } else if (survivingBotMate) {
+        const mateTransform = ctx.components.get(survivingBotMate.id, "Transform") ?? transform;
+        ctx.events.emit("squad:callout", {
+          kind: "teammate-killed",
+          text: "Моего напарника там убили.",
+          speakerId: survivingBotMate.id,
+          speakerName: survivingBotMate.name ?? null,
+          subjectId: entityId,
+          subjectName: entity?.name ?? null,
+          teamId: ownTeam,
+          killerId: killerId ?? null,
+          x: Number(mateTransform?.x ?? transform?.x) || 0,
+          y: Number(mateTransform?.y ?? transform?.y) || 0,
+          z: Number(mateTransform?.z ?? transform?.z) || 0,
+          radius: 95,
+          now,
+        });
+      }
+    }
+    wipeOrphanedDownedBots(ownTeam, killerId ?? null, now);
   });
 
   const originalHeal = health.heal.bind(health);
   health.heal = (id, amount) => isDowned(id) ? 0 : originalHeal(id, amount);
 
-  function revive(id, now = Date.now(), reviverId = null) {
+  function revive(id, now = Date.now(), reviverId = null, options = {}) {
     const state = stateFor(id);
     if (!state?.downed || !entities.get(id)?.alive) return false;
-    if (!physics.setCharacterDowned(id, false)) return false;
+    const entity = entities.get(id);
+    if (!physics.setCharacterDowned(id, false) && !isBotEntity(entity)) return false;
     const resolvedReviverId = reviverId ?? state.reviverId ?? null;
     const hp = ctx.components.get(id, "Health");
-    hp.maximum = state.normalMaximum;
-    hp.current = Math.min(hp.maximum, 100);
+    const targetHealth = Number(options?.targetHealth);
+    if (Number.isFinite(targetHealth) && targetHealth > 0) {
+      hp.maximum = Math.max(state.normalMaximum, targetHealth);
+      hp.current = targetHealth;
+    } else {
+      hp.maximum = state.normalMaximum;
+      hp.current = Math.min(hp.maximum, 100);
+    }
     state.downed = false;
     state.reviveProgressMs = 0;
     state.reviverId = null;
@@ -296,7 +476,18 @@ export async function setup(ctx) {
     const feet = physics.position(id);
     Object.assign(transform, feet, { verticalVelocity: 0, grounded: false });
     ctx.events.emit("health:changed", { entityId: id, health: hp.current, maximum: hp.maximum });
-    emit("revived", id, { health: hp.current, reviverId: resolvedReviverId, now });
+    emit("revived", id, { health: hp.current, maximum: hp.maximum, reviverId: resolvedReviverId, now });
+    if (transform) {
+      ctx.events.emit("sound:spatial", {
+        entityId: id,
+        reviverId: resolvedReviverId,
+        key: "injury.revive.complete",
+        x: Number(transform.x) || 0,
+        y: Number(transform.y) || 0,
+        z: Number(transform.z) || 0,
+        radius: 36,
+      });
+    }
     if (resolvedReviverId) {
       emit("team-revive-completed", id, {
         reviverId: resolvedReviverId,
@@ -359,6 +550,16 @@ export async function setup(ctx) {
       return { ...snapshot, entities: snapshot.entities.map(entity => ({ ...entity, ...describe(entity.id) })) };
     };
   }
+  ctx.events.on("entity:respawned", ({ entityId }) => {
+    pauseTeamRevive(entityId, "respawn");
+    states.delete(entityId);
+    physics.setCharacterDowned(entityId, false);
+    const transform = ctx.components.get(entityId, "Transform");
+    if (transform) {
+      transform.downed = false;
+      delete transform.movementSpeed;
+    }
+  });
   ctx.events.on("entity:removed", ({ entityId }) => {
     pauseTeamRevive(entityId, "removed");
     states.delete(entityId);

@@ -506,3 +506,173 @@ test("haptic-feedback plugin integrates single/burst/critical patterns, Web Vibr
     });
   }
 });
+
+test("gamepad-input plugin supports Hold Triangle for armor plating with immediate rumble, short tap for interact, and full gamepad controls", async () => {
+  const { setup: setupGamepadInput, GAMEPAD_ARMOR_HOLD_MS } = await import("../public/client/plugins/gamepad-input.js");
+  assert.equal(GAMEPAD_ARMOR_HOLD_MS, 380);
+
+  const old = {
+    window: globalThis.window,
+    document: globalThis.document,
+    navigator: globalThis.navigator,
+    performance: globalThis.performance,
+  };
+
+  let fakeNow = 1000;
+  const rumbles = [];
+  const overlayToggles = [];
+  const buttons = Array.from({ length: 16 }, () => ({ pressed: false, value: 0 }));
+  const fakePad = {
+    connected: true,
+    id: "DualSense Wireless Controller",
+    axes: [0, 0, 0, 0],
+    buttons,
+    vibrationActuator: {
+      type: "dual-rumble",
+      playEffect: async (type, params) => {
+        rumbles.push({ type, ...params });
+      },
+    },
+  };
+
+  let currentEntity = {
+    id: "player-1",
+    alive: true,
+    downed: false,
+    airborne: false,
+    armor: 50,
+    armorMax: 150,
+    armorPlates: 2,
+    armorPlating: false,
+  };
+
+  try {
+    globalThis.performance = { now: () => fakeNow };
+    globalThis.window = {
+      addEventListener() {},
+      removeEventListener() {},
+    };
+    globalThis.document = {
+      getElementById: () => null,
+      querySelector: () => null,
+    };
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: {
+        getGamepads: () => [fakePad],
+      },
+    });
+
+    const events = new EventBus();
+    const baseInput = {
+      state: { lookSensitivity: 0.0042 },
+      sample: () => ({
+        forward: 0,
+        strafe: 0,
+        turn: 0,
+        pitch: 0,
+        sprint: false,
+        jumpPressed: false,
+        interactPressed: false,
+        interactHeld: false,
+        interactReleased: false,
+        platePressed: false,
+        stimulantPressed: false,
+        navigationTogglePressed: false,
+        navigationNextPressed: false,
+        navigationPrevPressed: false,
+        navigationFacePressed: false,
+        weaponSlot: null,
+        firePressed: false,
+        fireHeld: false,
+      }),
+    };
+    const services = new Map([
+      ["input", baseInput],
+      ["overlay-Manager-Stub", null],
+      ["overlay-manager", {
+        isOpen: () => false,
+        toggle: (panel) => overlayToggles.push(panel),
+      }],
+    ]);
+    const ctx = {
+      events,
+      services: {
+        get: (k) => services.get(k),
+        has: (k) => services.has(k),
+        provide: (k, v) => services.set(k, v),
+      },
+    };
+
+    await setupGamepadInput(ctx);
+    events.emit("network:welcome", { playerId: "player-1" });
+    events.emit("game:snapshot", { entities: [currentEntity] });
+
+    // 1. Hold Triangle (button 3) >= 380ms starts armor plating and fires immediate rumble so user can release
+    buttons[3].pressed = true;
+    buttons[3].value = 1;
+    let sampled = baseInput.sample();
+    assert.equal(sampled.platePressed, false, "Initial press at t=1000ms waits for hold threshold when armor can be plated");
+    assert.equal(sampled.interactPressed, false);
+    assert.equal(sampled.interactHeld, true);
+
+    fakeNow += 400; // 400ms >= 380ms
+    sampled = baseInput.sample();
+    assert.equal(sampled.platePressed, true, "Holding Triangle >= 380ms triggers platePressed while still held");
+    assert.equal(sampled.interactPressed, false, "Holding Triangle for armor does not misfire interactPressed");
+    assert(rumbles.length >= 1, "Immediate gamepad rumble confirms armor plating started so player can release Triangle");
+
+    // Releasing Triangle after armor hold does NOT trigger interactPressed
+    buttons[3].pressed = false;
+    buttons[3].value = 0;
+    fakeNow += 30;
+    sampled = baseInput.sample();
+    assert.equal(sampled.interactPressed, false, "Releasing Triangle after armor hold does not trigger interact");
+    assert.equal(sampled.interactReleased, true);
+
+    // 2. Short tap on Triangle (< 380ms) triggers interactPressed on release
+    buttons[3].pressed = true;
+    buttons[3].value = 1;
+    fakeNow += 50;
+    sampled = baseInput.sample();
+    assert.equal(sampled.interactPressed, false);
+
+    buttons[3].pressed = false;
+    buttons[3].value = 0;
+    fakeNow += 120; // 120ms < 380ms
+    sampled = baseInput.sample();
+    assert.equal(sampled.interactPressed, true, "Short tap (<380ms) on Triangle triggers interactPressed");
+
+    // 3. D-Pad Up (button 12), D-Pad Down (13), D-Pad Left (14), D-Pad Right (15), Square (2), R3 (11), Select (8), Start (9)
+    buttons[12].pressed = true;
+    buttons[13].pressed = true;
+    buttons[14].pressed = true;
+    buttons[15].pressed = true;
+    buttons[2].pressed = true;
+    buttons[11].pressed = true;
+    buttons[8].pressed = true;
+    buttons[9].pressed = true;
+    fakeNow += 40;
+    sampled = baseInput.sample();
+    assert.equal(sampled.stimulantPressed, true, "D-Pad Up triggers stimulant / self-revive");
+    assert.equal(sampled.navigationTogglePressed, true, "D-Pad Down toggles route guidance");
+    assert.equal(sampled.navigationPrevPressed, true, "D-Pad Left selects previous navigation target");
+    assert.equal(sampled.navigationNextPressed, true, "D-Pad Right selects next navigation target");
+    assert.equal(sampled.jumpPressed, true, "Square triggers jump");
+    assert.equal(sampled.navigationFacePressed, true, "R3 on ground auto-faces navigation target");
+    assert.deepEqual(overlayToggles, ["map", "menu"], "Select toggles map and Start toggles menu");
+  } finally {
+    Object.assign(globalThis, {
+      window: old.window,
+      document: old.document,
+      performance: old.performance,
+    });
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: old.navigator,
+    });
+  }
+});
+

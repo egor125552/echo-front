@@ -11,6 +11,10 @@ const LOOT_PICKUP_URL = warzoneSound("Call of Duty： Warzone ｜ Legendary Loot
 const CIRCLE_CLOSING_URL = warzoneSound("Call of Duty： Warzone ｜ Circle Closing Now! [Sound Effect].mp3");
 const VICTORY_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Victory! [Sound Effect].mp3");
 const DEFEAT_URL = warzoneSound("Call of Duty： Warzone ｜ Warzone Defeat [Sound Effect].mp3");
+const AIRDROP_INCOMING_URL = warzoneSound("Call of Duty： Warzone ｜ Loadout Drop Incoming [Sound Effect].mp3");
+const AIRDROP_LAND_IMPACT_URL = "/audio/gdc2026/METLImpt_METAL SWING HIT Weapon Swing To Metallic Body Impact And Resonant Tail 01_DDUMAIS_MWP2.mp3";
+const AIRDROP_DESCENT_WIND_URL = "/audio/environment/wind.mp3";
+
 const CRATE_AUDIO_RADIUS = 20;
 const CRATE_START_RADIUS = 18.5;
 const CRATE_FLOOR_TOLERANCE = 1.75;
@@ -19,6 +23,11 @@ const CRATE_AMBIENT_GAIN = 0.48;
 const CRATE_OCCLUDED_GAIN_REDUCTION = 0.52;
 const CRATE_OCCLUSION_CURVE = 0.72;
 const CRATE_OCCLUSION_BOOST = 1.08;
+
+export const AIRDROP_BEACON_RADIUS = 75;
+export const AIRDROP_BEACON_START_RADIUS = 70;
+const AIRDROP_FLOOR_TOLERANCE = 6.0;
+const AIRDROP_BEACON_GAIN = 0.64;
 
 export const manifest = {
   id: "battle-royale-audio",
@@ -38,6 +47,54 @@ function audibleCrateOcclusion(value) {
 function crateAmbientGain(occlusion) {
   const audible = audibleCrateOcclusion(occlusion);
   return CRATE_AMBIENT_GAIN * (1 - audible * CRATE_OCCLUDED_GAIN_REDUCTION);
+}
+
+function airdropBeaconGain(occlusion) {
+  const audible = audibleCrateOcclusion(occlusion);
+  return AIRDROP_BEACON_GAIN * (1 - audible * 0.42);
+}
+
+export function createAirdropBeaconBuffer(audioContext) {
+  const sampleRate = Math.max(8000, Number(audioContext?.sampleRate) || 44100);
+  const duration = 1.5;
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const buffer = audioContext.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate;
+    let sample = 0;
+
+    // Pulse 1: 0.00s .. 0.14s (1320 Hz carrier + harmonics)
+    if (t >= 0 && t <= 0.14) {
+      const localT = t;
+      const attack = Math.min(1, localT / 0.008);
+      const decay = Math.exp(-localT * 16);
+      const env = attack * decay;
+      sample += (
+        Math.sin(2 * Math.PI * 1320 * localT) * 0.62
+        + Math.sin(2 * Math.PI * 2640 * localT) * 0.22
+        + Math.sin(2 * Math.PI * 660 * localT) * 0.16
+      ) * env;
+    }
+
+    // Pulse 2: 0.19s .. 0.38s (1760 Hz confirmation ping + resonant tail)
+    if (t >= 0.19 && t <= 0.38) {
+      const localT = t - 0.19;
+      const attack = Math.min(1, localT / 0.008);
+      const decay = Math.exp(-localT * 13.5);
+      const env = attack * decay;
+      sample += (
+        Math.sin(2 * Math.PI * 1760 * localT) * 0.66
+        + Math.sin(2 * Math.PI * 3520 * localT) * 0.20
+        + Math.sin(2 * Math.PI * 880 * localT) * 0.14
+      ) * env;
+    }
+
+    data[i] = Math.max(-0.95, Math.min(0.95, sample * 0.85));
+  }
+
+  return buffer;
 }
 
 function createDoorBuffer(audioContext, open) {
@@ -62,6 +119,7 @@ export async function setup(ctx) {
   let mode = "tdm";
   let doorOpenBuffer = null;
   let doorCloseBuffer = null;
+  let airdropBeaconBuffer = null;
   let crateGeneration = 0;
   const crateLoops = new Map();
   const pendingCrates = new Set();
@@ -71,8 +129,17 @@ export async function setup(ctx) {
     doorCloseBuffer ??= createDoorBuffer(audio.context, false);
   }
 
+  function ensureAirdropBeaconBuffer() {
+    airdropBeaconBuffer ??= createAirdropBeaconBuffer(audio.context);
+    return airdropBeaconBuffer;
+  }
+
   function crateChannel(crateId) {
     return `br-crate:${crateId}`;
+  }
+
+  function airdropWindChannel(crateId) {
+    return `br-airdrop-wind:${crateId}`;
   }
 
   function stopCrateLoop(crateId) {
@@ -93,23 +160,40 @@ export async function setup(ctx) {
     pendingCrates.add(crate.id);
     const occlusion = clamp01(crate.occlusion);
     const audibleOcclusion = audibleCrateOcclusion(occlusion);
+    const isAirdrop = Boolean(crate.airdrop || crate.loot === "airdrop");
     try {
-      const handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
-        radius: CRATE_AUDIO_RADIUS,
-        gain: crateAmbientGain(occlusion),
-        referenceDistance: 1.4,
-        rolloffFactor: 2.2,
-        occlusion: audibleOcclusion,
-        loop: true,
-        channel: crateChannel(crate.id),
-        replace: true,
-      });
+      let handle = null;
+      if (isAirdrop) {
+        const buffer = ensureAirdropBeaconBuffer();
+        handle = audio.playSpatialBuffer(buffer, crate, {
+          radius: AIRDROP_BEACON_RADIUS,
+          gain: airdropBeaconGain(occlusion),
+          referenceDistance: 3.2,
+          rolloffFactor: 1.35,
+          occlusion: audibleOcclusion,
+          loop: true,
+          channel: crateChannel(crate.id),
+          replace: true,
+        });
+      } else {
+        handle = await audio.playSpatial(CRATE_AMBIENT_URL, crate, {
+          radius: CRATE_AUDIO_RADIUS,
+          gain: crateAmbientGain(occlusion),
+          referenceDistance: 1.4,
+          rolloffFactor: 2.2,
+          occlusion: audibleOcclusion,
+          loop: true,
+          channel: crateChannel(crate.id),
+          replace: true,
+        });
+      }
       if (mode !== "battle-royale" || generation !== crateGeneration || crate.opened) {
         try { handle?.source?.stop(); } catch {}
         return;
       }
       if (handle) {
         handle.crateOcclusion = occlusion;
+        handle.isAirdrop = isAirdrop;
         crateLoops.set(crate.id, handle);
       }
     } catch (error) {
@@ -137,9 +221,16 @@ export async function setup(ctx) {
 
     const generation = crateGeneration;
     for (const crate of crates) {
+      const isAirdrop = Boolean(crate.airdrop || crate.loot === "airdrop");
+      if (isAirdrop && crate.airdropPhase === "descending") {
+        stopCrateLoop(crate.id);
+        continue;
+      }
+      const verticalTolerance = isAirdrop ? AIRDROP_FLOOR_TOLERANCE : CRATE_FLOOR_TOLERANCE;
+      const startRadius = isAirdrop ? AIRDROP_BEACON_START_RADIUS : CRATE_START_RADIUS;
       const verticalDistance = Math.abs((crate.y ?? 0) - (listener.y ?? 0));
       const horizontalDistance = Math.hypot(crate.x - listener.x, crate.z - listener.z);
-      if (crate.opened || verticalDistance > CRATE_FLOOR_TOLERANCE || horizontalDistance > CRATE_START_RADIUS) {
+      if (crate.opened || verticalDistance > verticalTolerance || horizontalDistance > startRadius) {
         stopCrateLoop(crate.id);
         continue;
       }
@@ -183,8 +274,50 @@ export async function setup(ctx) {
           z: payload.z,
         }, { radius: 30, gain: 0.78, referenceDistance: 2, rolloffFactor: 0.55 });
       }
+      if (packet.event === "crate:airdrop-incoming") {
+        await audio.playCentered(AIRDROP_INCOMING_URL, {
+          gain: 0.85,
+          channel: "br-airdrop-incoming",
+          replace: true,
+        });
+        await audio.playSpatial(AIRDROP_DESCENT_WIND_URL, {
+          x: payload.x ?? 0,
+          y: 12,
+          z: payload.z ?? 0,
+        }, {
+          radius: 115,
+          gain: 0.62,
+          referenceDistance: 5,
+          rolloffFactor: 1.15,
+          channel: airdropWindChannel(payload.crateId),
+          replace: true,
+        });
+      }
+      if (packet.event === "crate:airdrop-landed") {
+        if (payload.crateId) audio.stopChannel(airdropWindChannel(payload.crateId));
+        await audio.playSpatial(AIRDROP_LAND_IMPACT_URL, {
+          x: payload.x ?? 0,
+          y: 0,
+          z: payload.z ?? 0,
+        }, {
+          radius: 120,
+          gain: 0.94,
+          referenceDistance: 4.5,
+          rolloffFactor: 1.2,
+          occlusion: clamp01(payload.occlusion),
+          channel: `br-airdrop-impact:${payload.crateId ?? "drop"}`,
+          replace: true,
+        });
+      }
+      if (packet.event === "crate:airdrop-opened") {
+        if (payload.crateId) {
+          audio.stopChannel(airdropWindChannel(payload.crateId));
+          stopCrateLoop(payload.crateId);
+        }
+      }
       if (packet.event === "loot:opened") {
         crateGeneration += 1;
+        if (payload.crateId) audio.stopChannel(airdropWindChannel(payload.crateId));
         stopCrateLoop(payload.crateId);
         await audio.playSpatial(CRATE_OPEN_URL, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
           radius: 12,

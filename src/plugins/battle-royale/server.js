@@ -20,8 +20,16 @@ function clamp01(value) {
   return Math.max(0, Math.min(1, Number(value) || 0));
 }
 
+export function effectiveZoneSteeringBuffer(radius) {
+  const r = Math.max(0, Number(radius) || 0);
+  return Math.min(ZONE_STEERING_BUFFER, r * 0.22);
+}
+
 export function shouldSteerForZone(distance, radius) {
-  return Number(distance) >= Math.max(0, Number(radius) - ZONE_STEERING_BUFFER);
+  const r = Math.max(0, Number(radius) || 0);
+  if (r <= 1) return Number(distance) > 0.5;
+  const buffer = effectiveZoneSteeringBuffer(r);
+  return Number(distance) >= Math.max(2.5, r - buffer);
 }
 
 export function zoneSteeringPoint(x, z, radius) {
@@ -29,9 +37,11 @@ export function zoneSteeringPoint(x, z, radius) {
   const pz = Number(z) || 0;
   const distance = Math.hypot(px, pz);
   if (!shouldSteerForZone(distance, radius)) return null;
-  const safeRadius = Math.max(0, Number(radius) - ZONE_STEERING_BUFFER * 2);
+  const r = Math.max(0, Number(radius) || 0);
+  const buffer = effectiveZoneSteeringBuffer(r);
+  const safeRadius = Math.max(Math.min(r * 0.62, Math.max(0, r - 3.5)), r - buffer * 2);
   const scale = distance > 0 ? Math.min(1, safeRadius / distance) : 0;
-  return { x: px * scale, y: 0, z: pz * scale, distance, radius: Number(radius) };
+  return { x: px * scale, y: 0, z: pz * scale, distance, radius: r };
 }
 
 export function zoneDamageForElapsed(elapsedMs) {
@@ -274,6 +284,20 @@ export async function setup(ctx) {
     }
   }
 
+  function redeploy(entityId, now = Date.now()) {
+    if (phase !== "active") return false;
+    placements.delete(entityId);
+    const alive = aliveEntities().length;
+    previousAlive = alive;
+    ctx.events.emit("battle-royale:redeployed", {
+      entityId,
+      alive,
+      total,
+      now: Number(now) || Date.now(),
+    });
+    return true;
+  }
+
   ctx.events.on("parachute:landed", ({ entityId, now }) => {
     const entity = entities.get(entityId);
     if (!entity || entity.bot || entity.botParachutist || entity.kind !== "human") return;
@@ -291,6 +315,7 @@ export async function setup(ctx) {
     status,
     zoneRadiusAt,
     placementOf(entityId) { return placements.get(entityId) ?? null; },
+    redeploy,
     forfeit,
     canAct() { return phase === "active"; },
     isActive() { return phase === "active"; },

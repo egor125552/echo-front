@@ -18,6 +18,8 @@ export async function setup(ctx) {
   const ammo = document.querySelector("#ammo-value");
   const health = document.querySelector("#health-value");
   const armor = document.querySelector("#armor-value");
+  const cash = document.querySelector("#cash-value");
+  const shopButton = document.querySelector('[data-touch-action="shop"]');
 
   ctx.events.on("network:connected", () => { connection.textContent = "Соединение установлено"; });
   ctx.events.on("network:disconnected", ({ willReconnect } = {}) => {
@@ -45,8 +47,10 @@ export async function setup(ctx) {
           : "Командный бой";
     }
     team.textContent = isBr ? "каждый сам за себя" : String(self.team || "-");
+    const personalKills = Math.max(0, Number(self.kills) || 0);
+    const squadKills = Math.max(personalKills, Number(self.squadKills) || 0);
     score.textContent = isBr
-      ? "без командного счёта"
+      ? (squadKills > 0 ? `убийств отряда: ${squadKills} (ваших: ${personalKills})` : "без командного счёта")
       : `${snapshot.match?.score?.[1] ?? 0} : ${snapshot.match?.score?.[2] ?? 0}`;
     if (remaining) remaining.textContent = isBr ? String(snapshot.match?.alive ?? "-") : "-";
     if (location) location.textContent = observed.location ?? "-";
@@ -59,7 +63,13 @@ export async function setup(ctx) {
         zone.textContent = `${Math.round(radius)} м, вы ${distance <= radius ? "внутри" : "снаружи"}`;
       } else zone.textContent = "-";
     }
-    weapon.textContent = self.weapon === "rifle" ? "Автомат" : self.weapon === "pistol" ? "Пистолет" : "-";
+    const WEAPON_LABELS = {
+      pistol: "Пистолет",
+      rifle: "Автомат",
+      marksman: "Винтовка",
+      sniper: "Снайперка",
+    };
+    weapon.textContent = WEAPON_LABELS[self.weapon] ?? "-";
     ammo.textContent = self.ammo == null ? "-" : `${self.ammo} / ${self.reserve ?? 0}`;
     health.textContent = self.health == null ? "-" : String(Math.round(self.health));
     if (self.armor == null) armor.textContent = "нет";
@@ -71,5 +81,11 @@ export async function setup(ctx) {
       const satchel = self.armorSatchel ? ", бронесумка" : "";
       armor.textContent = `${self.armorPlates} из ${self.armorPlateMax} пластин, ${Math.round(self.armor)} брони${reserve}${satchel}${plating}`;
     } else armor.textContent = String(Math.round(self.armor));
+    if (cash) cash.textContent = isBr ? `${Math.max(0, Number(self.cash) || 0)} $` : "-";
+    if (shopButton) {
+      const nearbyShop = snapshot?.shop?.nearbyShop ?? null;
+      shopButton.disabled = !isBr || !self.alive || Boolean(self.downed) || !nearbyShop;
+      shopButton.textContent = nearbyShop ? `Магазин (${nearbyShop.name})` : "Магазин";
+    }
   });
 }

@@ -44,6 +44,16 @@ export function botFireRhythm(botId, weaponId, cycle = 1) {
     burstMs: 450 + (seed % 430),
     pauseMs: 160 + ((seed >>> 8) % 270),
   };
+  if (weaponId === "marksman") return {
+    shotMs: 255 + (seed % 65),
+    burstMs: 750 + ((seed >>> 8) % 450),
+    pauseMs: 180 + ((seed >>> 16) % 220),
+  };
+  if (weaponId === "sniper") return {
+    shotMs: 1140 + (seed % 160),
+    burstMs: 1400,
+    pauseMs: 0,
+  };
   return {
     shotMs: 105 + (seed % 95),
     burstMs: 440 + ((seed >>> 8) % 410),
@@ -98,6 +108,16 @@ function sampleStuck(botState, transform, now, movementMagnitude) {
   return true;
 }
 
+const BOT_ACTUAL_TURN_SPEED = 2.6;
+
+function tdmSteerTurn(delta, { maxRate = 1.0, deadzone = 0.015, gain = 2.0, dtSec = 0.05 } = {}) {
+  const absDelta = Math.abs(delta);
+  if (absDelta <= deadzone) return 0;
+  const deadbeat = (absDelta * 0.9) / (BOT_ACTUAL_TURN_SPEED * dtSec);
+  const mag = Math.min(maxRate, (absDelta * gain) / BOT_ACTUAL_TURN_SPEED, deadbeat);
+  return Math.sign(delta) * mag;
+}
+
 export function applyBotObstacleAvoidance(physics, botId, transform, botState, input, now = Date.now()) {
   const movementMagnitude = Math.hypot(input.forward, input.strafe);
   if (movementMagnitude < 0.05) {
@@ -109,26 +129,58 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
   const forwardClearance = probeClearance(physics, botId, transform, desiredDirection);
   const blocked = forwardClearance < 0.95;
   const stuck = sampleStuck(botState, transform, now, movementMagnitude);
+  const currentlyAvoiding = (botState.avoidUntil ?? 0) > now;
 
-  if (blocked || stuck) {
-    const rightDirection = rotateDirection(desiredDirection, 0.9);
-    const leftDirection = rotateDirection(desiredDirection, -0.9);
+  if ((blocked && !currentlyAvoiding) || stuck) {
+    const rightDirection = rotateDirection(desiredDirection, 0.85);
+    const leftDirection = rotateDirection(desiredDirection, -0.85);
     const rightClearance = probeClearance(physics, botId, transform, rightDirection);
     const leftClearance = probeClearance(physics, botId, transform, leftDirection);
     const previous = botState.avoidDirection || botState.strafeDirection || 1;
-    botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.08
-      ? previous
-      : (rightClearance > leftClearance ? 1 : -1);
-    botState.avoidUntil = now + (stuck ? 900 : 650);
+    if ((botState.avoidFlipLockUntil ?? 0) <= now) {
+      botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.14
+        ? previous
+        : (rightClearance > leftClearance ? 1 : -1);
+    }
+    botState.avoidUntil = now + (stuck ? 950 : 750);
+  } else if (blocked && currentlyAvoiding) {
+    botState.avoidUntil = Math.max(botState.avoidUntil, now + 350);
   }
 
   if ((botState.avoidUntil ?? 0) <= now) return input;
 
-  let detour = rotateDirection(desiredDirection, (botState.avoidDirection || 1) * 1.15);
-  if (probeClearance(physics, botId, transform, detour) < 0.42) {
-    botState.avoidDirection *= -1;
-    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.35);
+  const side = botState.avoidDirection || 1;
+  let detour = rotateDirection(desiredDirection, side * 0.82);
+  let detourClearance = probeClearance(physics, botId, transform, detour);
+  if (detourClearance < 0.72) {
+    const wider = rotateDirection(desiredDirection, side * 1.2);
+    const widerClearance = probeClearance(physics, botId, transform, wider);
+    if (widerClearance > detourClearance) {
+      detour = wider;
+      detourClearance = widerClearance;
+    }
   }
+  if (detourClearance < 0.42 && (botState.avoidFlipLockUntil ?? 0) <= now) {
+    botState.avoidDirection = -side;
+    botState.avoidFlipLockUntil = now + 550;
+    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.25);
+  }
+
+  const preserveAim = Boolean(input.fireHeld || input.aimLock || Math.abs(input.strafe ?? 0) >= 0.25);
+  if (!preserveAim) {
+    const detourHeading = Math.atan2(detour.x, -detour.z);
+    const delta = wrapAngle(detourHeading - (Number(transform.angle) || 0));
+    const local = worldToLocal(transform.angle, detour);
+    return {
+      ...input,
+      forward: Math.abs(delta) > 1.1 ? 0.15 : Math.max(0.25, Math.min(0.78, Math.hypot(local.forward, local.strafe) * 0.78)),
+      strafe: Math.max(-0.35, Math.min(0.35, local.strafe * 0.4)),
+      turn: tdmSteerTurn(delta, { maxRate: 0.75, deadzone: 0.03, gain: 1.55, dtSec: 0.1 }),
+      targetAngle: detourHeading,
+      sprint: false,
+    };
+  }
+
   const local = worldToLocal(transform.angle, detour);
   return {
     ...input,
@@ -140,9 +192,9 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
 
 export const manifest = {
   id: "bot-combat",
-  version: "2.2.0",
+  version: "2.3.0",
   requires: ["bot-controller", "bot-perception", "movement", "weapons", "entities", "rapier-physics"],
-  optional: ["opening-round", "tutorial-session", "armor", "teams"],
+  optional: ["opening-round", "tutorial-session", "armor", "teams", "ai-enemy-decisions"],
   capabilities: [
     "services.consume", "services.provide",
     "components.read", "events.on",
@@ -161,6 +213,47 @@ export async function setup(ctx) {
   const tutorial = ctx.services.has("tutorial-session") ? ctx.services.get("tutorial-session") : null;
 
   const teams = ctx.services.has("teams") ? ctx.services.get("teams") : null;
+  const aiDecisions = ctx.services.has("ai-enemy-decisions")
+    ? ctx.services.get("ai-enemy-decisions")
+    : null;
+
+  function pickAiVisibleTarget(bot, botState, maxRange, aiCmd, now) {
+    const list = typeof perception.visibleEnemies === "function"
+      ? perception.visibleEnemies(bot.id, maxRange, { limit: 6, humanPriority: 1 })
+      : [perception.nearestVisibleEnemy(bot.id, maxRange, { humanPriority: 1 })].filter(Boolean);
+    if (!list.length) return null;
+    if (aiCmd.targetChoice === "attacker" && (botState.attackerUntil ?? 0) > now && botState.attackerId) {
+      const attacker = list.find((item) => item.entityId === botState.attackerId);
+      if (attacker) return attacker;
+    }
+    if (aiCmd.targetChoice === "priority_threat" || aiCmd.targetChoice === "human_player") {
+      if (aiCmd.isAlly || aiCmd.role === "ally_team" || aiCmd.role === "ally_squad") {
+        const botTeam = teams ? Number(teams.teamOf(bot.id)) || 0 : 0;
+        const allyHuman = entities.all().find((e) => e.alive && !e.bot && (!teams || Number(teams.teamOf(e.id)) === botTeam));
+        const allyHumanTransform = allyHuman ? ctx.components.get(allyHuman.id, "Transform") : null;
+        if (allyHumanTransform) {
+          return [...list].sort((a, b) => {
+            const da = Math.hypot((a.transform?.x ?? 0) - allyHumanTransform.x, (a.transform?.z ?? 0) - allyHumanTransform.z);
+            const db = Math.hypot((b.transform?.x ?? 0) - allyHumanTransform.x, (b.transform?.z ?? 0) - allyHumanTransform.z);
+            return da - db;
+          })[0];
+        }
+      } else {
+        const human = list.find((item) => item.entity && !item.entity.bot);
+        if (human) return human;
+      }
+    }
+    if (aiCmd.targetChoice === "weakest") {
+      return [...list].sort((a, b) => {
+        const aTotal = (ctx.components.get(a.entityId, "Health")?.current ?? 200)
+          + (ctx.components.get(a.entityId, "Armor")?.current ?? 0);
+        const bTotal = (ctx.components.get(b.entityId, "Health")?.current ?? 200)
+          + (ctx.components.get(b.entityId, "Armor")?.current ?? 0);
+        return aTotal - bTotal || a.distance - b.distance;
+      })[0];
+    }
+    return [...list].sort((a, b) => a.distance - b.distance)[0];
+  }
 
   ctx.events.on("combat:damage", ({ targetId, attackerId, now = Date.now() }) => {
     if (!targetId || !attackerId || targetId === attackerId) return;
@@ -210,11 +303,15 @@ export async function setup(ctx) {
       const dist = Math.hypot((Number(sound.x) || 0) - transform.x, (Number(sound.z) || 0) - transform.z);
       if (dist > radius) continue;
       if (!isWeaponSound && (botState.lastKnownUntil ?? 0) > now) continue;
+      if ((botState.lastKnownUntil ?? 0) > now && botState.lastKnownTargetId && botState.lastKnownTargetId !== sourceId) {
+        const knownDist = Math.hypot((botState.lastKnownX ?? 0) - transform.x, (botState.lastKnownZ ?? 0) - transform.z);
+        if (dist > knownDist * 1.15) continue;
+      }
       botState.lastKnownTargetId = sourceId;
       botState.lastKnownX = Number(sound.x) || 0;
       botState.lastKnownY = Number(sound.y) || 0;
       botState.lastKnownZ = Number(sound.z) || 0;
-      botState.lastKnownUntil = now + 6000;
+      botState.lastKnownUntil = now + 5000;
     }
   });
 
@@ -236,10 +333,35 @@ export async function setup(ctx) {
           continue;
         }
 
+        const preMaxRange = (inventory?.items ?? []).reduce((best, item) => (
+          Math.max(best, Number(weapons.definitions?.[item.id]?.range) || 0)
+        ), 28);
+        const quickVisible = tutorialDirective === "normal"
+          ? perception.nearestVisibleEnemy(bot.id, preMaxRange, { humanPriority: 0.62 })
+          : null;
         if (inventory?.items?.length > 1) {
-          const rifleIndex = inventory.items.findIndex((item) => item.id === "rifle" && (item.ammo > 0 || item.reserve > 0));
-          if (rifleIndex >= 0 && inventory.selected !== rifleIndex) {
-            inventory.selected = rifleIndex;
+          const dist = quickVisible?.distance ?? 36;
+          const usable = inventory.items
+            .map((item, idx) => ({ item, idx, ready: item.ammo > 0 && !(Number(item.reloadUntil) > now) }))
+            .filter(({ item }) => item.ammo > 0 || item.reserve > 0);
+          const priority = dist >= 34
+            ? ["sniper", "marksman", "rifle", "pistol"]
+            : dist >= 18
+              ? ["marksman", "sniper", "rifle", "pistol"]
+              : ["rifle", "marksman", "pistol", "sniper"];
+          for (const requireReady of [true, false]) {
+            let chosen = -1;
+            for (const id of priority) {
+              const found = usable.find((e) => e.item.id === id && (!requireReady || e.ready));
+              if (found) {
+                chosen = found.idx;
+                break;
+              }
+            }
+            if (chosen >= 0) {
+              if (inventory.selected !== chosen) inventory.selected = chosen;
+              break;
+            }
           }
         }
         const selected = inventory?.items?.[inventory.selected] ?? null;
@@ -266,7 +388,8 @@ export async function setup(ctx) {
           movement.setInput(bot.id, {
             forward: 0,
             strafe: 0,
-            turn: Math.max(-1, Math.min(1, error * 3.2)),
+            turn: tdmSteerTurn(error, { maxRate: 1.0, deadzone: 0.008, gain: 2.3 }),
+            targetAngle: desired,
             sprint: false,
             fireHeld: false,
           });
@@ -284,8 +407,11 @@ export async function setup(ctx) {
           continue;
         }
 
-        if (selected && selected.ammo <= 4 && selected.reserve > 0) {
-          weapons.reload(bot.id, now);
+        if (selected && selected.reserve > 0) {
+          const proactiveCap = selected.id === "sniper" ? 2 : selected.id === "marksman" ? 4 : 4;
+          if (selected.ammo <= 0 || (!quickVisible && selected.ammo <= proactiveCap)) {
+            weapons.reload(bot.id, now);
+          }
         }
 
         function clearFireTarget() {
@@ -296,13 +422,17 @@ export async function setup(ctx) {
           botState.nextShotAt = 0;
         }
 
-        let visibleTarget = perception.nearestVisibleEnemy(
-          bot.id,
-          weaponRange || 28,
-          { humanPriority: 0.62 },
-        );
+        const aiCmd = tutorialDirective === "normal" ? aiDecisions?.commandFor?.(bot.id, now) ?? null : null;
 
-        if ((botState.attackerUntil ?? 0) > now && botState.attackerId) {
+        let visibleTarget = aiCmd
+          ? pickAiVisibleTarget(bot, botState, weaponRange || 28, aiCmd, now)
+          : (quickVisible ?? perception.nearestVisibleEnemy(
+            bot.id,
+            weaponRange || 28,
+            { humanPriority: 0.62 },
+          ));
+
+        if (!aiCmd && (botState.attackerUntil ?? 0) > now && botState.attackerId) {
           const attackerEntity = entities.get(botState.attackerId);
           const attackerTransform = ctx.components.get(botState.attackerId, "Transform");
           if (attackerEntity?.alive && attackerTransform) {
@@ -317,6 +447,14 @@ export async function setup(ctx) {
               };
             }
           }
+        }
+
+        if (visibleTarget) {
+          botState.lastKnownTargetId = visibleTarget.entityId;
+          botState.lastKnownX = visibleTarget.transform.x;
+          botState.lastKnownY = visibleTarget.transform.y ?? 0;
+          botState.lastKnownZ = visibleTarget.transform.z;
+          botState.lastKnownUntil = now + 2400;
         }
 
         let rememberedHunt = null;
@@ -353,16 +491,41 @@ export async function setup(ctx) {
         }
 
         if (!huntTarget) {
+          const currentPatrol = botState.tdmPatrolTarget;
+          const distPatrol = currentPatrol
+            ? Math.hypot(currentPatrol.x - transform.x, currentPatrol.z - transform.z)
+            : Infinity;
+          if (!currentPatrol || distPatrol <= 3.2 || now >= (botState.tdmPatrolUntil ?? 0)) {
+            const patrolStep = (botState.tdmPatrolStep ?? 0) + 1;
+            botState.tdmPatrolStep = patrolStep;
+            const patrolSeed = stableHash(`${bot.id}:tdm-patrol:${patrolStep}`);
+            const forwardAngle = Number(transform.angle) || 0;
+            const offset = (((patrolSeed % 100) / 100) * 2 - 1) * 1.1;
+            const leg = 14 + (patrolSeed % 10);
+            const rawX = transform.x + Math.sin(forwardAngle + offset) * leg;
+            const rawZ = transform.z - Math.cos(forwardAngle + offset) * leg;
+            botState.tdmPatrolTarget = {
+              x: Math.max(-24, Math.min(24, rawX)),
+              z: Math.max(-24, Math.min(24, rawZ)),
+            };
+            botState.tdmPatrolUntil = now + 4500;
+          }
+          const patrolDesired = Math.atan2(
+            botState.tdmPatrolTarget.x - transform.x,
+            -(botState.tdmPatrolTarget.z - transform.z),
+          );
+          const patrolDelta = wrapAngle(patrolDesired - transform.angle);
           const roamingInput = applyBotObstacleAvoidance(
             physics,
             bot.id,
             transform,
             botState,
             {
-              forward: 0.88,
-              strafe: 0.24 * botState.strafeDirection,
-              turn: botState.wanderTurn,
-              sprint: true,
+              forward: Math.abs(patrolDelta) > 0.9 ? 0.25 : 0.85,
+              strafe: 0,
+              turn: tdmSteerTurn(patrolDelta, { maxRate: 0.72, deadzone: 0.03, gain: 1.45 }),
+              targetAngle: patrolDesired,
+              sprint: false,
               fireHeld: false,
             },
             now,
@@ -375,7 +538,7 @@ export async function setup(ctx) {
         const seed = bot.id.charCodeAt(bot.id.length - 1) || 1;
         if (now >= botState.tacticUntil) {
           botState.strafeDirection *= -1;
-          botState.tacticUntil = now + 480 + (seed % 5) * 115;
+          botState.tacticUntil = now + 1850 + (seed % 5) * 320;
         }
 
         let targetX = huntTarget.transform.x;
@@ -394,7 +557,11 @@ export async function setup(ctx) {
               + Math.sin(targetAngle) * (targetInput.strafe || 0)
             ) * targetSpeed;
             const projectileSpeed = Number(weaponDefinition?.muzzleVelocity) || 150;
-            const leadSeconds = Math.min(0.22, (visibleTarget.distance / projectileSpeed) * 0.85);
+            const isPrecision = selected?.id === "sniper" || selected?.id === "marksman";
+            const leadSeconds = Math.min(
+              isPrecision ? 0.32 : 0.22,
+              (visibleTarget.distance / projectileSpeed) * (isPrecision ? 0.96 : 0.85),
+            );
             targetX += vx * leadSeconds;
             targetZ += vz * leadSeconds;
           }
@@ -405,21 +572,69 @@ export async function setup(ctx) {
         const desiredWithoutWobble = Math.atan2(dx, -dz);
 
         if (!visibleTarget) {
-          const huntError = wrapAngle(desiredWithoutWobble - transform.angle);
-          const huntTurn = Math.max(-1, Math.min(1, huntError * 3.1));
-          const turningHard = Math.abs(huntError) > 1.25;
+          let moveHeading = desiredWithoutWobble;
+          let moveDist = huntTarget.distance;
+          if (aiCmd?.moveChoice === "regroup_squad" && teams) {
+            const ownTeam = Number(teams.teamOf(bot.id)) || 0;
+            const ally = entities.all()
+              .filter((e) => e.id !== bot.id && e.alive && Number(teams.teamOf(e.id)) === ownTeam)
+              .map((e) => ({ e, t: ctx.components.get(e.id, "Transform") }))
+              .filter((item) => item.t)
+              .sort((a, b) => (a.e.bot ? 1 : 0) - (b.e.bot ? 1 : 0)
+                || Math.hypot(a.t.x - transform.x, a.t.z - transform.z) - Math.hypot(b.t.x - transform.x, b.t.z - transform.z))[0];
+            if (ally) {
+              moveHeading = Math.atan2(ally.t.x - transform.x, -(ally.t.z - transform.z));
+              moveDist = Math.hypot(ally.t.x - transform.x, ally.t.z - transform.z);
+            }
+          }
+          const huntError = wrapAngle(moveHeading - transform.angle);
+          const huntTurn = tdmSteerTurn(huntError, { maxRate: 0.82, deadzone: 0.025, gain: 1.65 });
+          const turningHard = Math.abs(huntError) > 1.05;
+          let huntForward = turningHard ? 0.15 : (Math.abs(huntError) > 0.55 ? 0.55 : (moveDist > 4 ? 0.96 : 0.25));
+          let huntStrafe = 0;
+          let huntSprint = !turningHard && moveDist > 14;
+          if (aiCmd) {
+            if (aiCmd.moveChoice === "retreat_heal") {
+              huntForward = -0.7;
+              huntStrafe = 0.35 * botState.strafeDirection;
+              huntSprint = false;
+              if (armorService && !armorService.isPlating(bot.id)) {
+                const armorState = armorService.describe(bot.id);
+                if (armorState && armorState.reservePlates > 0 && armorState.current < armorState.maximum) {
+                  armorService.startFullPlating(bot.id, now);
+                }
+              }
+            } else if (aiCmd.moveChoice === "hold_cover") {
+              huntForward = 0;
+              huntStrafe = 0.2 * botState.strafeDirection;
+              huntSprint = false;
+            } else if (aiCmd.moveChoice === "flank_left") {
+              botState.strafeDirection = -1;
+              huntStrafe = -0.58;
+            } else if (aiCmd.moveChoice === "flank_right") {
+              botState.strafeDirection = 1;
+              huntStrafe = 0.58;
+            } else if (aiCmd.moveChoice === "regroup_squad") {
+              huntSprint = !turningHard && moveDist > 9;
+            }
+            if (aiCmd.paceChoice === "sprint_push" && huntForward > 0 && !turningHard) {
+              huntSprint = true;
+            } else if (aiCmd.paceChoice === "steady_aim") {
+              huntForward *= 0.65;
+              huntSprint = false;
+            }
+          }
           const huntingInput = applyBotObstacleAvoidance(
             physics,
             bot.id,
             transform,
             botState,
             {
-              forward: turningHard ? 0.35 : 1,
-              strafe: turningHard
-                ? Math.sign(huntError || 1) * 0.88
-                : 0.25 * botState.strafeDirection,
+              forward: huntForward,
+              strafe: huntStrafe,
               turn: huntTurn,
-              sprint: true,
+              targetAngle: moveHeading,
+              sprint: huntSprint,
               fireHeld: false,
             },
             now,
@@ -429,7 +644,7 @@ export async function setup(ctx) {
           continue;
         }
 
-        if (armorService?.isPlating(bot.id)) {
+        if (armorService?.isPlating(bot.id) && aiCmd?.moveChoice !== "retreat_heal") {
           armorService.cancelPlating(bot.id, "combat");
         }
 
@@ -438,20 +653,111 @@ export async function setup(ctx) {
           clearFireTarget();
           botState.reactionTargetId = target.entityId;
         }
-        const wobbleAmount = training?.aimWobble ?? 0.014;
-        const aimWobble = Math.sin(now / (270 + seed * 3) + seed) * wobbleAmount;
+        const wobbleAmount = training?.aimWobble ?? (aiCmd?.paceChoice === "steady_aim" ? 0.004 : 0.012);
+        const aimWobble = Math.sin(now / (320 + seed * 3) + seed) * wobbleAmount;
         const desired = desiredWithoutWobble + aimWobble;
         const error = wrapAngle(desired - transform.angle);
         const absoluteError = Math.abs(error);
-        const turn = Math.max(-1, Math.min(1, error * (training ? 2.1 : 3.25)));
+        const turn = tdmSteerTurn(error, {
+          maxRate: training ? 0.82 : 1.0,
+          deadzone: 0.01,
+          gain: training ? 1.7 : (aiCmd?.paceChoice === "steady_aim" ? 2.35 : 2.15),
+        });
 
         const healthComp = ctx.components.get(bot.id, "Health");
         const lowHealth = healthComp && healthComp.current < healthComp.maximum * 0.4;
 
+        const isSniper = selected?.id === "sniper";
+        const isMarksman = selected?.id === "marksman";
+        const isPrecision = isSniper || isMarksman;
+
         let forward = 0;
         let strafe = 0;
         let sprint = false;
-        if (target.distance > 15) {
+        if (aiCmd) {
+          if (aiCmd.moveChoice === "advance_direct") {
+            forward = target.distance > 5.5 ? 1 : 0.3;
+            strafe = 0.25 * botState.strafeDirection;
+            sprint = aiCmd.paceChoice === "sprint_push" && target.distance > 7;
+          } else if (aiCmd.moveChoice === "flank_left") {
+            botState.strafeDirection = -1;
+            forward = target.distance > 11 ? 0.72 : 0.24;
+            strafe = -0.92;
+            sprint = aiCmd.paceChoice === "sprint_push" && target.distance > 14;
+          } else if (aiCmd.moveChoice === "flank_right") {
+            botState.strafeDirection = 1;
+            forward = target.distance > 11 ? 0.72 : 0.24;
+            strafe = 0.92;
+            sprint = aiCmd.paceChoice === "sprint_push" && target.distance > 14;
+          } else if (aiCmd.moveChoice === "hold_cover") {
+            forward = 0;
+            strafe = 0.28 * botState.strafeDirection;
+            sprint = false;
+          } else if (aiCmd.moveChoice === "kite_back") {
+            const standoff = isSniper ? 36 : isMarksman ? 22 : 12;
+            forward = target.distance < standoff ? -0.84 : 0.05;
+            strafe = 0.52 * botState.strafeDirection;
+            sprint = false;
+          } else if (aiCmd.moveChoice === "retreat_heal") {
+            forward = -0.9;
+            strafe = 0.44 * botState.strafeDirection;
+            sprint = false;
+            if (armorService && !armorService.isPlating(bot.id)) {
+              const armorState = armorService.describe(bot.id);
+              if (armorState && armorState.reservePlates > 0 && armorState.current < armorState.maximum * 0.6) {
+                armorService.startFullPlating(bot.id, now);
+              }
+            }
+          } else if (aiCmd.moveChoice === "regroup_squad") {
+            forward = target.distance > 12 ? 0.55 : -0.25;
+            strafe = 0.62 * botState.strafeDirection;
+            sprint = false;
+          } else {
+            forward = target.distance > 10 ? 0.85 : 0.25;
+            strafe = 0.45 * botState.strafeDirection;
+            sprint = aiCmd.paceChoice === "sprint_push" && target.distance > 14;
+          }
+
+          if (aiCmd.paceChoice === "steady_aim") {
+            forward *= 0.34;
+            strafe *= 0.3;
+            sprint = false;
+          } else if (aiCmd.paceChoice === "tactical_strafe") {
+            if (Math.abs(strafe) < 0.55) strafe = 0.78 * botState.strafeDirection;
+            sprint = false;
+          } else if (aiCmd.paceChoice === "sprint_push" && forward > 0.65 && absoluteError < 0.7) {
+            sprint = true;
+          }
+        } else if (isSniper) {
+          if (target.distance > 54) {
+            forward = 0.85;
+            strafe = 0.25 * botState.strafeDirection;
+            sprint = true;
+          } else if (target.distance < 30) {
+            forward = -0.82;
+            strafe = 0.58 * botState.strafeDirection;
+          } else {
+            forward = 0;
+            strafe = 0.45 * botState.strafeDirection;
+          }
+          if (now >= (botState.nextShotAt ?? 0) - 200 && absoluteError < 0.24) {
+            forward *= 0.25;
+            strafe *= 0.22;
+            sprint = false;
+          }
+        } else if (isMarksman) {
+          if (target.distance > 34) {
+            forward = 0.88;
+            strafe = 0.3 * botState.strafeDirection;
+            sprint = true;
+          } else if (target.distance < 18) {
+            forward = -0.72;
+            strafe = 0.65 * botState.strafeDirection;
+          } else {
+            forward = lowHealth ? -0.35 : 0.1;
+            strafe = 0.62 * botState.strafeDirection;
+          }
+        } else if (target.distance > 15) {
           forward = 1;
           strafe = 0.32 * botState.strafeDirection;
           sprint = true;
@@ -485,33 +791,57 @@ export async function setup(ctx) {
             forward,
             strafe,
             turn,
+            targetAngle: desired,
             sprint,
             fireHeld: false,
+            aimLock: true,
           },
           now,
         );
         movement.setInput(bot.id, combatInput);
 
         if (selected?.reloadUntil > now) continue;
+        if (aiCmd?.fireChoice === "hold_fire") {
+          botState.reactionUntil = 0;
+          continue;
+        }
 
-        const fireCone = training?.fireConeRadians ?? BOT_FIRE_CONE_RADIANS;
+        const baseFireCone = isSniper ? 0.095 : isMarksman ? 0.14 : BOT_FIRE_CONE_RADIANS;
+        const fireCone = training?.fireConeRadians ?? (aiCmd?.paceChoice === "steady_aim" ? baseFireCone * 0.85 : baseFireCone);
         const aimReset = training?.aimResetRadians ?? BOT_AIM_RESET_RADIANS;
-        const reactionBase = training?.reactionBaseMs ?? BOT_REACTION_BASE_MS;
+        const reactionBase = training?.reactionBaseMs ?? (aiCmd?.paceChoice === "steady_aim" ? Math.round(BOT_REACTION_BASE_MS * 0.65) : BOT_REACTION_BASE_MS);
         if (weaponRange > 0 && absoluteError < fireCone && target.distance <= weaponRange) {
           if (botState.reactionUntil === 0) {
             botState.reactionUntil = now + reactionBase + (seed % 7) * (training ? 35 : 18);
           }
           if (now >= botState.reactionUntil && now >= (botState.nextShotAt ?? 0)) {
-            if (now >= (botState.burstUntil ?? 0) && now >= (botState.nextBurstAt ?? 0)) {
-              botState.burstCycle = (botState.burstCycle ?? 0) + 1;
-              const rhythm = botFireRhythm(bot.id, selected?.id, botState.burstCycle);
-              botState.burstUntil = now + rhythm.burstMs;
-              botState.nextBurstAt = botState.burstUntil + rhythm.pauseMs;
-            }
-            if (now < botState.burstUntil) {
-              const rhythm = botFireRhythm(bot.id, selected?.id, botState.burstCycle);
-              weapons.fire(bot.id, now, { pressed: selected?.id === "pistol" });
-              botState.nextShotAt = now + rhythm.shotMs;
+            if (isSniper || aiCmd?.fireChoice === "single_tap") {
+              const rhythm = botFireRhythm(bot.id, selected?.id, (botState.burstCycle ?? 0) + 1);
+              if (weapons.fire(bot.id, now, { pressed: true })) {
+                botState.burstCycle = (botState.burstCycle ?? 0) + 1;
+                botState.nextShotAt = now + (aiCmd?.fireChoice === "single_tap" && !isSniper
+                  ? Math.max(280, rhythm.shotMs)
+                  : rhythm.shotMs);
+              }
+            } else if (aiCmd?.fireChoice === "suppress_auto") {
+              const rhythm = botFireRhythm(bot.id, selected?.id, (botState.burstCycle ?? 0) + 1);
+              if (weapons.fire(bot.id, now, { pressed: !weaponDefinition?.automatic }) || !isPrecision) {
+                botState.nextShotAt = now + rhythm.shotMs;
+              }
+            } else {
+              if (now >= (botState.burstUntil ?? 0) && now >= (botState.nextBurstAt ?? 0)) {
+                botState.burstCycle = (botState.burstCycle ?? 0) + 1;
+                const rhythm = botFireRhythm(bot.id, selected?.id, botState.burstCycle);
+                botState.burstUntil = now + rhythm.burstMs;
+                botState.nextBurstAt = botState.burstUntil + rhythm.pauseMs;
+              }
+              if (now < botState.burstUntil) {
+                const rhythm = botFireRhythm(bot.id, selected?.id, botState.burstCycle);
+                const fired = weapons.fire(bot.id, now, { pressed: !weaponDefinition?.automatic });
+                if (fired || !isPrecision) {
+                  botState.nextShotAt = now + rhythm.shotMs;
+                }
+              }
             }
           }
         } else if (absoluteError >= aimReset || target.distance > weaponRange) {

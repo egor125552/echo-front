@@ -186,7 +186,11 @@ export async function setup(ctx) {
   async function load() {
     if (profile) return profile;
     if (!loading) {
-      loading = readEncryptedProfile(network.sessionId)
+      const timedRead = Promise.race([
+        readEncryptedProfile(network.sessionId),
+        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
+      ]);
+      loading = timedRead
         .catch((error) => {
           console.warn("Encrypted player profile unavailable", error);
           return null;

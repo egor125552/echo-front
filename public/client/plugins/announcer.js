@@ -181,11 +181,26 @@ export async function setup(ctx) {
     }
 
     if (packet.event === "weapon:selected" && payload.entityId === network.playerId) {
-      announce(payload.weaponId === "rifle" ? "Автомат" : "Пистолет", { interrupt: true });
+      const names = {
+        rifle: "Автомат",
+        marksman: "Винтовка",
+        sniper: "Снайперка",
+        pistol: "Пистолет",
+      };
+      announce(names[payload.weaponId] ?? "Пистолет", { interrupt: true });
     }
 
-    if (packet.event === "weapon:unlocked" && payload.entityId === network.playerId && payload.weaponId === "rifle") {
-      announce(mode === "battle-royale" ? "Подобран автомат" : "Открыт автомат", { interrupt: false });
+    if (
+      packet.event === "weapon:unlocked"
+      && payload.entityId === network.playerId
+      && (payload.weaponId === "rifle" || payload.weaponId === "marksman" || payload.weaponId === "sniper")
+    ) {
+      const unlockNames = {
+        rifle: mode === "battle-royale" ? "Подобран автомат" : "Открыт автомат",
+        marksman: mode === "battle-royale" ? "Получена винтовка" : "Открыта винтовка",
+        sniper: mode === "battle-royale" ? "Получена снайперка" : "Открыта снайперка",
+      };
+      announce(unlockNames[payload.weaponId], { interrupt: false });
     }
 
     if (mode === "battle-royale") {
@@ -215,9 +230,27 @@ export async function setup(ctx) {
         announce(payload.open ? "Дверь открыта" : "Дверь закрыта", { interrupt: false, repeat: true });
       }
       if (packet.event === "loot:picked" && payload.entityId === network.playerId) {
-        if (payload.loot === "rifle") {
-          if (payload.restocked) announce(`Патроны к автомату: ${Math.max(0, Number(payload.quantity) || 0)}`, { interrupt: false });
-          else announce(payload.applied ? "Автомат подобран" : "Боезапас автомата полон", { interrupt: false });
+        if (payload.loot === "rifle" || payload.loot === "marksman" || payload.loot === "sniper") {
+          const restockLabels = {
+            rifle: "автомату",
+            marksman: "винтовке",
+            sniper: "снайперке",
+          };
+          const pickedLabels = {
+            rifle: "Автомат подобран",
+            marksman: "Винтовка подобрана",
+            sniper: "Снайперка подобрана",
+          };
+          const fullLabels = {
+            rifle: "Боезапас автомата полон",
+            marksman: "Боезапас винтовки полон",
+            sniper: "Боезапас снайперки полон",
+          };
+          if (payload.restocked) {
+            announce(`Патроны к ${restockLabels[payload.loot]}: ${Math.max(0, Number(payload.quantity) || 0)}`, { interrupt: false });
+          } else {
+            announce(payload.applied ? pickedLabels[payload.loot] : fullLabels[payload.loot], { interrupt: false });
+          }
         }
         if (payload.loot === "armor") {
           if (!payload.applied) {

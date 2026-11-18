@@ -12,6 +12,7 @@ import * as hapticFeedback from "../plugins/haptic-feedback.js";
 import * as gamepadHaptics from "../plugins/gamepad-haptics.js";
 import * as speechSettings from "../plugins/speech-settings.js";
 import * as socialProfile from "../plugins/social-profile.js";
+import * as enemyAiSettings from "../plugins/enemy-ai-settings.js";
 import * as accessibleMenus from "../plugins/accessible-menus.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
@@ -60,6 +61,7 @@ export const echoFrontClientPreset = [
   gamepadHaptics,
   speechSettings,
   socialProfile,
+  enemyAiSettings,
   accessibleMenus,
   speechDiagnostics,
   spatialAudio,
