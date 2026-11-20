@@ -183,14 +183,15 @@
                 <option value="compact">Компактные данные (.jsonl)</option>
               </select>
             </label>
-            <p id="journal-status" role="status">Журнал включён.</p>
+            <p id="journal-status" role="status" aria-live="polite">Журнал включён.</p>
             <label class="setting-row" for="journal-text-view">
               <span>Текст журнала</span>
               <textarea id="journal-text-view" rows="10" readonly spellcheck="false"></textarea>
             </label>
             <p id="journal-copy-status" role="status" aria-live="polite"></p>
-            <button id="journal-copy" type="button" disabled>Скопировать журнал текстом</button>
-            <button id="journal-download" type="button" disabled>Скачать журнал</button>
+            <button id="journal-copy" type="button">Скопировать журнал текстом</button>
+            <button id="journal-download" type="button">Скачать журнал</button>
+            <div id="journal-download-fallback" hidden></div>
             <button id="journal-clear" type="button">Очистить журнал</button>
             <p>Журнал хранится только в этой вкладке и записывает события боя, действия игрока, решения ИИ и состояние подключения обычным текстом на русском языке.</p>
           </div>

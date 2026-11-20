@@ -269,7 +269,7 @@ export async function setup(ctx) {
       const entity = entities.get(entityId);
       if (entity?.bot) {
         const kin = getBotKinematics(entityId);
-        kin.targetAngle = Number.isFinite(Number(input.targetAngle))
+        kin.targetAngle = input.targetAngle != null && Number.isFinite(Number(input.targetAngle))
           ? wrapAngle(Number(input.targetAngle))
           : null;
       }

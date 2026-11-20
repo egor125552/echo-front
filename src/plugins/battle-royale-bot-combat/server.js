@@ -1,16 +1,17 @@
 import { getSharedTacticalCombatNet } from "../../ai/tactical-combat-net.js";
+import { getSharedTacticalNodeGrid } from "../../ai/tactical-node-grid.js";
 
 export const BOT_VISIBLE_MEMORY_MS = 10_000;
 export const BOT_DAMAGE_MEMORY_MS = 12_000;
 export const BOT_SEARCH_REACHED_DISTANCE = 2.2;
 export const BOT_INVESTIGATION_REACHED_DISTANCE = 3.2;
-export const BOT_REACTION_MIN_MS = 130;
-export const BOT_REACTION_SPREAD_MS = 110;
-export const BOT_RETURN_FIRE_REACTION_MS = 70;
+export const BOT_REACTION_MIN_MS = 115;
+export const BOT_REACTION_SPREAD_MS = 90;
+export const BOT_RETURN_FIRE_REACTION_MS = 55;
 export const BOT_BURST_MIN_MS = 760;
 export const BOT_BURST_SPREAD_MS = 420;
-export const BOT_BURST_PAUSE_MIN_MS = 260;
-export const BOT_BURST_PAUSE_SPREAD_MS = 240;
+export const BOT_BURST_PAUSE_MIN_MS = 240;
+export const BOT_BURST_PAUSE_SPREAD_MS = 220;
 export const BOT_STAIR_ENTRY_OFFSET = 1.15;
 export const BOT_STAIR_ENTRY_TOLERANCE = 0.32;
 export const BOT_GROUND_RAMP_ESCAPE_Y = 0.45;
@@ -26,6 +27,12 @@ export const manifest = {
   optional: ["battle-royale-tutorial", "armor", "stimulants", "ai-enemy-decisions"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on", "events.emit"],
 };
+
+function clamp(value, min, max) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
 
 function wrapAngle(value) {
   let angle = value;
@@ -85,10 +92,11 @@ function steeringTo(transform, target, thinkDelayMs = 120, options = {}) {
   }
   const stepCount = Math.max(1, Math.ceil((Number(thinkDelayMs) || 120) / 50));
   const effectiveSec = stepCount * 0.05;
-  const maxRate = Math.max(0.1, Math.min(1, Number(options.maxRate) || 1.0));
+  const closeRangeDamp = dist < 2.2 && absDelta < 0.45 ? 0.78 : 1.0;
+  const maxRate = Math.max(0.1, Math.min(1, (Number(options.maxRate) || 1.0) * closeRangeDamp));
   const gain = Number(options.gain) || 1.75;
   const maxTurnStep = BOT_TURN_SPEED_RAD_PER_SEC * effectiveSec;
-  const deadbeatCap = maxTurnStep > 0 ? (absDelta * 0.9) / maxTurnStep : 1;
+  const deadbeatCap = maxTurnStep > 0 ? (absDelta * 0.88) / maxTurnStep : 1;
   const proportional = Math.min(maxRate, (absDelta * gain) / BOT_TURN_SPEED_RAD_PER_SEC);
   const turn = Math.sign(delta) * Math.min(proportional, deadbeatCap);
   return {
@@ -254,6 +262,7 @@ export async function setup(ctx) {
   const getShop = () => (ctx.services.has("shop") ? ctx.services.get("shop") : null);
   const getAiDecisions = () => (ctx.services.has("ai-enemy-decisions") ? ctx.services.get("ai-enemy-decisions") : null);
   const combatNet = getSharedTacticalCombatNet();
+  const nodeGrid = getSharedTacticalNodeGrid(map);
   const targetMotionSamples = new Map();
 
   function observeHumanCombatEngagement(humanId, targetId, {
@@ -351,6 +360,12 @@ export async function setup(ctx) {
     const attacker = attackerId ? entities.get(attackerId) : null;
     const target = resolvedTargetId ? entities.get(resolvedTargetId) : null;
     const involvesHuman = Boolean((attacker && !attacker.bot) || (target && !target.bot));
+
+    const aTransform = attackerId ? ctx.components.get(attackerId, "Transform") : null;
+    const tTransform = resolvedTargetId ? ctx.components.get(resolvedTargetId, "Transform") : null;
+    if (aTransform && tTransform) {
+      nodeGrid.recordFireDanger(aTransform, tTransform, dmgScale, tNow);
+    }
 
     if (attacker && !attacker.bot) {
       observeHumanCombatEngagement(attackerId, resolvedTargetId, {
@@ -1410,6 +1425,18 @@ export async function setup(ctx) {
       if (selfState) selfState.escortMoving = engageEscort;
       if (engageEscort) {
         const slot = Number(botEntity?.squadSlot) || 0;
+        const underFire = Boolean(selfState?.lastDamagedAt && now - selfState.lastDamagedAt <= 3500);
+        const escortNode = nodeGrid.selectSquadmateEscortNode(
+          botId,
+          transform,
+          humanMate.id,
+          humanMate.transform,
+          { squadSlot: slot + 1, underFire, now },
+        );
+        if (selfState && escortNode) {
+          selfState.escortNodeId = escortNode.id;
+          selfState.escortWingmanRole = escortNode.wingmanRole;
+        }
         const baseAngle = selfState?.escortLeaderAnchor?.angle ?? (Number(humanMate.transform.angle) || 0);
         const formAngle = baseAngle + (slot === 0 ? -0.95 : slot === 1 ? 0.95 : Math.PI);
         const radius = separatedByStructure ? 2.0 : 2.65;
@@ -1433,6 +1460,7 @@ export async function setup(ctx) {
           separatedByStructure,
           patrolSprint: !separatedByStructure && distToHuman >= 4.4,
           distToHuman,
+          escortNodeId: escortNode?.id ?? null,
           x: safePoint.x,
           y: safePoint.y,
           z: safePoint.z,
@@ -1594,6 +1622,19 @@ export async function setup(ctx) {
     if (!state) return;
     state.lastDamagedById = attackerId;
     state.lastDamagedAt = now;
+    if (attackerTransform) {
+      state.combatFocus = {
+        entityId: attackerId,
+        x: Number(attackerTransform.x) || 0,
+        y: Number(attackerTransform.y) || 0,
+        z: Number(attackerTransform.z) || 0,
+        until: now + 900,
+      };
+    }
+    if (now >= (state.lastDamageJukeAt ?? 0) + 900) {
+      state.strafeDirection = -(state.strafeDirection || 1);
+      state.lastDamageJukeAt = now;
+    }
     if (state.reactionTargetId !== attackerId) {
       state.reactionTargetId = attackerId;
       state.reactionUntil = now + BOT_RETURN_FIRE_REACTION_MS;
@@ -1621,7 +1662,7 @@ export async function setup(ctx) {
     if (route?.kind === "stair" || insideDoorThroat) {
       movement.setInput(bot.id, {
         ...input,
-        strafe: 0,
+        strafe: clamp(input.strafe ?? 0, -0.6, 0.6),
         sprint: route.kind === "door" ? Boolean(input.sprint) : false,
       });
       return;
@@ -1629,70 +1670,92 @@ export async function setup(ctx) {
     setNavigatedInput(bot, transform, state, input, now);
   }
 
-  function routeToward(bot, transform, state, route, now, thinkDelay = 120) {
+  function worldDeltaToLocalMove(angle, dx, dz) {
+    const len = Math.hypot(dx, dz);
+    if (len < 0.001) return { forward: 0, strafe: 0 };
+    const ux = dx / len;
+    const uz = dz / len;
+    return {
+      forward: Math.sin(angle) * ux - Math.cos(angle) * uz,
+      strafe: Math.cos(angle) * ux + Math.sin(angle) * uz,
+    };
+  }
+
+  /**
+   * Unified human-like locomotion controller:
+   * - Turns smoothly ON THE MOVE like a real player (WASD + mouse), never freezing legs just to rotate camera in place.
+   * - On stairs and through doors, walks steadily forward while gently centering laterally via strafe — zero "step back-and-forth" stalling!
+   */
+  function routeToward(bot, transform, state, route, now, thinkDelay = 85) {
     if (!route) return false;
     openRouteDoor(bot.id, transform, route, now);
-    const stagedRoute = stagedStairRoute(transform, route);
     const upperY = Math.max(1, Number(map.building?.upperY) || 3.2);
-    const midStair = stagedRoute?.kind === "stair"
-      && Number(transform.y) > 0.2
+    const onStair = route.kind === "stair";
+    const midStair = onStair
+      && Number(transform.y) > 0.15
       && Number(transform.y) < upperY - 0.15;
-    let preciseRoute = stagedRoute;
-    if (midStair) {
-      if (stagedRoute.transitionSide === "approach") {
-        preciseRoute = { ...stagedRoute, stairStage: "traverse" };
-      } else {
-        const dx = Math.abs((Number(stagedRoute.x) || 0) - (Number(transform.x) || 0));
-        const dz = Math.abs((Number(stagedRoute.z) || 0) - (Number(transform.z) || 0));
-        if (dx > dz * 1.5 && dx > 0.5 && dz <= 0.45) {
-          preciseRoute = { ...stagedRoute, z: Number(transform.z) || 0, stairStage: "traverse" };
-        } else if (dz > dx * 1.5 && dz > 0.5 && dx <= 0.45) {
-          preciseRoute = { ...stagedRoute, x: Number(transform.x) || 0, stairStage: "traverse" };
-        } else {
-          preciseRoute = { ...stagedRoute, stairStage: "traverse" };
-        }
+
+    let targetPoint = route;
+    if (midStair && route.transitionSide !== "approach") {
+      // Once physically on the stair ramp, travel cleanly along the ramp axis without zig-zagging
+      const dx = Math.abs((Number(route.x) || 0) - (Number(transform.x) || 0));
+      const dz = Math.abs((Number(route.z) || 0) - (Number(transform.z) || 0));
+      if (dx > dz * 1.5 && dx > 0.45 && dz <= 0.6) {
+        targetPoint = { ...route, z: Number(transform.z) || 0 };
+      } else if (dz > dx * 1.5 && dz > 0.45 && dx <= 0.6) {
+        targetPoint = { ...route, x: Number(transform.x) || 0 };
       }
     }
-    const isTraversal = preciseRoute.kind === "stair" || preciseRoute.kind === "door";
+
+    const responsiveDelay = onStair || route.kind === "door" ? Math.min(thinkDelay, 65) : Math.min(thinkDelay, 110);
     const steering = steeringTo(
       transform,
-      preciseRoute,
-      thinkDelay,
-      isTraversal
-        ? { maxRate: 0.92, deadzone: 0.015, gain: 1.85, allowPointTurn: true }
-        : { maxRate: 0.74, deadzone: 0.025, gain: 1.5 },
+      targetPoint,
+      responsiveDelay,
+      onStair || route.kind === "door"
+        ? { maxRate: 0.88, deadzone: 0.02, gain: 1.65, allowPointTurn: true }
+        : { maxRate: 0.72, deadzone: 0.03, gain: 1.45 },
     );
+
+    const dx = (Number(targetPoint.x) || 0) - (Number(transform.x) || 0);
+    const dz = (Number(targetPoint.z) || 0) - (Number(transform.z) || 0);
+    const local = worldDeltaToLocalMove(Number(transform.angle) || 0, dx, dz);
     const headingError = Math.abs(steering.delta);
+
     let forward;
-    if (preciseRoute.kind === "stair") {
-      forward = headingError > 0.28
-        ? 0
-        : headingError > 0.14
-          ? 0.3
-          : (preciseRoute.stairStage === "align" ? 0.55 : 0.82);
-    } else if (preciseRoute.kind === "door") {
-      forward = headingError > 0.78 ? 0 : (headingError > 0.28 ? 0.5 : 1);
-    } else if (headingError > 1.05 || (headingError > 0.55 && steering.distance < 3.5)) {
-      // Turn in place before accelerating to prevent tight-orbit circling.
-      forward = 0;
+    let strafe;
+    if (onStair) {
+      // Never freeze on stairs! Walk continuously toward the stair target using forward + gentle lateral alignment.
+      const speedScale = midStair ? 0.86 : 0.76;
+      forward = clamp(local.forward * speedScale, -0.35, 0.9);
+      strafe = clamp(local.strafe * 0.65, -0.55, 0.55);
+      if (Math.hypot(forward, strafe) < 0.35 && steering.distance > 0.25) {
+        forward = 0.55;
+      }
+    } else if (route.kind === "door") {
+      // Walk smoothly through doorways while turning on the move
+      forward = headingError > 1.25 ? clamp(local.forward * 0.65, -0.2, 0.55) : (headingError > 0.55 ? 0.68 : 0.95);
+      strafe = headingError > 0.22 ? clamp(local.strafe * 0.55, -0.45, 0.45) : 0;
     } else {
-      forward = headingError > 0.55 ? 0.45 : 1;
+      forward = headingError > 1.35 ? 0.32 : (headingError > 0.65 ? 0.65 : 1);
+      strafe = headingError > 0.45 ? clamp(local.strafe * 0.4, -0.35, 0.35) : 0;
     }
-    setRouteInput(bot, transform, state, preciseRoute, {
+
+    setRouteInput(bot, transform, state, targetPoint, {
       forward,
-      strafe: 0,
+      strafe,
       turn: steering.turn,
       targetAngle: steering.targetAngle,
-      sprint: preciseRoute.kind !== "stair" && forward >= 0.8 && steering.distance > 18,
+      sprint: !onStair && forward >= 0.82 && headingError < 0.35 && steering.distance > 14,
       fireHeld: false,
     }, now);
-    state.nextThinkAt = now + thinkDelay;
+    state.nextThinkAt = now + responsiveDelay;
     return true;
   }
 
   function moveTowardPosition(bot, transform, state, target, now, {
     sprint = false,
-    thinkDelay = 150,
+    thinkDelay = 115,
     stopDistance = 1.5,
     sprintDistance = 5,
     faceTargetOnArrival = false,
@@ -1705,30 +1768,48 @@ export async function setup(ctx) {
       : null;
     route = normalizeRouteForTarget(transform, target, route, upperY);
     if (routeToward(bot, transform, state, route, now, thinkDelay)) return true;
+
+    const responsiveDelay = Math.min(thinkDelay, 125);
     const steering = steeringTo(
       transform,
       target,
-      thinkDelay,
+      responsiveDelay,
       calm
         ? { maxRate: 0.72, deadzone: 0.03, gain: 1.45, allowPointTurn: faceTargetOnArrival }
-        : { maxRate: 0.95, deadzone: 0.02, gain: 1.75, allowPointTurn: faceTargetOnArrival },
+        : { maxRate: 0.92, deadzone: 0.02, gain: 1.7, allowPointTurn: faceTargetOnArrival },
     );
     const arrived = steering.distance <= stopDistance;
     const headingError = Math.abs(steering.delta);
-    const forward = arrived
-      ? 0
-      : (headingError > 1.05 || (headingError > 0.55 && steering.distance < 3.5))
-        ? 0
-        : (headingError > 0.55 ? 0.45 : 1);
+    const dx = (Number(target.x) || 0) - (Number(transform.x) || 0);
+    const dz = (Number(target.z) || 0) - (Number(transform.z) || 0);
+    const local = worldDeltaToLocalMove(Number(transform.angle) || 0, dx, dz);
+
+    // Human-like locomotion: keep moving and smoothly curve into turns instead of freezing like a turret
+    let forward = 0;
+    let strafe = 0;
+    if (!arrived) {
+      if (headingError <= 0.45) {
+        forward = 1;
+        strafe = 0;
+      } else if (headingError <= 1.25) {
+        forward = 0.74;
+        strafe = clamp(local.strafe * 0.45, -0.4, 0.4);
+      } else {
+        // Curve smoothly forward into sharp turns rather than shuffling backward
+        forward = clamp(local.forward * 0.55, 0.08, 0.5);
+        strafe = clamp(local.strafe * 0.58, -0.52, 0.52);
+      }
+    }
+
     setNavigatedInput(bot, transform, state, {
       forward,
-      strafe: 0,
+      strafe,
       turn: arrived && !faceTargetOnArrival ? 0 : steering.turn,
       targetAngle: arrived && !faceTargetOnArrival ? null : steering.targetAngle,
-      sprint: !arrived && sprint && forward >= 0.8 && steering.distance > sprintDistance,
+      sprint: !arrived && sprint && forward >= 0.82 && headingError < 0.4 && steering.distance > sprintDistance,
       fireHeld: false,
     }, now);
-    state.nextThinkAt = now + thinkDelay;
+    state.nextThinkAt = now + responsiveDelay;
     return true;
   }
 
@@ -1905,23 +1986,34 @@ export async function setup(ctx) {
     }
     if (combatRoute?.kind === "stair" || combatRoute?.kind === "door") {
       openRouteDoor(bot.id, transform, combatRoute, now);
-      const staged = stagedStairRoute(transform, combatRoute);
       const localLegs = worldToLocalMove(
         Number(transform.angle) || 0,
-        (Number(staged.x) || 0) - (Number(transform.x) || 0),
-        (Number(staged.z) || 0) - (Number(transform.z) || 0),
+        (Number(combatRoute.x) || 0) - (Number(transform.x) || 0),
+        (Number(combatRoute.z) || 0) - (Number(transform.z) || 0),
       );
       movement.setInput(bot.id, {
-        forward: Math.max(-0.85, Math.min(0.85, localLegs.forward * 0.82)),
-        strafe: combatRoute.kind === "stair" ? 0 : Math.max(-0.75, Math.min(0.75, localLegs.strafe * 0.75)),
+        forward: clamp(localLegs.forward * 0.85, -0.45, 0.88),
+        strafe: clamp(localLegs.strafe * (combatRoute.kind === "stair" ? 0.55 : 0.72), -0.65, 0.65),
         turn: steering.turn,
         targetAngle: steering.targetAngle,
         sprint: false,
         fireHeld,
       });
-      state.nextThinkAt = now + thinkDelay;
+      state.nextThinkAt = now + Math.min(thinkDelay, 75);
       return true;
     }
+
+    // Select & reserve a GTA-style Ped Node cube via our Living Tactical Field linked to TacticalCombatNet
+    const tacticalNode = nodeGrid.selectCombatNodeForTactic(
+      bot.id,
+      transform,
+      visible.entityId,
+      visible.transform,
+      netDecision.action,
+      { desiredRange, now },
+    );
+    state.activeCombatNode = tacticalNode;
+    state.activeCombatNodeId = tacticalNode?.id ?? null;
 
     let forward = 0.12;
     let strafe = 0;
@@ -1947,6 +2039,18 @@ export async function setup(ctx) {
       if (Math.abs(targetDist - desiredRange) < 5) strafe = state.strafeDirection * 0.44;
     }
 
+    // Blend movement toward the bot's reserved Ped Node cube so bots spread onto distinct cover/flank cubes
+    if (tacticalNode && !aiCmd && !hasOutnumberedCallout) {
+      const nodeDx = (Number(tacticalNode.x) || 0) - (Number(transform.x) || 0);
+      const nodeDz = (Number(tacticalNode.z) || 0) - (Number(transform.z) || 0);
+      const nodeDist = Math.hypot(nodeDx, nodeDz);
+      if (nodeDist > 1.8 && nodeDist <= 38) {
+        const localCubeLegs = worldToLocalMove(Number(transform.angle) || 0, nodeDx, nodeDz);
+        forward = forward * 0.68 + localCubeLegs.forward * 0.32;
+        strafe = strafe * 0.62 + localCubeLegs.strafe * 0.38;
+      }
+    }
+
     // Precision aim settle: steady footing right before squeezing a Sniper/Marksman shot.
     const boltAlmostReady = now >= (state.nextShotAt ?? 0) - 200;
     let sprint = targetDist > desiredRange + 8 && (effectiveTactic === "press" || effectiveTactic === "flank");
@@ -1960,7 +2064,13 @@ export async function setup(ctx) {
     } else if (aiCmd?.paceChoice === "sprint_push" && forward > 0.6 && Math.abs(steering.delta) < 0.78) {
       sprint = effectiveTactic !== "hold" && effectiveTactic !== "space";
     }
-    if (isSniper && targetDist <= fireRange && boltAlmostReady && Math.abs(steering.delta) < 0.25) {
+    const isReloadingNow = Boolean(selectedWeapon && Number(selectedWeapon.reloadUntil) > now);
+    if (isReloadingNow && targetDist <= 30) {
+      // Tactical reload weave: evade laterally and create space while reloading instead of charging with an empty mag
+      forward = targetDist < 18 ? -0.58 : -0.18;
+      strafe = state.strafeDirection * 0.78;
+      sprint = false;
+    } else if (isSniper && targetDist <= fireRange && boltAlmostReady && Math.abs(steering.delta) < 0.25) {
       forward *= 0.25;
       strafe *= 0.22;
       sprint = false;
@@ -2063,50 +2173,76 @@ export async function setup(ctx) {
   }
 
   function executeEscortOverwatch(bot, transform, state, humanTransform, now) {
+    // Hold a calm, steady overwatch sector beside the player — NO artificial turret head-wagging!
     const slot = Number(bot?.squadSlot) || 0;
-    const baseAngle = state.escortLeaderAnchor?.angle ?? (Number(humanTransform?.angle) || 0);
-    const sectorOffset = slot === 0 ? -0.58 : slot === 1 ? 0.58 : 2.65;
-    const scanSweep = Math.sin(now / 3600 + slot * 2.1) * 0.16;
-    const targetHeading = wrapAngle(baseAngle + sectorOffset + scanSweep);
+    const hx = Number(humanTransform?.x) || 0;
+    const hz = Number(humanTransform?.z) || 0;
+    if (!state.escortLeaderAnchor) {
+      state.escortLeaderAnchor = { x: hx, z: hz, angle: Number(humanTransform?.angle) || 0 };
+    } else if (Math.hypot(hx - state.escortLeaderAnchor.x, hz - state.escortLeaderAnchor.z) >= 2.2) {
+      state.escortLeaderAnchor = { x: hx, z: hz, angle: Number(humanTransform?.angle) || 0 };
+    }
+    const baseAngle = state.escortLeaderAnchor.angle;
+    const sectorOffset = slot === 0 ? -0.52 : slot === 1 ? 0.52 : 2.65;
+    const targetHeading = wrapAngle(baseAngle + sectorOffset);
     const delta = wrapAngle(targetHeading - (Number(transform.angle) || 0));
-    const turn = Math.abs(delta) <= 0.04
+    const deadbeat = (Math.abs(delta) * 0.82) / (BOT_TURN_SPEED_RAD_PER_SEC * 0.18);
+    const turn = Math.abs(delta) <= 0.16
       ? 0
-      : Math.sign(delta) * Math.min(0.42, (Math.abs(delta) * 1.1) / BOT_TURN_SPEED_RAD_PER_SEC, (Math.abs(delta) * 0.85) / (BOT_TURN_SPEED_RAD_PER_SEC * 0.15));
+      : Math.sign(delta) * Math.min(0.35, (Math.abs(delta) * 0.9) / BOT_TURN_SPEED_RAD_PER_SEC, deadbeat);
     state.squadRoleActive = "escort-overwatch";
     movement.setInput(bot.id, {
       forward: 0,
       strafe: 0,
       turn,
-      targetAngle: targetHeading,
+      targetAngle: Math.abs(delta) <= 0.16 ? null : targetHeading,
       sprint: false,
       fireHeld: false,
     });
-    state.nextThinkAt = now + 150;
+    state.nextThinkAt = now + 180;
     return true;
   }
 
   function executeRoam(bot, transform, state, now) {
-    const seed = Number.parseInt(String(bot.id).replace(/\D/g, ""), 10) || 1;
-    if (!Number.isFinite(state.roamHeading) || now >= (state.roamHeadingUntil ?? 0)) {
-      const step = (state.roamHeadingStep ?? 0) + 1;
-      state.roamHeadingStep = step;
-      const variation = (((stableSeed(`${bot.id}:roam:${step}`) % 100) / 100) * 2 - 1) * 0.42;
-      state.roamHeading = wrapAngle((Number(transform.angle) || 0) + variation);
-      state.roamHeadingUntil = now + 5200 + (seed % 4) * 600;
+    // Purposeful cube-to-cube patrol across our TacticalNodeGrid instead of aimless random camera turns
+    const reachedTarget = state.roamCubeTarget
+      && distance2(transform, state.roamCubeTarget) <= 4.5;
+    if (!state.roamCubeTarget || reachedTarget || now >= (state.roamCubeUntil ?? 0)) {
+      const heading = Number(transform.angle) || 0;
+      const forwardX = Math.sin(heading);
+      const forwardZ = -Math.cos(heading);
+      const probePoint = {
+        x: (Number(transform.x) || 0) + forwardX * 48,
+        z: (Number(transform.z) || 0) + forwardZ * 48,
+      };
+      const nextCube = nodeGrid.nearestPedNode(probePoint, {
+        maxDist: 95,
+        excludeReservedByOther: bot.id,
+        now,
+      }) ?? nodeGrid.nearestPedNode({ x: 0, z: 0 }, { maxDist: 220, excludeReservedByOther: bot.id, now });
+      if (nextCube) {
+        nodeGrid.reserveNode(bot.id, nextCube.id, now, 8500);
+        state.roamCubeTarget = { x: nextCube.x, y: nextCube.y ?? 0, z: nextCube.z };
+        state.roamCubeUntil = now + 10_000;
+      }
     }
-    const delta = wrapAngle(state.roamHeading - (Number(transform.angle) || 0));
-    const turn = Math.abs(delta) <= 0.035
-      ? 0
-      : Math.sign(delta) * Math.min(0.45, (Math.abs(delta) * 1.2) / BOT_TURN_SPEED_RAD_PER_SEC, (Math.abs(delta) * 0.85) / (BOT_TURN_SPEED_RAD_PER_SEC * 0.25));
+
+    if (state.roamCubeTarget) {
+      return moveTowardPosition(bot, transform, state, state.roamCubeTarget, now, {
+        sprint: distance2(transform, state.roamCubeTarget) > 22,
+        thinkDelay: 120,
+        stopDistance: 3.5,
+      });
+    }
+
     setNavigatedInput(bot, transform, state, {
-      forward: Math.abs(delta) > 0.95 ? 0.2 : 0.85,
+      forward: 0.85,
       strafe: 0,
-      turn,
-      targetAngle: state.roamHeading,
+      turn: 0,
       sprint: false,
       fireHeld: false,
     }, now);
-    state.nextThinkAt = now + 220;
+    state.nextThinkAt = now + 180;
     return true;
   }
 
@@ -3117,7 +3253,9 @@ export async function setup(ctx) {
 
   const api = {
     combatNet,
+    nodeGrid,
     neuralNetSummary: () => combatNet.summary(),
+    tacticalGridSummary: () => nodeGrid.summary(),
     squadPartnerId,
     squadRoleFor,
     squadTeammatesFor,

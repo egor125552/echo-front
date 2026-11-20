@@ -332,8 +332,10 @@ export async function setup(ctx) {
   const copyButton = document.querySelector("#journal-copy");
   const copyStatus = document.querySelector("#journal-copy-status");
   const downloadButton = document.querySelector("#journal-download");
+  const downloadFallback = document.querySelector("#journal-download-fallback");
   const clearButton = document.querySelector("#journal-clear");
   const status = document.querySelector("#journal-status");
+  let lastDownloadUrl = null;
 
   let enabled = localStorage.getItem(ENABLED_KEY) !== "false";
   let startedAtPerf = performance.now();
@@ -403,6 +405,10 @@ export async function setup(ctx) {
     pendingPerformance = null;
     journalSnapshotCost = { count: 0, totalMs: 0, maxMs: 0 };
     if (copyStatus) copyStatus.textContent = "";
+    if (downloadFallback) {
+      downloadFallback.hidden = true;
+      downloadFallback.textContent = "";
+    }
     renderTextView();
     updateUi();
   }
@@ -410,9 +416,10 @@ export async function setup(ctx) {
   function updateUi() {
     if (enabledInput) enabledInput.checked = enabled;
     const count = Math.max(0, lines.length - 1);
-    const hasContent = count > 0 || textLines.length > 1;
-    if (downloadButton) downloadButton.disabled = !hasContent;
-    if (copyButton) copyButton.disabled = textLines.length <= 1;
+    const hasAnyRecords = lines.length > 0 || textLines.length > 0;
+    const hasAnyText = textLines.length > 0;
+    if (downloadButton) downloadButton.disabled = !hasAnyRecords;
+    if (copyButton) copyButton.disabled = !hasAnyText;
     if (status) {
       status.textContent = enabled
         ? `Журнал включён. Событий в тексте: ${Math.max(0, textLines.length - 1)}, записей всего: ${count}.`
@@ -554,24 +561,12 @@ export async function setup(ctx) {
     return formatSelect?.value === "text" ? "text" : "compact";
   }
 
-  async function makeDownloadBlob(text, format = "compact") {
+  function makeDownloadBlobSync(text, format = "compact") {
     if (format === "text") {
       return {
         blob: new Blob([text], { type: "text/plain;charset=utf-8" }),
         extension: "txt",
       };
-    }
-    if (typeof CompressionStream === "function") {
-      try {
-        const compressed = new Blob([text], { type: "application/x-ndjson" })
-          .stream()
-          .pipeThrough(new CompressionStream("gzip"));
-        return {
-          blob: await new Response(compressed).blob(),
-          extension: "jsonl.gz",
-        };
-      } catch {
-      }
     }
     return {
       blob: new Blob([text], { type: "application/x-ndjson;charset=utf-8" }),
@@ -579,42 +574,109 @@ export async function setup(ctx) {
     };
   }
 
-  async function downloadJournal() {
+  function copyStringSync(content) {
+    if (typeof document === "undefined" || typeof document.execCommand !== "function") return false;
+    const body = document.body;
+    if (!body || typeof document.createElement !== "function") return false;
+    const helper = document.createElement("textarea");
+    helper.value = content;
+    helper.setAttribute("aria-hidden", "true");
+    helper.style.position = "fixed";
+    helper.style.left = "-9999px";
+    helper.style.top = "0";
+    helper.style.opacity = "0";
+    helper.style.fontSize = "16px";
+    body.append(helper);
+    let copied = false;
+    try {
+      helper.focus({ preventScroll: true });
+      helper.select();
+      if (typeof helper.setSelectionRange === "function") {
+        helper.setSelectionRange(0, content.length);
+      }
+      copied = Boolean(document.execCommand("copy"));
+    } catch {
+      copied = false;
+    } finally {
+      helper.remove?.();
+    }
+    return copied;
+  }
+
+  function downloadJournal() {
     const format = selectedDownloadFormat();
     append(["m", stamp(), "export", { records: Math.max(0, lines.length - 1), format }], { force: true });
     const text = format === "text"
       ? `${textLines.join("\n")}\n`
       : `${lines.join("\n")}\n`;
-    const { blob, extension } = await makeDownloadBlob(text, format);
+    const { blob, extension } = makeDownloadBlobSync(text, format);
     const date = new Date().toISOString().replace(/[:.]/g, "-");
+    const filename = `echo-front-journal-${date}.${extension}`;
+    const url = URL.createObjectURL(blob);
+    if (lastDownloadUrl) {
+      try { URL.revokeObjectURL(lastDownloadUrl); } catch {}
+    }
+    lastDownloadUrl = url;
+
     const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = `Журнал Echo Front ${date}.${extension}`;
+    link.href = url;
+    link.download = filename;
+    link.rel = "noopener";
+    link.style && (link.style.display = "none");
     document.body.append(link);
     link.click();
     link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+
+    if (downloadFallback) {
+      downloadFallback.textContent = "";
+      const fallbackLink = document.createElement("a");
+      fallbackLink.href = url;
+      fallbackLink.download = filename;
+      fallbackLink.rel = "noopener";
+      fallbackLink.textContent = `Если файл не сохранился автоматически — нажмите здесь (${filename})`;
+      downloadFallback.append(fallbackLink);
+      downloadFallback.hidden = false;
+    }
+    if (status) {
+      status.textContent = `Журнал отправлен на скачивание: ${filename}.`;
+    }
+    setTimeout(() => {
+      if (lastDownloadUrl === url) {
+        try { URL.revokeObjectURL(url); } catch {}
+        lastDownloadUrl = null;
+      }
+    }, 60_000);
+    return Promise.resolve({ filename, format, bytes: blob.size });
   }
 
   async function copyTextJournal() {
-    const content = textLines.join("\n");
-    if (!content) return;
-    let copied = false;
-    try {
-      await navigator.clipboard.writeText(content);
-      copied = true;
-    } catch {
+    const content = textLines.join("\n") || textView?.value || lines.join("\n");
+    if (!content) return false;
+    // Execute synchronous DOM copy first while user click activation is still active (critical in iframes & iOS Safari).
+    let copied = copyStringSync(content);
+    if (!copied && typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
       try {
-        textView?.focus();
-        textView?.select();
-        copied = document.execCommand("copy");
+        await navigator.clipboard.writeText(content);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+    if (!copied && textView) {
+      try {
+        textView.focus();
+        textView.select();
+        textView.setSelectionRange?.(0, textView.value.length);
+        copied = Boolean(document.execCommand?.("copy"));
       } catch {}
     }
+    const lineCount = textLines.length;
     if (copyStatus) {
       copyStatus.textContent = copied
-        ? "Текстовый журнал скопирован."
-        : "Не удалось скопировать автоматически — текст доступен в поле выше.";
+        ? `Текстовый журнал скопирован (строк: ${lineCount}).`
+        : "Не удалось скопировать автоматически — текст выделен в поле выше, скопируйте вручную.";
     }
+    return copied;
   }
 
   enabledInput?.addEventListener("change", () => {
@@ -640,10 +702,15 @@ export async function setup(ctx) {
   copyButton?.addEventListener("click", () => { void copyTextJournal(); });
 
   downloadButton?.addEventListener("click", () => {
-    downloadJournal().catch((error) => {
+    try {
+      downloadJournal().catch((error) => {
+        console.error("Play journal download failed", error);
+        if (status) status.textContent = "Не удалось скачать журнал.";
+      });
+    } catch (error) {
       console.error("Play journal download failed", error);
       if (status) status.textContent = "Не удалось скачать журнал.";
-    });
+    }
   });
 
   clearButton?.addEventListener("click", resetJournal);

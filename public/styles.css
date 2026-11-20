@@ -455,6 +455,17 @@ html[data-touch-mode="gestures"][data-game-active="true"] #accessible-game-menu:
   font-size: 0.9rem;
   line-height: 1.45;
 }
+#journal-download-fallback a {
+  display: inline-block;
+  color: #93c5fd;
+  text-decoration: underline;
+  font-weight: 600;
+  padding: 0.35rem 0;
+}
+#journal-download-fallback a:hover,
+#journal-download-fallback a:focus-visible {
+  color: #dbeafe;
+}
 #quick-speech-test { margin-top: 0.7rem; }
 
 

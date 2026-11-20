@@ -282,8 +282,17 @@ export async function setup(ctx) {
     }
   }
 
+  function isUiControlTarget(target) {
+    if (!target || typeof target.closest !== "function") return false;
+    if (target.closest("#touch-controls, #gesture-stage, #gesture-toolbar")) return false;
+    if (target.closest("#technical-tools, #settings-panel, #help-panel, #about-panel, dialog")) return true;
+    const tag = String(target.tagName || "").toUpperCase();
+    return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || tag === "SUMMARY" || tag === "A" || tag === "BUTTON";
+  }
+
   window.addEventListener("keydown", (event) => {
     if (!enabled) return;
+    if (isUiControlTarget(event.target)) return;
     if (handled.has(event.code)) event.preventDefault();
     if (!handled.has(event.code)) return;
     if (!pressed.has(event.code)) {
@@ -310,6 +319,7 @@ export async function setup(ctx) {
 
   window.addEventListener("keyup", (event) => {
     if (!handled.has(event.code)) return;
+    if (isUiControlTarget(event.target) && !pressed.has(event.code)) return;
     if (enabled) event.preventDefault();
     const wasPressed = releaseKeyboardKey(pressed, event.code);
     if (enabled && wasPressed) ctx.events.emit("input:key", { code: event.code, down: false });

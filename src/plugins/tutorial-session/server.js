@@ -6,15 +6,19 @@ export const TUTORIAL_PHASES = [
   "hit-enemy",
   "eliminate-enemy",
   "reload",
+  "select-marksman",
+  "fire-marksman",
+  "select-sniper",
+  "fire-sniper",
   "receive-hit",
   "team-complete",
 ];
 
 export const manifest = {
   id: "tutorial-session",
-  version: "1.1.0",
+  version: "1.2.0",
   requires: ["entities", "teams"],
-  optional: ["spawn-protection"],
+  optional: ["spawn-protection", "weapons"],
   capabilities: ["services.consume", "services.provide", "components.read", "events.on"],
 };
 
@@ -24,6 +28,9 @@ export async function setup(ctx) {
   const teams = ctx.services.get("teams");
   const spawnProtection = ctx.services.has("spawn-protection")
     ? ctx.services.get("spawn-protection")
+    : null;
+  const weapons = ctx.services.has("weapons")
+    ? ctx.services.get("weapons")
     : null;
   const states = new Map();
 
@@ -63,6 +70,37 @@ export async function setup(ctx) {
     return true;
   }
 
+  function activeWeaponId(playerId) {
+    const inventory = ctx.components.get(playerId, "Weapons");
+    return inventory?.items?.[inventory.selected]?.id ?? null;
+  }
+
+  function beginMarksmanStep(playerId, now) {
+    if (!weapons) {
+      if (advance(playerId, "receive-hit", now)) spawnProtection?.clear?.(playerId);
+      return;
+    }
+    weapons.grant?.(playerId, "marksman");
+    if (activeWeaponId(playerId) === "marksman") {
+      advance(playerId, "fire-marksman", now);
+    } else {
+      advance(playerId, "select-marksman", now);
+    }
+  }
+
+  function beginSniperStep(playerId, now) {
+    if (!weapons) {
+      if (advance(playerId, "receive-hit", now)) spawnProtection?.clear?.(playerId);
+      return;
+    }
+    weapons.grant?.(playerId, "sniper");
+    if (activeWeaponId(playerId) === "sniper") {
+      advance(playerId, "fire-sniper", now);
+    } else {
+      advance(playerId, "select-sniper", now);
+    }
+  }
+
   function handleInput(playerId, input = {}, now = Date.now()) {
     const state = ensure(playerId);
     if (!state) return;
@@ -75,7 +113,7 @@ export async function setup(ctx) {
     } else if (state.phase === "fire" && (input.firePressed || input.fireHeld)) {
       advance(playerId, "hit-enemy", now);
     } else if (state.phase === "reload" && input.reload) {
-      if (advance(playerId, "receive-hit", now)) spawnProtection?.clear?.(playerId);
+      beginMarksmanStep(playerId, now);
     }
   }
 
@@ -92,6 +130,28 @@ export async function setup(ctx) {
     else if (state.phase === "strafe" && distance >= 3) advance(playerId, "sprint", now);
     else if (state.phase === "sprint" && distance >= 10) advance(playerId, "fire", now);
   }
+
+  ctx.events.on("weapon:selected", ({ entityId, weaponId, now } = {}) => {
+    if (!enabled) return;
+    const state = ensure(entityId);
+    if (!state) return;
+    if (state.phase === "select-marksman" && weaponId === "marksman") {
+      advance(entityId, "fire-marksman", now);
+    } else if (state.phase === "select-sniper" && weaponId === "sniper") {
+      advance(entityId, "fire-sniper", now);
+    }
+  });
+
+  ctx.events.on("weapon:fired", ({ entityId, weaponId, now } = {}) => {
+    if (!enabled) return;
+    const state = ensure(entityId);
+    if (!state) return;
+    if (state.phase === "fire-marksman" && weaponId === "marksman") {
+      beginSniperStep(entityId, now);
+    } else if (state.phase === "fire-sniper" && weaponId === "sniper") {
+      if (advance(entityId, "receive-hit", now)) spawnProtection?.clear?.(entityId);
+    }
+  });
 
   ctx.events.on("combat:damage", (payload = {}) => {
     const applied = (Number(payload.healthApplied) || 0) + (Number(payload.armorAbsorbed) || 0);

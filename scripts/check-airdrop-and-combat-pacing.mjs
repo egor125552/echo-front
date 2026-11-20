@@ -562,10 +562,12 @@ test("full-lobby enemy squads distribute across diverse map routes, only a subse
       "Majority of enemy bots in the lobby must remain distributed on their own map routes",
     );
 
-    // 4. Verify TacticalCombatNet selects neural tactics + fire mode and learns directly from the live human player
+    // 4. Verify TacticalCombatNet selects neural tactics + fire mode, and TacticalNodeGrid assigns distinct Ped/Car cubes & squadmate wingman cubes
     const duelBot = allEnemies[0];
+    const duelBot2 = allEnemies[1];
     const duelTarget = joined.squadmates[0];
     groundEntity(game, duelBot.id, { x: -80, y: 0, z: -80, angle: 0 }, nowRef.now);
+    groundEntity(game, duelBot2.id, { x: -82, y: 0, z: -76, angle: 0 }, nowRef.now);
     groundEntity(game, duelTarget, { x: -64, y: 0, z: -80, angle: Math.PI }, nowRef.now);
 
     for (let i = 0; i < 10; i += 1) {
@@ -574,8 +576,53 @@ test("full-lobby enemy squads distribute across diverse map routes, only a subse
     }
 
     const botComp = c.get(duelBot.id, "Bot");
+    const botComp2 = c.get(duelBot2.id, "Bot");
     assert(botComp?.lastNeuralAction, "Bot component must record lastNeuralAction chosen by TacticalCombatNet");
     assert(botComp?.lastNeuralFireMode, "Bot component must record lastNeuralFireMode (when/how to shoot)");
+    assert(botComp?.activeCombatNodeId, "Bot must reserve a tactical Ped Node cube during combat");
+    assert(
+      botComp.activeCombatNodeId !== botComp2?.activeCombatNodeId,
+      "Two bots fighting together must reserve two distinct Ped Node cubes (1 cube = 1 fighter, no clumping)",
+    );
+
+    const gridSummary = botCombat.tacticalGridSummary();
+    assert(gridSummary.carNodesCount >= 80, `Expected >= 80 GTA-style Car Nodes, got ${gridSummary.carNodesCount}`);
+    assert(gridSummary.pedNodesCount >= 120, `Expected >= 120 GTA-style Ped Nodes, got ${gridSummary.pedNodesCount}`);
+    assert(
+      gridSummary.stats.squadmateEscortSelections >= 1,
+      "Human squadmates must use the TacticalNodeGrid for wingman/escort positioning",
+    );
+
+    // Verify vehicle Car Nodes route around the warehouse while open-ground vehicle ramming against the player remains allowed
+    const nodeGrid = botCombat.nodeGrid;
+    const bypassPath = nodeGrid.findVehiclePath({ x: 100, z: -22 }, { x: 175, z: -22 }, nowRef.now);
+    assert(bypassPath.length >= 2, "Car Node vehicle path across the warehouse must route around the building via Car Nodes");
+    assert.equal(
+      nodeGrid.canRamTarget({ x: -40, z: -40 }, { x: -15, z: -40 }),
+      true,
+      "Enemy vehicles on open ground must still be allowed to ram the live player",
+    );
+    assert.equal(
+      nodeGrid.canRamTarget({ x: 105, z: -22 }, { x: 170, z: -22 }),
+      false,
+      "Enemy vehicles must not attempt to ram straight through a solid building wall",
+    );
+
+    // Verify Smart Blueprint Auto-Compiler automatically creates door, room, stair, cover, and car cubes for any new building added in the future
+    const compiledNewBuilding = nodeGrid.registerBuildingBlueprint({
+      id: "expansion-watchtower",
+      x: -290,
+      z: -240,
+      width: 16,
+      depth: 14,
+      floors: [{ id: "ground", y: 0 }, { id: "upper", y: 3.2 }],
+      doors: [{ id: "watchtower-door", floorId: "ground", side: "south", offset: 0 }],
+      stairs: [{ id: "watchtower-stair", fromFloorId: "ground", toFloorId: "upper", x: 0, z: 0, run: 5, risesToward: "north" }],
+    });
+    assert(
+      compiledNewBuilding.addedCar >= 4 && compiledNewBuilding.addedPed >= 8,
+      `Smart Blueprint Auto-Compiler must automatically generate car & ped cubes for new buildings (got car=${compiledNewBuilding.addedCar}, ped=${compiledNewBuilding.addedPed})`,
+    );
 
     // Simulate live human player parachute deployment and combat hit so the neural net learns from the human player
     game.host.events.emit("parachute:deployed", {
@@ -596,6 +643,7 @@ test("full-lobby enemy squads distribute across diverse map routes, only a subse
       now: nowRef.now,
     });
     const netSummaryAfter = botCombat.neuralNetSummary();
+    const gridSummaryAfter = botCombat.tacticalGridSummary();
     assert(
       netSummaryAfter.liveCombatUpdates > netSummaryBefore.liveCombatUpdates,
       `Expected liveCombatUpdates to increment after real combat damage (${netSummaryBefore.liveCombatUpdates} -> ${netSummaryAfter.liveCombatUpdates})`,
@@ -607,6 +655,10 @@ test("full-lobby enemy squads distribute across diverse map routes, only a subse
     assert(
       netSummaryAfter.humanSamplesLearned >= netSummaryBefore.humanSamplesLearned + 2,
       "Neural net must accumulate live imitation samples from the human player's combat and parachute actions",
+    );
+    assert(
+      gridSummaryAfter.stats.dangerUpdates >= 2,
+      "Living Tactical Field must record danger heat from live gunfire lines",
     );
   } finally {
     await game.host.stop();

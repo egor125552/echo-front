@@ -1,22 +1,29 @@
-export const BOT_OBSTACLE_PROBE_DISTANCE = 1.45;
-export const BOT_DOOR_PROBE_DISTANCE = 2.1;
-export const BOT_STUCK_SAMPLE_MS = 300;
-export const BOT_STUCK_DISTANCE = 0.055;
+// Clean human-like obstacle sliding & automatic door opening for bots.
+// Replaces the old Roomba-style 50-degree camera-spinning obstacle avoider:
+// when a bot brushes a wall corner, stair railing, or teammate, it smoothly
+// sidesteps (strafes) around the obstacle while keeping its camera steady!
+
+export const BOT_OBSTACLE_PROBE_DISTANCE = 1.48;
+export const BOT_DOOR_PROBE_DISTANCE = 2.2;
+export const BOT_STUCK_SAMPLE_MS = 320;
+export const BOT_STUCK_DISTANCE = 0.045;
 
 export const manifest = {
   id: "bot-navigation",
-  version: "1.1.0",
+  version: "2.1.0",
   requires: ["rapier-physics", "map-test-arena"],
   capabilities: ["services.consume", "services.provide"],
 };
-
-const BOT_ACTUAL_TURN_SPEED = 2.6;
 
 function wrapAngle(value) {
   let angle = Number(value) || 0;
   while (angle > Math.PI) angle -= Math.PI * 2;
   while (angle < -Math.PI) angle += Math.PI * 2;
   return angle;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, Number(value) || 0));
 }
 
 function normalizeDirection(direction) {
@@ -71,7 +78,7 @@ function sampleStuck(botState, transform, now, movementMagnitude) {
   botState.navSampleZ = transform.z;
   botState.navSampleAt = now;
 
-  if (movementMagnitude < 0.25 || moved >= BOT_STUCK_DISTANCE) {
+  if (movementMagnitude < 0.22 || moved >= BOT_STUCK_DISTANCE) {
     botState.stuckSamples = 0;
     return false;
   }
@@ -82,6 +89,13 @@ function sampleStuck(botState, transform, now, movementMagnitude) {
   return true;
 }
 
+/**
+ * Human-like obstacle sliding:
+ * Never hijacks and violently spins the bot's camera on a timer.
+ * Instead, keeps the camera looking naturally toward the path/target and applies
+ * a smooth lateral sidestep (strafe) around corners, doorframes, trees, or teammates
+ * even slightly before contact so bots curve smoothly instead of scraping walls.
+ */
 export function applyBotObstacleAvoidance(physics, botId, transform, botState, input, now = Date.now()) {
   const movementMagnitude = Math.hypot(input.forward ?? 0, input.strafe ?? 0);
   if (movementMagnitude < 0.05) {
@@ -91,71 +105,72 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
 
   const desiredDirection = localToWorld(transform.angle, input.forward ?? 0, input.strafe ?? 0);
   const forwardClearance = probeClearance(physics, botId, transform, desiredDirection);
-  const blocked = forwardClearance < 0.95;
+  const blocked = forwardClearance < 0.88;
+  const approachingObstacle = !blocked && forwardClearance < 1.38;
   const stuck = sampleStuck(botState, transform, now, movementMagnitude);
-  const currentlyAvoiding = (botState.avoidUntil ?? 0) > now;
+  const currentlySliding = (botState.avoidUntil ?? 0) > now;
 
-  if ((blocked && !currentlyAvoiding) || stuck) {
-    const rightDirection = rotateDirection(desiredDirection, 0.85);
-    const leftDirection = rotateDirection(desiredDirection, -0.85);
-    const rightClearance = probeClearance(physics, botId, transform, rightDirection);
-    const leftClearance = probeClearance(physics, botId, transform, leftDirection);
-    const previous = botState.avoidDirection || botState.strafeDirection || 1;
+  if ((blocked && !currentlySliding) || stuck) {
+    const rightDir = rotateDirection(desiredDirection, 0.72);
+    const leftDir = rotateDirection(desiredDirection, -0.72);
+    const rightClear = probeClearance(physics, botId, transform, rightDir);
+    const leftClear = probeClearance(physics, botId, transform, leftDir);
+    const prevSide = botState.avoidDirection || botState.strafeDirection || 1;
     if ((botState.avoidFlipLockUntil ?? 0) <= now) {
-      botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.14
-        ? previous
-        : (rightClearance > leftClearance ? 1 : -1);
+      botState.avoidDirection = Math.abs(rightClear - leftClear) < 0.14
+        ? prevSide
+        : (rightClear > leftClear ? 1 : -1);
+      botState.avoidFlipLockUntil = now + 480;
     }
-    botState.avoidUntil = now + (stuck ? 950 : 750);
-  } else if (blocked && currentlyAvoiding) {
-    botState.avoidUntil = Math.max(botState.avoidUntil, now + 350);
+    botState.avoidUntil = now + (stuck ? 520 : 340);
+  } else if (blocked && currentlySliding) {
+    botState.avoidUntil = Math.max(botState.avoidUntil, now + 220);
+  } else if (approachingObstacle && !currentlySliding) {
+    // Gentle pre-contact curve around an obstacle ahead without slowing down or spinning camera
+    const rightClear = probeClearance(physics, botId, transform, rotateDirection(desiredDirection, 0.55));
+    const leftClear = probeClearance(physics, botId, transform, rotateDirection(desiredDirection, -0.55));
+    if (Math.abs(rightClear - leftClear) >= 0.16) {
+      const gentleSide = rightClear > leftClear ? 1 : -1;
+      botState.avoidDirection = gentleSide;
+      const curveDir = rotateDirection(desiredDirection, gentleSide * 0.42);
+      const localCurve = worldToLocal(transform.angle, curveDir);
+      return {
+        ...input,
+        forward: clamp(localCurve.forward * 0.92, -0.4, 0.96),
+        strafe: clamp(localCurve.strafe * 0.65, -0.65, 0.65),
+        turn: input.turn ?? 0,
+        targetAngle: input.targetAngle ?? null,
+      };
+    }
   }
 
   if ((botState.avoidUntil ?? 0) <= now) return input;
 
   const side = botState.avoidDirection || 1;
-  let detour = rotateDirection(desiredDirection, side * 0.82);
-  let detourClearance = probeClearance(physics, botId, transform, detour);
-  if (detourClearance < 0.72) {
-    const wider = rotateDirection(desiredDirection, side * 1.2);
-    const widerClearance = probeClearance(physics, botId, transform, wider);
-    if (widerClearance > detourClearance) {
-      detour = wider;
-      detourClearance = widerClearance;
+  let slideDir = rotateDirection(desiredDirection, side * 0.78);
+  let slideClear = probeClearance(physics, botId, transform, slideDir);
+
+  if (slideClear < 0.55) {
+    const widerDir = rotateDirection(desiredDirection, side * 1.25);
+    const widerClear = probeClearance(physics, botId, transform, widerDir);
+    if (widerClear > slideClear) {
+      slideDir = widerDir;
+      slideClear = widerClear;
+    } else if ((botState.avoidFlipLockUntil ?? 0) <= now) {
+      botState.avoidDirection = -side;
+      botState.avoidFlipLockUntil = now + 520;
+      slideDir = rotateDirection(desiredDirection, botState.avoidDirection * 1.15);
     }
   }
-  if (detourClearance < 0.42 && (botState.avoidFlipLockUntil ?? 0) <= now) {
-    botState.avoidDirection = -side;
-    botState.avoidFlipLockUntil = now + 550;
-    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.25);
-  }
 
-  const preserveAim = Boolean(input.fireHeld || input.aimLock || Math.abs(input.strafe ?? 0) >= 0.25);
-  if (!preserveAim) {
-    const detourHeading = Math.atan2(detour.x, -detour.z);
-    const delta = wrapAngle(detourHeading - (Number(transform.angle) || 0));
-    const deadzone = 0.03;
-    let calmTurn = 0;
-    if (Math.abs(delta) > deadzone) {
-      const deadbeat = (Math.abs(delta) * 0.88) / (BOT_ACTUAL_TURN_SPEED * 0.12);
-      calmTurn = Math.sign(delta) * Math.min(0.75, (Math.abs(delta) * 1.55) / BOT_ACTUAL_TURN_SPEED, deadbeat);
-    }
-    const local = worldToLocal(transform.angle, detour);
-    return {
-      ...input,
-      forward: Math.abs(delta) > 1.1 ? 0.15 : Math.max(0.25, Math.min(0.78, Math.hypot(local.forward, local.strafe) * 0.78)),
-      strafe: Math.max(-0.35, Math.min(0.35, local.strafe * 0.4)),
-      turn: calmTurn,
-      targetAngle: detourHeading,
-      sprint: false,
-    };
-  }
-
-  const local = worldToLocal(transform.angle, detour);
+  const local = worldToLocal(transform.angle, slideDir);
+  // Keep the bot's camera steady (preserve input.turn & input.targetAngle) and slide smoothly with WASD!
   return {
     ...input,
-    forward: Math.max(-0.7, Math.min(0.65, local.forward)),
-    strafe: Math.max(-1, Math.min(1, local.strafe)),
+    forward: clamp(local.forward * 0.78, -0.55, 0.78),
+    strafe: clamp(local.strafe * 0.85, -0.85, 0.85),
+    turn: input.turn ?? 0,
+    targetAngle: input.targetAngle ?? null,
     sprint: false,
   };
 }

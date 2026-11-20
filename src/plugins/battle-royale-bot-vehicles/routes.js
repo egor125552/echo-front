@@ -1,7 +1,9 @@
 import { distance, headingTo } from "./driving.js";
+import { getSharedTacticalNodeGrid } from "../../ai/tactical-node-grid.js";
 
 export function createDriverRoutes(physics, navigation, map) {
   const { world, RAPIER } = physics;
+  const nodeGrid = getSharedTacticalNodeGrid(map);
   // Sized for the widest current body, not just the internal chassis.
   const shape = new RAPIER.Cuboid(2.55, .3, 1.5);
 
@@ -116,7 +118,15 @@ export function createDriverRoutes(physics, navigation, map) {
     // Keep corners, rather than the widely spaced speech checkpoints. Give
     // every segment a right-hand lane bias so opposing bot traffic does
     // not aim for the exact same centre line.
-    const anchors = (route?.anchors?.length ? route.anchors : [goal]).map(p => ({ x: p.x, y: 0, z: p.z }));
+    let anchors = (route?.anchors?.length ? route.anchors : [goal]).map(p => ({ x: p.x, y: 0, z: p.z }));
+    if (anchors.length <= 1 && nodeGrid.segmentHitsBuilding(routeStart, goal, buildingClearance)) {
+      const carNodePath = nodeGrid.findVehiclePath(routeStart, goal);
+      if (carNodePath.length > 0) {
+        anchors = [...carNodePath.map(p => ({ x: p.x, y: 0, z: p.z, nodeId: p.id })), { x: goal.x, y: 0, z: goal.z }];
+      }
+    } else {
+      nodeGrid.stats.carPathQueries += 1;
+    }
     const raw = escape ? [{ ...escape, escape: true }, ...anchors] : anchors;
     const points = [];
     let cursor = vehicle;
@@ -147,6 +157,15 @@ export function createDriverRoutes(physics, navigation, map) {
     return { point, nextPoint: route.points[route.index + 1], remaining };
   }
 
-  return { clearDistance, forwardBlocker, visible, parkingGoal, plan, waypoint,
-    clearPath(vehicle, point, margin = 3) { return clearDistance(vehicle, headingTo(vehicle, point), distance(vehicle, point) + margin) > distance(vehicle, point); } };
+  return {
+    nodeGrid,
+    canRamTarget: (vehiclePos, targetPos, maxDist = 105) => nodeGrid.canRamTarget(vehiclePos, targetPos, maxDist),
+    clearDistance,
+    forwardBlocker,
+    visible,
+    parkingGoal,
+    plan,
+    waypoint,
+    clearPath(vehicle, point, margin = 3) { return clearDistance(vehicle, headingTo(vehicle, point), distance(vehicle, point) + margin) > distance(vehicle, point); },
+  };
 }

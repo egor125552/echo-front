@@ -127,13 +127,14 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
 
   const desiredDirection = localToWorld(transform.angle, input.forward, input.strafe);
   const forwardClearance = probeClearance(physics, botId, transform, desiredDirection);
-  const blocked = forwardClearance < 0.95;
+  const blocked = forwardClearance < 0.9;
+  const approachingObstacle = !blocked && forwardClearance < 1.38;
   const stuck = sampleStuck(botState, transform, now, movementMagnitude);
   const currentlyAvoiding = (botState.avoidUntil ?? 0) > now;
 
   if ((blocked && !currentlyAvoiding) || stuck) {
-    const rightDirection = rotateDirection(desiredDirection, 0.85);
-    const leftDirection = rotateDirection(desiredDirection, -0.85);
+    const rightDirection = rotateDirection(desiredDirection, 0.72);
+    const leftDirection = rotateDirection(desiredDirection, -0.72);
     const rightClearance = probeClearance(physics, botId, transform, rightDirection);
     const leftClearance = probeClearance(physics, botId, transform, leftDirection);
     const previous = botState.avoidDirection || botState.strafeDirection || 1;
@@ -141,51 +142,56 @@ export function applyBotObstacleAvoidance(physics, botId, transform, botState, i
       botState.avoidDirection = Math.abs(rightClearance - leftClearance) < 0.14
         ? previous
         : (rightClearance > leftClearance ? 1 : -1);
+      botState.avoidFlipLockUntil = now + 480;
     }
-    botState.avoidUntil = now + (stuck ? 950 : 750);
+    botState.avoidUntil = now + (stuck ? 520 : 360);
   } else if (blocked && currentlyAvoiding) {
-    botState.avoidUntil = Math.max(botState.avoidUntil, now + 350);
+    botState.avoidUntil = Math.max(botState.avoidUntil, now + 220);
+  } else if (approachingObstacle && !currentlyAvoiding) {
+    // Smooth pre-contact sidestep curve around corners/pillars without ever spinning the camera
+    const rightClearance = probeClearance(physics, botId, transform, rotateDirection(desiredDirection, 0.55));
+    const leftClearance = probeClearance(physics, botId, transform, rotateDirection(desiredDirection, -0.55));
+    if (Math.abs(rightClearance - leftClearance) >= 0.16) {
+      const gentleSide = rightClearance > leftClearance ? 1 : -1;
+      botState.avoidDirection = gentleSide;
+      const curveDir = rotateDirection(desiredDirection, gentleSide * 0.42);
+      const localCurve = worldToLocal(transform.angle, curveDir);
+      return {
+        ...input,
+        forward: Math.max(-0.4, Math.min(0.95, localCurve.forward * 0.92)),
+        strafe: Math.max(-0.65, Math.min(0.65, localCurve.strafe * 0.65)),
+        turn: input.turn ?? 0,
+        targetAngle: input.targetAngle ?? null,
+      };
+    }
   }
 
   if ((botState.avoidUntil ?? 0) <= now) return input;
 
   const side = botState.avoidDirection || 1;
-  let detour = rotateDirection(desiredDirection, side * 0.82);
-  let detourClearance = probeClearance(physics, botId, transform, detour);
-  if (detourClearance < 0.72) {
-    const wider = rotateDirection(desiredDirection, side * 1.2);
+  let slideDir = rotateDirection(desiredDirection, side * 0.78);
+  let slideClearance = probeClearance(physics, botId, transform, slideDir);
+  if (slideClearance < 0.55) {
+    const wider = rotateDirection(desiredDirection, side * 1.25);
     const widerClearance = probeClearance(physics, botId, transform, wider);
-    if (widerClearance > detourClearance) {
-      detour = wider;
-      detourClearance = widerClearance;
+    if (widerClearance > slideClearance) {
+      slideDir = wider;
+      slideClearance = widerClearance;
+    } else if ((botState.avoidFlipLockUntil ?? 0) <= now) {
+      botState.avoidDirection = -side;
+      botState.avoidFlipLockUntil = now + 520;
+      slideDir = rotateDirection(desiredDirection, botState.avoidDirection * 1.15);
     }
   }
-  if (detourClearance < 0.42 && (botState.avoidFlipLockUntil ?? 0) <= now) {
-    botState.avoidDirection = -side;
-    botState.avoidFlipLockUntil = now + 550;
-    detour = rotateDirection(desiredDirection, botState.avoidDirection * 1.25);
-  }
 
-  const preserveAim = Boolean(input.fireHeld || input.aimLock || Math.abs(input.strafe ?? 0) >= 0.25);
-  if (!preserveAim) {
-    const detourHeading = Math.atan2(detour.x, -detour.z);
-    const delta = wrapAngle(detourHeading - (Number(transform.angle) || 0));
-    const local = worldToLocal(transform.angle, detour);
-    return {
-      ...input,
-      forward: Math.abs(delta) > 1.1 ? 0.15 : Math.max(0.25, Math.min(0.78, Math.hypot(local.forward, local.strafe) * 0.78)),
-      strafe: Math.max(-0.35, Math.min(0.35, local.strafe * 0.4)),
-      turn: tdmSteerTurn(delta, { maxRate: 0.75, deadzone: 0.03, gain: 1.55, dtSec: 0.1 }),
-      targetAngle: detourHeading,
-      sprint: false,
-    };
-  }
-
-  const local = worldToLocal(transform.angle, detour);
+  // Always preserve camera heading (input.turn & input.targetAngle) and slide smoothly around obstacles via WASD!
+  const local = worldToLocal(transform.angle, slideDir);
   return {
     ...input,
-    forward: Math.max(-0.7, Math.min(0.65, local.forward)),
-    strafe: Math.max(-1, Math.min(1, local.strafe)),
+    forward: Math.max(-0.55, Math.min(0.78, local.forward * 0.78)),
+    strafe: Math.max(-0.85, Math.min(0.85, local.strafe * 0.85)),
+    turn: input.turn ?? 0,
+    targetAngle: input.targetAngle ?? null,
     sprint: false,
   };
 }
@@ -272,6 +278,10 @@ export async function setup(ctx) {
     botState.lastKnownUntil = now + 6500;
     botState.attackerId = attackerId;
     botState.attackerUntil = now + 5000;
+    if (now >= (botState.lastDamageJukeAt ?? 0) + 900) {
+      botState.strafeDirection = -(botState.strafeDirection || 1);
+      botState.lastDamageJukeAt = now;
+    }
 
     if (botState.reactionTargetId !== attackerId) {
       botState.reactionTargetId = attackerId;
@@ -515,14 +525,15 @@ export async function setup(ctx) {
             -(botState.tdmPatrolTarget.z - transform.z),
           );
           const patrolDelta = wrapAngle(patrolDesired - transform.angle);
+          const patrolStrafe = Math.abs(patrolDelta) > 0.45 ? Math.sign(patrolDelta) * 0.36 : 0;
           const roamingInput = applyBotObstacleAvoidance(
             physics,
             bot.id,
             transform,
             botState,
             {
-              forward: Math.abs(patrolDelta) > 0.9 ? 0.25 : 0.85,
-              strafe: 0,
+              forward: Math.abs(patrolDelta) > 1.1 ? 0.35 : (Math.abs(patrolDelta) > 0.55 ? 0.68 : 0.88),
+              strafe: patrolStrafe,
               turn: tdmSteerTurn(patrolDelta, { maxRate: 0.72, deadzone: 0.03, gain: 1.45 }),
               targetAngle: patrolDesired,
               sprint: false,
@@ -589,10 +600,10 @@ export async function setup(ctx) {
           }
           const huntError = wrapAngle(moveHeading - transform.angle);
           const huntTurn = tdmSteerTurn(huntError, { maxRate: 0.82, deadzone: 0.025, gain: 1.65 });
-          const turningHard = Math.abs(huntError) > 1.05;
-          let huntForward = turningHard ? 0.15 : (Math.abs(huntError) > 0.55 ? 0.55 : (moveDist > 4 ? 0.96 : 0.25));
-          let huntStrafe = 0;
-          let huntSprint = !turningHard && moveDist > 14;
+          const turningHard = Math.abs(huntError) > 1.1;
+          let huntForward = turningHard ? 0.34 : (Math.abs(huntError) > 0.55 ? 0.68 : (moveDist > 4 ? 0.96 : 0.28));
+          let huntStrafe = Math.abs(huntError) > 0.45 ? Math.sign(huntError) * 0.38 : 0;
+          let huntSprint = !turningHard && Math.abs(huntError) < 0.45 && moveDist > 14;
           if (aiCmd) {
             if (aiCmd.moveChoice === "retreat_heal") {
               huntForward = -0.7;
@@ -778,6 +789,13 @@ export async function setup(ctx) {
           if (target.distance > 6) {
             strafe = Math.max(Math.abs(strafe), training.approachStrafe) * botState.strafeDirection;
           }
+        }
+
+        if (!training && selected?.reloadUntil > now && target.distance <= 24) {
+          // Tactical reload weave: evade laterally and create space while reloading
+          forward = target.distance < 14 ? -0.58 : -0.18;
+          strafe = 0.82 * botState.strafeDirection;
+          sprint = false;
         }
 
         if (absoluteError > 0.85) strafe *= 0.35;
