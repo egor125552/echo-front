@@ -677,15 +677,21 @@ export async function setup(ctx) {
     return true;
   };
 
+  const originalConnectHuman = matchApi.connectHuman?.bind(matchApi) ?? null;
+  if (originalConnectHuman) {
+    matchApi.connectHuman = (playerId, ...args) => {
+      if (playerId) catalogDeliveries.delete(playerId);
+      return originalConnectHuman(playerId, ...args);
+    };
+  }
+
   const originalSnapshotFor = matchApi.snapshotFor?.bind(matchApi) ?? null;
   if (originalSnapshotFor) {
     matchApi.snapshotFor = (playerId, now = Date.now()) => {
       const base = originalSnapshotFor(playerId, now);
       if (!social.isHost(playerId)) return base;
       const delivered = catalogDeliveries.get(playerId);
-      const includeCatalog = !delivered
-        || delivered.revision !== revision
-        || now - delivered.at >= 5_000;
+      const includeCatalog = !delivered || delivered.revision !== revision;
       if (includeCatalog) catalogDeliveries.set(playerId, { revision, at: now });
       return {
         ...base,

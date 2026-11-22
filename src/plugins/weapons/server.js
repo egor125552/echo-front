@@ -70,6 +70,26 @@ const DEFINITIONS = {
     soundRadius: 240,
     reloadMs: 1850,
   },
+  "electro-rifle": {
+    id: "electro-rifle",
+    name: "Электрический автомат-шокер",
+    automatic: true,
+    holdRepeat: true,
+    magazine: 80,
+    reserve: 800,
+    damage: 185,
+    shattersArmor: true,
+    armorDamageMultiplier: 4.5,
+    piercesVehicles: true,
+    rpm: 780,
+    range: 260,
+    muzzleVelocity: 680,
+    projectileMass: 0.012,
+    projectileRadius: 0.006,
+    soundKey: "weapon.rifle",
+    soundRadius: 240,
+    reloadMs: 900,
+  },
 };
 
 export const manifest = {
@@ -198,6 +218,7 @@ export async function setup(ctx) {
     const targetingOptions = {
       muzzleVelocity: definition.muzzleVelocity,
       weaponId: weapon.id,
+      piercesVehicles: Boolean(definition.piercesVehicles),
     };
     const resolved = targeting?.resolveShot
       ? targeting.resolveShot(entityId, baseDirection, definition.range, targetingOptions)
@@ -229,10 +250,13 @@ export async function setup(ctx) {
     const forwardMove = Math.max(0, shooterVx * direction.x + shooterVz * direction.z);
     const spawnOffset = 0.76 + forwardMove * 0.055;
 
+    const crouchCoverPeek = Boolean(transform.crouching && transform.inCover);
+    const muzzleOffset = spawnOffset + (crouchCoverPeek ? 0.45 : 0);
+    const muzzleHeight = crouchCoverPeek ? 1.24 : (transform.crouching ? 0.86 : 1);
     const origin = {
-      x: transform.x + direction.x * spawnOffset,
-      y: (Number(transform.y) || 0) + 1,
-      z: transform.z + direction.z * spawnOffset,
+      x: transform.x + direction.x * muzzleOffset,
+      y: (Number(transform.y) || 0) + muzzleHeight,
+      z: transform.z + direction.z * muzzleOffset,
     };
     const projectileId = projectiles.spawn({
       shooterId: entityId,
@@ -242,6 +266,7 @@ export async function setup(ctx) {
       range: definition.range,
       mass: definition.projectileMass,
       radius: definition.projectileRadius,
+      piercesVehicles: Boolean(definition.piercesVehicles),
       origin,
       direction,
       now,
@@ -285,6 +310,41 @@ export async function setup(ctx) {
     has(entityId, weaponId) {
       return Boolean(ctx.components.get(entityId, "Weapons")?.items?.some((item) => item.id === weaponId));
     },
+    takeAmmo(entityId, weaponId, amount = 0) {
+      const inventory = ctx.components.get(entityId, "Weapons");
+      const qty = Math.max(0, Math.floor(Number(amount) || 0));
+      if (!inventory?.items?.length || !qty) return 0;
+      const item = inventory.items.find((entry) => entry.id === weaponId);
+      if (!item || item.reserve <= 0) return 0;
+      const removed = Math.min(item.reserve, qty);
+      item.reserve -= removed;
+      return removed;
+    },
+    grantAmmo(entityId, weaponId, amount = 0) {
+      const inventory = ctx.components.get(entityId, "Weapons");
+      const qty = Math.max(0, Math.floor(Number(amount) || 0));
+      if (!inventory?.items?.length || !qty) return 0;
+      const item = inventory.items.find((entry) => entry.id === weaponId)
+        ?? inventory.items[inventory.selected]
+        ?? inventory.items[0];
+      if (!item) return 0;
+      const def = DEFINITIONS[item.id] ?? { reserve: 120 };
+      const cap = Math.max(400, (def.reserve || 120) * 4);
+      const added = Math.min(qty, Math.max(0, cap - item.reserve));
+      item.reserve += added;
+      return added;
+    },
+    ammoCapacityFor(entityId, weaponId) {
+      const inventory = ctx.components.get(entityId, "Weapons");
+      if (!inventory?.items?.length) return 0;
+      const item = inventory.items.find((entry) => entry.id === weaponId)
+        ?? inventory.items[inventory.selected]
+        ?? inventory.items[0];
+      if (!item) return 0;
+      const def = DEFINITIONS[item.id] ?? { reserve: 120 };
+      const cap = Math.max(400, (def.reserve || 120) * 4);
+      return Math.max(0, cap - item.reserve);
+    },
     reload(entityId, now = Date.now()) {
       const inventory = ctx.components.get(entityId, "Weapons");
       if (!inventory?.items.length) return;
@@ -303,6 +363,18 @@ export async function setup(ctx) {
         entityId,
         weaponId: inventory.items[inventory.selected].id,
       });
+    },
+    selectById(entityId, weaponId) {
+      const inventory = ctx.components.get(entityId, "Weapons");
+      if (!inventory?.items.length) return false;
+      const idx = inventory.items.findIndex((item) => item.id === weaponId);
+      if (idx < 0) return false;
+      inventory.selected = idx;
+      ctx.events.emit("weapon:selected", {
+        entityId,
+        weaponId: inventory.items[idx].id,
+      });
+      return true;
     },
     tickAutomatic(now = Date.now()) {
       for (const [entityId, input] of ctx.components.entries("Input")) {

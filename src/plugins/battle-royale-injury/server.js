@@ -455,7 +455,7 @@ export async function setup(ctx) {
     const state = stateFor(id);
     if (!state?.downed || !entities.get(id)?.alive) return false;
     const entity = entities.get(id);
-    if (!physics.setCharacterDowned(id, false) && !isBotEntity(entity)) return false;
+    if (!physics.setCharacterDowned(id, false, { allowNudge: true, force: true }) && !isBotEntity(entity)) return false;
     const resolvedReviverId = reviverId ?? state.reviverId ?? null;
     const hp = ctx.components.get(id, "Health");
     const targetHealth = Number(options?.targetHealth);

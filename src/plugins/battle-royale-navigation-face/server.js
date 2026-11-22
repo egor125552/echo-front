@@ -96,8 +96,9 @@ export async function setup(ctx) {
 
   function targetAndPointFor(playerId) {
     const state = navigation.stateFor(playerId);
-    const targets = navigation.availableTargets(playerId);
     const targetId = state.activeTargetId ?? state.selectedTargetId;
+    if (!targetId) return { state, target: null, facePoint: null, source: null };
+    const targets = navigation.availableTargets(playerId);
     const target = targets.find((entry) => entry.id === targetId) ?? null;
     if (!target) return { state, target: null, facePoint: null, source: null };
 
@@ -448,19 +449,22 @@ export async function setup(ctx) {
   };
 
   matchApi.snapshotFor = (playerId, now = Date.now()) => {
-    const snapshot = originalSnapshotFor(playerId, now);
-    const guidance = stateFor(playerId);
-    return {
-      ...snapshot,
-      navigationGuidance: {
-        enabled: guidance.enabled,
-        mode: guidance.mode,
-        targetId: guidance.targetId,
-        targetName: guidance.targetName,
-        active: guidance.autoGuide.active,
-        manualOverride: guidance.autoGuide.manualOverride,
-      },
+    const run = () => {
+      const snapshot = originalSnapshotFor(playerId, now);
+      const guidance = stateFor(playerId);
+      return {
+        ...snapshot,
+        navigationGuidance: {
+          enabled: guidance.enabled,
+          mode: guidance.mode,
+          targetId: guidance.targetId,
+          targetName: guidance.targetName,
+          active: guidance.autoGuide.active,
+          manualOverride: guidance.autoGuide.manualOverride,
+        },
+      };
     };
+    return navigation.withTargetCache ? navigation.withTargetCache(run) : run();
   };
 
   ctx.events.on("navigation:stopped", ({ entityId }) => {

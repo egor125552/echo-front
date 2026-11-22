@@ -1,3 +1,5 @@
+import { isInsideResidenceNoGuidanceZone } from "../../game/special-ops-arsenal.js";
+
 export const NAVIGATION_CHECKPOINT_SPACING = 72;
 export const NAVIGATION_CHECKPOINT_REACHED = 5.25;
 export const NAVIGATION_TRANSITION_REACHED = 0.35;
@@ -144,6 +146,23 @@ export async function setup(ctx) {
   const staticTargets = new Map();
   const targetProviders = new Map();
   const playerStates = new Map();
+  let targetCacheDepth = 0;
+  let targetCache = null;
+
+  function withTargetCache(fn) {
+    if (targetCacheDepth === 0) targetCache = new Map();
+    targetCacheDepth += 1;
+    try {
+      return fn();
+    } finally {
+      targetCacheDepth -= 1;
+      if (targetCacheDepth === 0) targetCache = null;
+    }
+  }
+
+  function invalidateTargetCache(playerId) {
+    if (targetCache) targetCache.delete(playerId);
+  }
 
   function registerTarget(spec = {}) {
     const id = String(spec.id ?? "").trim();
@@ -243,6 +262,7 @@ export async function setup(ctx) {
   }
 
   function availableTargets(playerId) {
+    if (targetCache && targetCache.has(playerId)) return targetCache.get(playerId);
     const transform = transformFor(playerId);
     const driving = Boolean(vehicles.isDriving?.(playerId));
     let targets = [];
@@ -326,6 +346,7 @@ export async function setup(ctx) {
       }
       return a.name.localeCompare(b.name, "ru");
     });
+    if (targetCache) targetCache.set(playerId, targets);
     return targets;
   }
 
@@ -718,6 +739,7 @@ export async function setup(ctx) {
     if (!target) return null;
     const state = playerState(playerId);
     state.selectedTargetId = target.id;
+    invalidateTargetCache(playerId);
     if (announce) {
       emitFor(playerId, "navigation:selected", {
         targetId: target.id,
@@ -770,6 +792,7 @@ export async function setup(ctx) {
     state.routeMeta = null;
     state.lastTargetPosition = null;
     state.lastRouteAt = 0;
+    invalidateTargetCache(playerId);
     if (announce) {
       emitFor(playerId, "navigation:stopped", {
         targetId: previous?.id ?? null,
@@ -788,11 +811,21 @@ export async function setup(ctx) {
   function activate(playerId, target, now = Date.now()) {
     const transform = transformFor(playerId);
     if (!transform || !target) return false;
+    if (isInsideResidenceNoGuidanceZone(transform)) {
+      emitFor(playerId, "navigation:warning", {
+        reason: "residence-no-guidance",
+        targetId: target.id,
+        targetName: target.name,
+        now,
+      });
+      return false;
+    }
     const state = playerState(playerId);
     const replacing = Boolean(state.activeTargetId && state.activeTargetId !== target.id);
     const route = buildRoute(transform, target, { mode: routeModeFor(playerId) });
     state.activeTargetId = target.id;
     state.selectedTargetId = target.id;
+    invalidateTargetCache(playerId);
     state.checkpoints = route.checkpoints;
     state.checkpointIndex = 0;
     state.lastRouteAt = now;
@@ -861,6 +894,7 @@ export async function setup(ctx) {
       mode: route.mode,
       initialDistance: route.distance,
     };
+    invalidateTargetCache(playerId);
     return true;
   }
 
@@ -1136,7 +1170,7 @@ export async function setup(ctx) {
   registerProvider("vehicles", (playerId) => {
     const counts = new Map();
     const currentVehicleId = vehicles.vehicleForDriver?.(playerId)?.id ?? null;
-    return (vehicles.snapshot?.() ?? [])
+    return (vehicles.navigationSnapshot?.() ?? vehicles.trafficSnapshot?.() ?? vehicles.snapshot?.() ?? [])
       .filter((vehicle) => vehicle.id !== currentVehicleId)
       .filter((vehicle) => !vehicle.occupied || vehicle.driverId === playerId)
       .map((vehicle) => {
@@ -1184,10 +1218,10 @@ export async function setup(ctx) {
     },
   });
 
-  matchApi.snapshotFor = (playerId, now = Date.now()) => ({
+  matchApi.snapshotFor = (playerId, now = Date.now()) => withTargetCache(() => ({
     ...originalSnapshotFor(playerId, now),
     navigation: publicState(playerId, now),
-  });
+  }));
 
   matchApi.eventsForPlayer = (playerId, packets = []) => {
     const selected = originalEventsForPlayer(playerId, packets);
@@ -1221,6 +1255,7 @@ export async function setup(ctx) {
     unregisterTarget,
     registerProvider,
     availableTargets,
+    withTargetCache,
     selectNext,
     selectPrev,
     selectTarget,

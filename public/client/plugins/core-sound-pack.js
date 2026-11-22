@@ -14,6 +14,8 @@ const SOUNDS = {
   "armor.self-break": "/assets/audio/core/armor-break.mp3",
   "enemy.killed": "/assets/audio/core/enemy-killed.mp3",
   "death.full": "/assets/audio/core/death-full.mp3",
+  "bomb.nuke": "/assets/aistudio/dropped-a-bomb-and-it-exploded_188d696e.mp3",
+  "bomb.mine": "/assets/aistudio/bomb-drop-and-explosion_424c5b6a.mp3",
 };
 
 function numbered(prefix, count) {
@@ -67,18 +69,22 @@ export const SPATIAL_SOUND_PROFILES = {
   "weapon.rifle": { gain: 1.05, referenceDistance: 3, rolloffFactor: 0.28, airAbsorptionMinHz: 2800 },
   "weapon.marksman": { gain: 1.12, referenceDistance: 4, rolloffFactor: 0.24, airAbsorptionMinHz: 2600 },
   "weapon.sniper": { gain: 1.25, referenceDistance: 5.5, rolloffFactor: 0.19, airAbsorptionMinHz: 2200 },
+  "bomb.nuke": { gain: 1.35, referenceDistance: 14, rolloffFactor: 0.14, airAbsorptionMinHz: 1800 },
+  "bomb.mine": { gain: 1.25, referenceDistance: 8, rolloffFactor: 0.22, airAbsorptionMinHz: 2100 },
   default: { gain: 1, referenceDistance: 2, rolloffFactor: 0.5, airAbsorptionMinHz: 4200 },
 };
 
 const WEAPON_SOUND_KEYS = Object.freeze({
   pistol: "weapon.pistol",
   rifle: "weapon.rifle",
+  "electro-rifle": "weapon.rifle",
   marksman: "weapon.marksman",
   sniper: "weapon.sniper",
 });
 
 const WEAPON_HOLD_INTERVAL_MS = Object.freeze({
   rifle: 100,
+  "electro-rifle": 90,
   pistol: 200,
   marksman: 255,
 });
@@ -206,9 +212,13 @@ export async function setup(ctx) {
         return;
       }
       if (packet.event !== "sound:spatial") return;
-      if (payload.entityId === network.playerId) {
+      const isBombSound = payload.key === "bomb.nuke" || payload.key === "bomb.mine";
+      const offset = Number.isFinite(Number(payload.offset))
+        ? Number(payload.offset)
+        : (payload.key === "bomb.mine" ? 1.45 : 0);
+      if (payload.entityId === network.playerId && !isBombSound) {
         if (Object.values(WEAPON_SOUND_KEYS).includes(payload.key)) return;
-        await audio.playCentered(url, { gain: isFootstep ? 0.45 : 0.85 });
+        await audio.playCentered(url, { gain: isFootstep ? 0.45 : 0.85, offset });
         return;
       }
       const profile = spatialProfileForKey(payload.key);
@@ -218,9 +228,11 @@ export async function setup(ctx) {
         ? (sourceZone === "outdoor" || selfAcousticZone === "outdoor" ? 0.68 : 0.45)
         : 0;
       const physicalOcclusion = Number(payload.occlusion);
-      const occlusion = Number.isFinite(physicalOcclusion)
-        ? Math.max(0, Math.min(1, physicalOcclusion))
-        : fallbackOcclusion;
+      const occlusion = isBombSound
+        ? Math.min(0.45, Number.isFinite(physicalOcclusion) ? Math.max(0, physicalOcclusion) : 0)
+        : (Number.isFinite(physicalOcclusion)
+          ? Math.max(0, Math.min(1, physicalOcclusion))
+          : fallbackOcclusion);
       await audio.playSpatial(url, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
         radius: payload.radius ?? 40,
         gain: profile.gain,
@@ -228,6 +240,7 @@ export async function setup(ctx) {
         rolloffFactor: profile.rolloffFactor,
         airAbsorptionMinHz: profile.airAbsorptionMinHz,
         occlusion,
+        offset,
       });
     } catch (error) {
       console.error("Echo Front audio error", error);

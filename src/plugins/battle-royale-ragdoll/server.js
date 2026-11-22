@@ -65,7 +65,7 @@ const IMPACT_SOUND_THRESHOLD = 0.95;
 const IMPACT_DAMAGE_THRESHOLD = 4.0;
 const CONTROL_CHEST_TORQUE = 5.2;
 const CONTROL_PELVIS_TORQUE = 3.0;
-const MAX_ACTIVE_RAGDOLLS = 8;
+const MAX_ACTIVE_RAGDOLLS = 16;
 const VEHICLE_PEDESTRIAN_HIT_SPEED = 3.0;
 const PARACHUTE_HANDOFF_MIN_ALTITUDE = 1.5;
 const TUMBLE_IMPACT_KEYS = Object.freeze([
@@ -324,13 +324,29 @@ export async function setup(ctx) {
       if (options.dead) existing.dead = true;
       return true;
     }
-    if (active.size >= MAX_ACTIVE_RAGDOLLS) return false;
+    if (active.size >= MAX_ACTIVE_RAGDOLLS) {
+      // Evict the oldest bot ragdoll (preferring dead corpses first) so fresh hits/explosions always launch!
+      let victim = null;
+      for (const candidate of active.values()) {
+        const candEnt = entities.get(candidate.entityId);
+        if (candEnt && !candEnt.bot) continue;
+        if (
+          !victim
+          || (candidate.dead && !victim.dead)
+          || (candidate.dead === victim.dead && candidate.elapsed > victim.elapsed)
+        ) {
+          victim = candidate;
+        }
+      }
+      if (victim) cleanup(victim, now, "pool-evicted");
+      if (active.size >= MAX_ACTIVE_RAGDOLLS) return false;
+    }
 
     const entity = entities.get(entityId);
     const transform = ctx.components.get(entityId, "Transform");
     if (!entity || !transform) return false;
     if (!options.dead && !entity.alive) return false;
-    if (!options.dead && transform.downed) return false;
+    if (!options.dead && !options.allowDowned && transform.downed) return false;
 
     const base = options.position ?? {
       x: Number(transform.x) || 0,
@@ -510,7 +526,7 @@ export async function setup(ctx) {
     if (!transform || !pelvis) return;
     const p = pelvis.translation();
     transform.x = p.x;
-    transform.y = Math.max(0, p.y - 0.91);
+    transform.y = p.y < -2 ? p.y - 0.91 : Math.max(0, p.y - 0.91);
     transform.z = p.z;
     transform.angle = entry.angle;
     transform.verticalVelocity = 0;
@@ -857,7 +873,7 @@ export async function setup(ctx) {
     const transform = ctx.components.get(entry.entityId, "Transform");
     if (transform && p) {
       transform.x = p.x;
-      transform.y = Math.max(0, p.y - 0.91);
+      transform.y = p.y < -2 ? p.y - 0.91 : Math.max(0, p.y - 0.91);
       transform.z = p.z;
       transform.verticalVelocity = 0;
       transform.grounded = false;
@@ -881,6 +897,7 @@ export async function setup(ctx) {
     if (!battleRoyale.isActive()) return;
     for (const entity of entities.all()) {
       if (!entity?.alive || entity.bot || entity.kind !== "human") continue;
+      if (entity.electroJumpActive || now < (Number(entity.electroJumpFallImmuneUntil) || 0)) continue;
       if (active.has(entity.id) || vehicles.isDriving(entity.id)) continue;
       if (parachute.stateFor(entity.id)?.airborne) continue;
       const transform = ctx.components.get(entity.id, "Transform");
@@ -961,8 +978,56 @@ export async function setup(ctx) {
     if (current) cleanup(current, frameNow, "entity-removed");
   });
 
+  function cancel(entityId, now = frameNow, reason = "cancelled") {
+    const current = active.get(entityId);
+    if (!current) return false;
+    cleanup(current, now, reason);
+    physics.setCharacterEnabled(entityId, true);
+    return true;
+  }
+
+  function trigger(entityId, {
+    reason = "impact",
+    vx = 0,
+    vy = 0,
+    vz = 0,
+    dead = false,
+    allowDowned = false,
+    now = frameNow,
+  } = {}) {
+    const linVx = Number(vx) || 0;
+    const linVy = Number(vy) || 0;
+    const linVz = Number(vz) || 0;
+    const existing = active.get(entityId);
+    if (existing) {
+      if (dead) existing.dead = true;
+      for (const part of existing.parts) {
+        part.body.setLinvel({ x: linVx, y: linVy, z: linVz }, true);
+        if (typeof part.body.setAngvel === "function") {
+          part.body.setAngvel({
+            x: (linVz * 0.25) || 2.8,
+            y: (linVy * 0.2) || 1.9,
+            z: (-linVx * 0.25) || -2.4,
+          }, true);
+        }
+      }
+      applyInitialImpulse(existing, { x: linVx * 6, y: linVy * 8, z: linVz * 6 });
+      return true;
+    }
+    const entity = entities.get(entityId);
+    return activate(entityId, {
+      reason,
+      dead: Boolean(dead || !entity?.alive),
+      allowDowned: Boolean(allowDowned),
+      velocity: { x: linVx, y: linVy, z: linVz },
+      impulse: { x: linVx * 8, y: linVy * 10, z: linVz * 8 },
+    }, now);
+  }
+
   ctx.services.provide("ragdoll", {
     activate,
+    trigger,
+    cancel,
     setInput,
     deployParachute,
     beginFrame,

@@ -140,6 +140,14 @@ export async function setup(ctx) {
       const transform = ctx.components.get(entity.id, "Transform");
       if (!state?.airborne || state.phase !== "deployed" || !transform) continue;
 
+      if (
+        !(Number(state.unstableSlipUntil || 0) > now)
+        && physics.isOpenSky?.(transform.x, transform.y, transform.z, 1)
+      ) {
+        clearSlipMemory(state);
+        continue;
+      }
+
       if (supportDistanceAt(transform) <= LANDING_SUPPORT_TOLERANCE) {
         clearSlipMemory(state);
         continue;

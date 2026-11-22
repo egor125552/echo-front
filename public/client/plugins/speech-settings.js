@@ -130,6 +130,8 @@ export async function setup(ctx) {
     return voiceSelect;
   }
 
+  let lastVoiceSelectSignature = null;
+
   function updateVoiceSelect() {
     const select = ensureVoiceSelect();
     if (!select) return;
@@ -138,11 +140,20 @@ export async function setup(ctx) {
       .slice()
       .sort((a, b) => scoreRussianVoice(b) - scoreRussianVoice(a));
     const previous = selectedVoiceId;
+    const best = russian[0] ?? null;
+    const resolvedValue = previous && russian.some((voice) => voiceId(voice) === previous)
+      ? previous
+      : "";
+    const signature = `${resolvedValue}|${best ? voiceId(best) : ""}|${russian.map((v) => `${voiceId(v)}:${v.name}:${v.lang}:${v.localService ? 1 : 0}`).join(",")}`;
+    if (signature === lastVoiceSelectSignature && select.options.length > 0) {
+      if (select.value !== resolvedValue) select.value = resolvedValue;
+      return;
+    }
+    lastVoiceSelectSignature = signature;
     select.replaceChildren();
 
     const auto = document.createElement("option");
     auto.value = "";
-    const best = bestRussianVoice(voices);
     auto.textContent = best
       ? `Автоматически — ${best.name}`
       : "Автоматически — системный русский голос";
@@ -155,13 +166,7 @@ export async function setup(ctx) {
       select.appendChild(option);
     }
 
-    if (previous && russian.some((voice) => voiceId(voice) === previous)) {
-      select.value = previous;
-    } else {
-      // Chrome and some Android engines can return an empty voice list during startup.
-      // Keep the stored preference so voiceschanged can restore it when the list arrives.
-      select.value = "";
-    }
+    select.value = resolvedValue;
   }
 
   function refreshVoices(reason = "manual") {

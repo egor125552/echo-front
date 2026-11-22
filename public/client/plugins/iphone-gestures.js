@@ -62,6 +62,7 @@ export async function setup(ctx) {
   let pendingTwoFingerTapTimer = null;
   let twoFingerTapCount = 0;
   let lastTwoFingerTapAt = 0;
+  let nukeAiming = false;
 
   function gameActive() {
     return !panel.hidden && controlSettings.mode === "gestures"
@@ -185,6 +186,11 @@ export async function setup(ctx) {
   function commitTwoFingerTap(count) {
     cancelPendingTwoFingerTap();
     if (count === 1) {
+      if (nukeAiming) {
+        input.triggerVirtualAction?.("nuke-cancel");
+        ctx.events.emit("gesture:action", { gesture: "two-finger-tap", action: "nuke-cancel" });
+        return;
+      }
       input.triggerVirtualAction?.("reload");
       ctx.events.emit("gesture:action", { gesture: "two-finger-tap", action: "reload" });
     } else if (count === 2) {
@@ -257,14 +263,16 @@ export async function setup(ctx) {
     const avgDx = ((first.x - first.originX) + (second.x - second.originX)) * 0.5;
     const avgDy = ((first.y - first.originY) + (second.y - second.originY)) * 0.5;
 
-    // Vertical two-finger swipes: up switches weapon, down opens the Map.
+    // Vertical two-finger swipes: up switches weapon (or cycles Mini-Nuke distance while aiming), down opens the Map.
     if (!twoFingerSwipeTriggered
       && Math.abs(avgDy) >= SWIPE_MIN_DISTANCE_PX
       && Math.abs(avgDy) > Math.abs(avgDx) * 1.15) {
       twoFingerSwipeTriggered = true;
       setTurn(0);
       if (avgDy < 0) {
-        const action = avgDx < -28 ? "weapon-prev" : "weapon-next";
+        const action = nukeAiming
+          ? (avgDx < -28 ? "nuke-cycle-prev" : "nuke-cycle-next")
+          : (avgDx < -28 ? "weapon-prev" : "weapon-next");
         input.triggerVirtualAction?.(action);
         ctx.events.emit("gesture:action", { gesture: "two-finger-swipe-up", action });
       } else {
@@ -325,13 +333,31 @@ export async function setup(ctx) {
       return;
     }
 
-    // 4+ fingers: check for vertical swipe down to announce parachute status.
+    // 4+ fingers directional swipes:
+    // - Down: parachute status
+    // - Up: Mini-Nuke (aim -> launch)
+    // - Left: plant Landmine
+    // - Right: switch Electro-Rifle mode (Shock / Chain / Overload)
     if (count >= 4 && !fourFingerSwipeTriggered) {
+      const avgDx = points.reduce((sum, p) => sum + (p.x - p.originX), 0) / points.length;
       const avgDy = points.reduce((sum, p) => sum + (p.y - p.originY), 0) / points.length;
-      if (avgDy >= SWIPE_MIN_DISTANCE_PX) {
+      if (Math.max(Math.abs(avgDx), Math.abs(avgDy)) >= SWIPE_MIN_DISTANCE_PX) {
         fourFingerSwipeTriggered = true;
-        input.triggerVirtualAction?.("parachute-status");
-        ctx.events.emit("gesture:action", { gesture: "four-finger-swipe-down", action: "parachute-status" });
+        if (Math.abs(avgDy) >= Math.abs(avgDx)) {
+          if (avgDy > 0) {
+            input.triggerVirtualAction?.("parachute-status");
+            ctx.events.emit("gesture:action", { gesture: "four-finger-swipe-down", action: "parachute-status" });
+          } else {
+            input.triggerVirtualAction?.("nuke");
+            ctx.events.emit("gesture:action", { gesture: "four-finger-swipe-up", action: "nuke" });
+          }
+        } else if (avgDx < 0) {
+          input.triggerVirtualAction?.("mine");
+          ctx.events.emit("gesture:action", { gesture: "four-finger-swipe-left", action: "mine" });
+        } else {
+          input.triggerVirtualAction?.("electro-mode");
+          ctx.events.emit("gesture:action", { gesture: "four-finger-swipe-right", action: "electro-mode" });
+        }
       }
     }
   }
@@ -508,6 +534,12 @@ export async function setup(ctx) {
     singleHoldTriggered = false;
   }
 
+  ctx.events.on("game:snapshot", (snapshot) => {
+    nukeAiming = Boolean(snapshot?.specialOps?.nukeAiming);
+  });
+  ctx.events.on("network:disconnected", () => {
+    nukeAiming = false;
+  });
   ctx.events.on("touch-control:mode-changed", reset);
   ctx.events.on("ui:menu", ({ open } = {}) => { if (open) reset(); });
   window.addEventListener("blur", reset);

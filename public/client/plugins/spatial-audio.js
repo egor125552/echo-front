@@ -247,6 +247,7 @@ export async function setup(ctx) {
     replace = false,
     loop = false,
     foreground = false,
+    offset = 0,
   } = {}) {
     const source = audioContext.createBufferSource();
     const gainNode = audioContext.createGain();
@@ -255,7 +256,9 @@ export async function setup(ctx) {
     gainNode.gain.value = gain;
     source.connect(gainNode).connect(foreground ? foregroundInput : masterInput);
     trackSource(source, channel, replace);
-    source.start();
+    const startOffset = Math.max(0, Math.min(Number(offset) || 0, Math.max(0, (buffer?.duration ?? 0) - 0.05)));
+    if (startOffset > 0) source.start(0, startOffset);
+    else source.start();
     return {
       source,
       setGain(nextGain, timeConstant = 0.18) {
@@ -285,6 +288,7 @@ export async function setup(ctx) {
     channel = null,
     replace = false,
     loop = false,
+    offset = 0,
   } = {}) {
     const local = localize(position);
     const attenuation = distanceAttenuation(local.distance, {
@@ -340,7 +344,9 @@ export async function setup(ctx) {
     airFilter.connect(stereoPanner).connect(stereoGain).connect(masterInput);
     airFilter.connect(hrtfPanner).connect(rearFilter).connect(hrtfGain).connect(masterInput);
     trackSource(source, channel, replace);
-    source.start();
+    const startOffset = Math.max(0, Math.min(Number(offset) || 0, Math.max(0, (buffer?.duration ?? 0) - 0.05)));
+    if (startOffset > 0) source.start(0, startOffset);
+    else source.start();
 
     let currentPosition = { ...position };
     let currentGain = Math.max(0, Number(gain) || 0);

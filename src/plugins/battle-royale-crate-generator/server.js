@@ -273,6 +273,7 @@ export async function setup(ctx) {
     crate.landedAt = now;
     cratePhysics.registerCrate?.(crate);
     const isJuggernaut = Boolean(crate.juggernaut || crate.loot === "juggernaut");
+    const isElectro = Boolean(crate.electroLukashenko || crate.loot === "electro-lukashenko");
     const payload = {
       crateId: crate.id,
       loot: crate.loot,
@@ -281,6 +282,7 @@ export async function setup(ctx) {
       z: crate.z,
       airdrop: true,
       juggernaut: isJuggernaut,
+      electroLukashenko: isElectro,
       now,
     };
     ctx.events.emit("crate:airdrop-landed", payload);
@@ -289,11 +291,11 @@ export async function setup(ctx) {
     }
     ctx.events.emit("sound:spatial", {
       entityId: null,
-      key: isJuggernaut ? "airdrop.juggernaut" : "airdrop.landed",
+      key: (isJuggernaut || isElectro) ? "airdrop.juggernaut" : "airdrop.landed",
       x: crate.x,
       y: 0,
       z: crate.z,
-      radius: isJuggernaut ? 900 : 135,
+      radius: (isJuggernaut || isElectro) ? 900 : 135,
       now,
     });
     return true;
@@ -310,9 +312,10 @@ export async function setup(ctx) {
     reason = "sky-drop",
   } = {}) {
     const zoneRadius = Math.max(45, finite(battleRoyale.zoneRadiusAt?.(now), 650));
-    const isJuggernaut = Boolean(juggernaut || loot === "juggernaut");
+    const isElectro = Boolean(loot === "electro-lukashenko");
+    const isJuggernaut = Boolean(!isElectro && (juggernaut || loot === "juggernaut"));
     const activeUnopened = map.crates.filter((c) => c?.airdrop && !c.opened);
-    if (!isJuggernaut && activeUnopened.length >= MAX_ACTIVE_AIRDROPS) {
+    if (!isJuggernaut && !isElectro && activeUnopened.length >= MAX_ACTIVE_AIRDROPS) {
       if (!recycleOldestAirdrop(zoneRadius)) return null;
     } else if (airdropIds.length >= MAX_ACTIVE_AIRDROPS * 2 + 2) {
       recycleOldestAirdrop(zoneRadius);
@@ -329,17 +332,20 @@ export async function setup(ctx) {
     airdropSerial += 1;
     const startY = Math.max(0, finite(altitude, AIRDROP_ALTITUDE));
     const crate = {
-      id: isJuggernaut ? `crate-juggernaut-${airdropSerial}` : `crate-airdrop-${airdropSerial}`,
+      id: isElectro
+        ? `crate-electro-${airdropSerial}`
+        : (isJuggernaut ? `crate-juggernaut-${airdropSerial}` : `crate-airdrop-${airdropSerial}`),
       x: Number(spot.x.toFixed(2)),
       y: Number(startY.toFixed(2)),
       z: Number(spot.z.toFixed(2)),
       hx: 0.85,
       hz: 0.85,
-      loot: isJuggernaut ? "juggernaut" : "airdrop",
+      loot: isElectro ? "electro-lukashenko" : (isJuggernaut ? "juggernaut" : "airdrop"),
       opened: false,
       generated: false,
       airdrop: true,
       juggernaut: isJuggernaut,
+      electroLukashenko: isElectro,
       airdropPhase: startY > 0 ? "descending" : "landed",
       spawnedAt: now,
       landedAt: startY > 0 ? null : now,
@@ -358,6 +364,7 @@ export async function setup(ctx) {
       reason,
       airdrop: true,
       juggernaut: isJuggernaut,
+      electroLukashenko: isElectro,
       buyerId: nearEntityId ?? null,
       now,
     };
@@ -379,6 +386,20 @@ export async function setup(ctx) {
       loot: "juggernaut",
       reason: options.reason ?? "juggernaut-drop",
     });
+  }
+
+  function spawnElectroLukashenkoDrop(options = {}) {
+    const crate = spawnAirdrop({
+      ...options,
+      juggernaut: false,
+      loot: "electro-lukashenko",
+      reason: options.reason ?? "electro-lukashenko-drop",
+    });
+    if (crate) {
+      crate.electroLukashenko = true;
+      crate.name = "Груз «Электрический Лукашенко»";
+    }
+    return crate;
   }
 
   function stepAirdrops(dt = 0.05, now = Date.now()) {
@@ -492,11 +513,12 @@ export async function setup(ctx) {
     if (tutorial) return;
     const eventNow = finite(payload.now, Date.now());
     const crate = map.crates.find((c) => c?.id === payload.crateId);
-    if (crate?.airdrop || payload.loot === "airdrop" || payload.loot === "juggernaut") {
+    if (crate?.airdrop || payload.loot === "airdrop" || payload.loot === "juggernaut" || payload.loot === "electro-lukashenko") {
       ctx.events.emit("crate:airdrop-opened", {
         crateId: payload.crateId ?? crate?.id ?? null,
         entityId: payload.entityId ?? null,
         juggernaut: Boolean(crate?.juggernaut || payload.loot === "juggernaut"),
+        electroLukashenko: Boolean(crate?.electroLukashenko || payload.loot === "electro-lukashenko"),
         x: finite(payload.x, crate?.x ?? 0),
         y: finite(payload.y, crate?.y ?? 0),
         z: finite(payload.z, crate?.z ?? 0),
@@ -521,6 +543,7 @@ export async function setup(ctx) {
     spawnCrate,
     spawnAirdrop,
     spawnJuggernautDrop,
+    spawnElectroLukashenkoDrop,
     stepAirdrops,
     tick,
     unopenedInSafeZone,

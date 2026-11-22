@@ -671,10 +671,11 @@ test("Living Squad Goals: squad building loot run opens crates, squad vehicle ra
     assert(c.get("br-bot-10", "Bot").outnumberedCallout != null, "Squadmate must receive outnumbered callout");
     assert(afterPartnerDist < initialPartnerDist - 2.0, "Squadmate must converge toward outnumbered partner");
 
-    // Move br-bot-9..12 away before testing post-knockdown calm looting
-    for (const id of ["br-bot-9", "br-bot-10", "br-bot-11", "br-bot-12"]) {
-      groundEntity(game, id, { x: -410, y: 0, z: -410 });
-    }
+    // Move br-bot-9..12 away (keeping opposing squads separated) before testing post-knockdown calm looting
+    groundEntity(game, "br-bot-9", { x: -410, y: 0, z: -410 });
+    groundEntity(game, "br-bot-10", { x: -414, y: 0, z: -410 });
+    groundEntity(game, "br-bot-11", { x: -410, y: 0, z: 410 });
+    groundEntity(game, "br-bot-12", { x: -414, y: 0, z: 410 });
 
     // 5. Calm Post-Knockdown Looting & Armor Plating:
     // Place br-bot-13 next to downed enemy br-bot-15 (who has standing teammate br-bot-16 far away so br-bot-15 stays downed),

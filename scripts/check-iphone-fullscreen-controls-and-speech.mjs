@@ -125,6 +125,34 @@ test("iPhone defaults to accessible buttons and gestures only work when selected
     dispatch("touchend", [finger(80, 100, 1), finger(110, 100, 2), finger(140, 100, 3), finger(170, 100, 4)]);
     assert(triggeredActions.includes("navigation-face"), "four-finger tap must toggle auto-guidance");
 
+    // 4-finger directional swipes: left = mine, up = nuke, right = electro-mode, down = parachute-status
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(140, 120, 1), finger(170, 120, 2), finger(200, 120, 3), finger(230, 120, 4)]);
+    dispatch("touchmove", [finger(70, 120, 1), finger(100, 120, 2), finger(130, 120, 3), finger(160, 120, 4)]);
+    dispatch("touchend", [finger(70, 120, 1), finger(100, 120, 2), finger(130, 120, 3), finger(160, 120, 4)]);
+    assert(triggeredActions.includes("mine"), "four-finger swipe left must plant mine");
+
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(80, 180, 1), finger(110, 180, 2), finger(140, 180, 3), finger(170, 180, 4)]);
+    dispatch("touchmove", [finger(80, 110, 1), finger(110, 110, 2), finger(140, 110, 3), finger(170, 110, 4)]);
+    dispatch("touchend", [finger(80, 110, 1), finger(110, 110, 2), finger(140, 110, 3), finger(170, 110, 4)]);
+    assert(triggeredActions.includes("nuke"), "four-finger swipe up must aim/launch mini-nuke");
+
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(60, 120, 1), finger(90, 120, 2), finger(120, 120, 3), finger(150, 120, 4)]);
+    dispatch("touchmove", [finger(130, 120, 1), finger(160, 120, 2), finger(190, 120, 3), finger(220, 120, 4)]);
+    dispatch("touchend", [finger(130, 120, 1), finger(160, 120, 2), finger(190, 120, 3), finger(220, 120, 4)]);
+    assert(triggeredActions.includes("electro-mode"), "four-finger swipe right must switch electro-rifle mode");
+
+    // While Mini-Nuke is aiming, 2-finger swipe up cycles nuke distance instead of switching weapon
+    events.emit("game:snapshot", { specialOps: { nukeAiming: true } });
+    triggeredActions.length = 0;
+    dispatch("touchstart", [finger(100, 160, 1), finger(140, 160, 2)]);
+    dispatch("touchmove", [finger(100, 90, 1), finger(140, 90, 2)]);
+    dispatch("touchend", [finger(100, 90, 1), finger(140, 90, 2)]);
+    assert(triggeredActions.includes("nuke-cycle-next"), "two-finger swipe up while aiming nuke must cycle distance");
+    events.emit("game:snapshot", { specialOps: { nukeAiming: false } });
+
     menu.hidden = false;
     assert.equal(dispatch("touchstart", finger(90, 120)), false,
       "a screen-reader menu should not trigger game gestures");

@@ -56,6 +56,10 @@ export async function setup(ctx) {
         remaining: amount,
         attackerId,
         weaponId: source.weaponId ?? null,
+        distance: Number.isFinite(Number(source.distance)) ? Number(source.distance) : null,
+        distanceMultiplier: Number.isFinite(Number(source.distanceMultiplier))
+          ? Number(source.distanceMultiplier)
+          : 1,
         now,
         armorAbsorbed: 0,
         armorBroke: false,
@@ -99,6 +103,8 @@ export async function setup(ctx) {
         attackerId: packet.attackerId,
         weaponId: packet.weaponId,
         requested: amount,
+        distance: packet.distance,
+        distanceMultiplier: packet.distanceMultiplier,
         healthApplied: result.applied,
         armorAbsorbed: packet.armorAbsorbed,
         armorBroke: packet.armorBroke,

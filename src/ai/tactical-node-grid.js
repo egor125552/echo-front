@@ -69,6 +69,10 @@ export class TacticalNodeGrid {
     this._syncedNavCount = -1;
     this._syncedHalfSize = -1;
     this._syncedMapRef = null;
+    this._buildingBounds = null;
+    this._buildingBoundsMapRef = null;
+    this._buildingBoundsNavCount = -1;
+    this._buildingBoundsCustomCount = -1;
     this.buildGraphs();
   }
 
@@ -92,7 +96,7 @@ export class TacticalNodeGrid {
     return `${gx}:${gz}`;
   }
 
-  buildingBoundsList() {
+  rebuildBuildingBounds() {
     const list = [];
     const seen = new Set();
     if (this.map?.building && Number.isFinite(this.map.building.minX)) {
@@ -100,14 +104,30 @@ export class TacticalNodeGrid {
       seen.add(id);
       list.push({ id, ...this.map.building });
     }
-    for (const nb of this.map?.navigationBuildings ?? []) {
-      const bounds = nb?.bounds ?? nb;
-      const id = String(nb?.id ?? bounds?.id ?? "");
-      if (!id || seen.has(id) || !Number.isFinite(bounds?.minX)) continue;
-      seen.add(id);
-      list.push({ id, ...bounds });
+    const navBuildings = this.map?.navigationBuildings;
+    if (Array.isArray(navBuildings)) {
+      for (const nb of navBuildings) {
+        const bounds = nb?.bounds ?? nb;
+        const id = String(nb?.id ?? bounds?.id ?? "");
+        if (!id || seen.has(id) || !Number.isFinite(bounds?.minX)) continue;
+        seen.add(id);
+        list.push({ id, ...bounds });
+      }
     }
-    for (const bp of [...BATTLE_ROYALE_BUILDINGS, ...this.customBlueprints]) {
+    for (const bp of BATTLE_ROYALE_BUILDINGS) {
+      if (!bp?.id || seen.has(bp.id)) continue;
+      const hw = Math.abs(Number(bp.width) || 12) * 0.5;
+      const hd = Math.abs(Number(bp.depth) || 10) * 0.5;
+      seen.add(bp.id);
+      list.push({
+        id: bp.id,
+        minX: (Number(bp.x) || 0) - hw,
+        maxX: (Number(bp.x) || 0) + hw,
+        minZ: (Number(bp.z) || 0) - hd,
+        maxZ: (Number(bp.z) || 0) + hd,
+      });
+    }
+    for (const bp of this.customBlueprints) {
       if (!bp?.id || seen.has(bp.id)) continue;
       const hw = Math.abs(Number(bp.width) || 12) * 0.5;
       const hd = Math.abs(Number(bp.depth) || 10) * 0.5;
@@ -130,11 +150,30 @@ export class TacticalNodeGrid {
       seen.add("warehouse-east");
       list.push({ id: "warehouse-east", minX: 122, maxX: 158, minZ: -34, maxZ: -10 });
     }
+    this._buildingBounds = list;
+    this._buildingBoundsMapRef = this.map;
+    this._buildingBoundsNavCount = Array.isArray(navBuildings) ? navBuildings.length : 0;
+    this._buildingBoundsCustomCount = this.customBlueprints.length;
     return list;
   }
 
+  buildingBoundsList() {
+    const navCount = Array.isArray(this.map?.navigationBuildings) ? this.map.navigationBuildings.length : 0;
+    if (
+      this._buildingBounds
+      && this._buildingBoundsMapRef === this.map
+      && this._buildingBoundsNavCount === navCount
+      && this._buildingBoundsCustomCount === this.customBlueprints.length
+    ) {
+      return this._buildingBounds;
+    }
+    return this.rebuildBuildingBounds();
+  }
+
   pointInsideAnyBuilding(x, z, margin = 0) {
-    for (const b of this.buildingBoundsList()) {
+    const bounds = this.buildingBoundsList();
+    for (let i = 0; i < bounds.length; i += 1) {
+      const b = bounds[i];
       if (
         x >= b.minX - margin
         && x <= b.maxX + margin
@@ -148,28 +187,83 @@ export class TacticalNodeGrid {
   }
 
   segmentHitsBuilding(a, b, margin = 4.5) {
-    const steps = Math.max(4, Math.ceil(dist2(a, b) / 4));
-    for (let i = 1; i < steps; i += 1) {
-      const t = i / steps;
-      const x = a.x + (b.x - a.x) * t;
-      const z = a.z + (b.z - a.z) * t;
-      if (this.pointInsideAnyBuilding(x, z, margin)) return true;
+    const ax = Number(a?.x) || 0;
+    const az = Number(a?.z) || 0;
+    const bx = Number(b?.x) || 0;
+    const bz = Number(b?.z) || 0;
+    const dx = bx - ax;
+    const dz = bz - az;
+    const segMinX = ax < bx ? ax : bx;
+    const segMaxX = ax > bx ? ax : bx;
+    const segMinZ = az < bz ? az : bz;
+    const segMaxZ = az > bz ? az : bz;
+    const bounds = this.buildingBoundsList();
+    let steps = 0;
+
+    for (let j = 0; j < bounds.length; j += 1) {
+      const bnd = bounds[j];
+      const minX = bnd.minX - margin;
+      const maxX = bnd.maxX + margin;
+      if (segMaxX < minX || segMinX > maxX) continue;
+      const minZ = bnd.minZ - margin;
+      const maxZ = bnd.maxZ + margin;
+      if (segMaxZ < minZ || segMinZ > maxZ) continue;
+
+      // Exact 2D slab reject before sampling the discrete interior points.
+      let tMin = 0;
+      let tMax = 1;
+      if (Math.abs(dx) < 1e-12) {
+        if (ax < minX || ax > maxX) continue;
+      } else {
+        let tx1 = (minX - ax) / dx;
+        let tx2 = (maxX - ax) / dx;
+        if (tx1 > tx2) { const tmp = tx1; tx1 = tx2; tx2 = tmp; }
+        if (tx1 > tMin) tMin = tx1;
+        if (tx2 < tMax) tMax = tx2;
+        if (tMin > tMax) continue;
+      }
+      if (Math.abs(dz) < 1e-12) {
+        if (az < minZ || az > maxZ) continue;
+      } else {
+        let tz1 = (minZ - az) / dz;
+        let tz2 = (maxZ - az) / dz;
+        if (tz1 > tz2) { const tmp = tz1; tz1 = tz2; tz2 = tmp; }
+        if (tz1 > tMin) tMin = tz1;
+        if (tz2 < tMax) tMax = tz2;
+        if (tMin > tMax) continue;
+      }
+
+      if (steps === 0) steps = Math.max(4, Math.ceil(Math.hypot(dx, dz) / 4));
+      for (let i = 1; i < steps; i += 1) {
+        const t = i / steps;
+        const x = ax + dx * t;
+        const z = az + dz * t;
+        if (x >= minX && x <= maxX && z >= minZ && z <= maxZ) return true;
+      }
     }
     return false;
   }
 
   hasNearbyCarNode(x, z, minSeparation = 9.5) {
-    for (const node of this.carNodes) {
-      if (Math.hypot(node.x - x, node.z - z) <= minSeparation) return true;
+    const limitSq = minSeparation * minSeparation;
+    for (let i = 0; i < this.carNodes.length; i += 1) {
+      const node = this.carNodes[i];
+      const dx = node.x - x;
+      const dz = node.z - z;
+      if (dx * dx + dz * dz <= limitSq) return true;
     }
     return false;
   }
 
   hasNearbyPedNode(x, y, z, minSeparation = 2.4) {
-    for (const node of this.pedNodes) {
-      if (Math.abs((node.y || 0) - (y || 0)) <= 0.8 && Math.hypot(node.x - x, node.z - z) <= minSeparation) {
-        return true;
-      }
+    const limitSq = minSeparation * minSeparation;
+    const ny = y || 0;
+    for (let i = 0; i < this.pedNodes.length; i += 1) {
+      const node = this.pedNodes[i];
+      if (Math.abs((node.y || 0) - ny) > 0.8) continue;
+      const dx = node.x - x;
+      const dz = node.z - z;
+      if (dx * dx + dz * dz <= limitSq) return true;
     }
     return false;
   }
@@ -401,6 +495,7 @@ export class TacticalNodeGrid {
     const exists = this.customBlueprints.findIndex((b) => b.id === blueprint.id);
     if (exists >= 0) this.customBlueprints[exists] = blueprint;
     else this.customBlueprints.push(blueprint);
+    this.rebuildBuildingBounds();
     const res = this.compileBlueprintCubesForBuilding(blueprint);
     this.reconnectAllNodes();
     return res;
@@ -522,6 +617,7 @@ export class TacticalNodeGrid {
     this.pedNodeById.clear();
     this.carSectors.clear();
     this.pedSectors.clear();
+    this.rebuildBuildingBounds();
 
     // 1. Load all hand-placed Car Cubes from MANUAL_CAR_CUBES
     for (const cube of MANUAL_CAR_CUBES) {
@@ -561,13 +657,18 @@ export class TacticalNodeGrid {
   }
 
   nearestCarNode(pos, { kind = null, maxDist = Infinity } = {}) {
+    const px = Number(pos?.x) || 0;
+    const pz = Number(pos?.z) || 0;
     let best = null;
-    let bestDist = maxDist;
-    for (const node of this.carNodes) {
+    let bestDistSq = maxDist === Infinity ? Infinity : maxDist * maxDist;
+    for (let i = 0; i < this.carNodes.length; i += 1) {
+      const node = this.carNodes[i];
       if (kind && node.kind !== kind) continue;
-      const d = dist2(pos, node);
-      if (d < bestDist) {
-        bestDist = d;
+      const dx = px - node.x;
+      const dz = pz - node.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq < bestDistSq) {
+        bestDistSq = dSq;
         best = node;
       }
     }
@@ -575,16 +676,20 @@ export class TacticalNodeGrid {
   }
 
   nearestPedNode(pos, { kind = null, maxDist = Infinity, excludeReservedByOther = null, now = Date.now() } = {}) {
+    const px = Number(pos?.x) || 0;
+    const pz = Number(pos?.z) || 0;
     let best = null;
-    let bestDist = maxDist;
-    for (const node of this.pedNodes) {
+    let bestDistSq = maxDist === Infinity ? Infinity : maxDist * maxDist;
+    for (let i = 0; i < this.pedNodes.length; i += 1) {
+      const node = this.pedNodes[i];
       if (kind && node.kind !== kind) continue;
+      const dx = px - node.x;
+      const dz = pz - node.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq >= bestDistSq) continue;
       if (excludeReservedByOther && this.isNodeReservedByOther(node.id, excludeReservedByOther, now)) continue;
-      const d = dist2(pos, node);
-      if (d < bestDist) {
-        bestDist = d;
-        best = node;
-      }
+      bestDistSq = dSq;
+      best = node;
     }
     return best;
   }
@@ -639,17 +744,33 @@ export class TacticalNodeGrid {
     this.stats.dangerUpdates += 1;
   }
 
-  dangerScoreAt(point, now = Date.now()) {
-    let score = 0;
-    for (let i = this.dangerEvents.length - 1; i >= 0; i -= 1) {
-      const ev = this.dangerEvents[i];
-      if (now >= ev.expiresAt) {
-        this.dangerEvents.splice(i, 1);
-        continue;
+  pruneDangerEvents(now = Date.now()) {
+    const events = this.dangerEvents;
+    let write = 0;
+    for (let read = 0; read < events.length; read += 1) {
+      const ev = events[read];
+      if (now < ev.expiresAt) {
+        if (write !== read) events[write] = ev;
+        write += 1;
       }
-      const d = Math.hypot((Number(point.x) || 0) - ev.x, (Number(point.z) || 0) - ev.z);
-      if (d <= 14) {
-        score += ev.intensity * (1 - d / 14);
+    }
+    if (write !== events.length) events.length = write;
+  }
+
+  dangerScoreAt(point, now = Date.now(), pruned = false) {
+    const events = this.dangerEvents;
+    if (events.length === 0) return 0;
+    if (!pruned) this.pruneDangerEvents(now);
+    const px = Number(point.x) || 0;
+    const pz = Number(point.z) || 0;
+    let score = 0;
+    for (let i = 0; i < events.length; i += 1) {
+      const ev = events[i];
+      const dx = px - ev.x;
+      const dz = pz - ev.z;
+      const dSq = dx * dx + dz * dz;
+      if (dSq <= 196) {
+        score += ev.intensity * (1 - Math.sqrt(dSq) / 14);
       }
     }
     return score;
@@ -729,6 +850,7 @@ export class TacticalNodeGrid {
     if (!startNode || !goalNode) return [];
     if (startNode.id === goalNode.id) return [goalNode];
 
+    if (layer === "ped") this.pruneDangerEvents(now);
     const open = [startNode.id];
     const openSet = new Set([startNode.id]);
     const cameFrom = new Map();
@@ -738,17 +860,27 @@ export class TacticalNodeGrid {
 
     while (open.length > 0 && iterations < 180) {
       iterations += 1;
-      open.sort((a, b) => (fScore.get(a) ?? Infinity) - (fScore.get(b) ?? Infinity));
-      const currentId = open.shift();
+      let bestIdx = 0;
+      let bestF = fScore.get(open[0]) ?? Infinity;
+      for (let i = 1; i < open.length; i += 1) {
+        const f = fScore.get(open[i]) ?? Infinity;
+        if (f < bestF) {
+          bestF = f;
+          bestIdx = i;
+        }
+      }
+      const currentId = open[bestIdx];
+      open.splice(bestIdx, 1);
       openSet.delete(currentId);
       if (currentId === goalNode.id) {
         const path = [];
         let curr = currentId;
         while (curr) {
           const n = byId.get(curr);
-          if (n) path.unshift(n);
+          if (n) path.push(n);
           curr = cameFrom.get(curr);
         }
+        path.reverse();
         return path;
       }
 
@@ -758,7 +890,7 @@ export class TacticalNodeGrid {
         const neighbor = byId.get(neighborId);
         if (!neighbor) continue;
         const stepCost = dist2(current, neighbor)
-          + (layer === "ped" ? this.dangerScoreAt(neighbor, now) * 14 : 0);
+          + (layer === "ped" ? this.dangerScoreAt(neighbor, now, true) * 14 : 0);
         const tentativeG = (gScore.get(currentId) ?? Infinity) + stepCost;
         if (tentativeG < (gScore.get(neighborId) ?? Infinity)) {
           cameFrom.set(neighborId, currentId);
@@ -843,16 +975,27 @@ export class TacticalNodeGrid {
 
     let bestNode = null;
     let bestScore = -Infinity;
+    this.pruneDangerEvents(now);
+    const tx = Number(predictedTarget.x) || 0;
+    const tz = Number(predictedTarget.z) || 0;
+    const bx = Number(botPos.x) || 0;
+    const bz = Number(botPos.z) || 0;
 
-    for (const node of this.pedNodes) {
-      const distFromTarget = dist2(node, predictedTarget);
-      if (distFromTarget < 4.5 || distFromTarget > 72) continue;
-      const distFromBot = dist2(node, botPos);
-      if (distFromBot > 55) continue;
+    for (let i = 0; i < this.pedNodes.length; i += 1) {
+      const node = this.pedNodes[i];
+      const tdx = node.x - tx;
+      const tdz = node.z - tz;
+      const distFromTargetSq = tdx * tdx + tdz * tdz;
+      if (distFromTargetSq < 20.25 || distFromTargetSq > 5184) continue;
+      const bdx = node.x - bx;
+      const bdz = node.z - bz;
+      const distFromBotSq = bdx * bdx + bdz * bdz;
+      if (distFromBotSq > 3025) continue;
       if (this.isNodeReservedByOther(node.id, botId, now)) continue;
 
+      const distFromBot = Math.sqrt(distFromBotSq);
       const distToIdeal = dist2(node, idealPoint);
-      const danger = this.dangerScoreAt(node, now);
+      const danger = this.dangerScoreAt(node, now, true);
       let score = -distToIdeal * 1.35 - distFromBot * 0.35 - danger * 18;
 
       if (wantCover && (node.kind === "cover" || node.kind === "doorway")) {
@@ -929,14 +1072,23 @@ export class TacticalNodeGrid {
     // Find best nearby unreserved Ped Node or snap to tactical wingman offset
     let bestNode = null;
     let bestScore = -Infinity;
-    for (const node of this.pedNodes) {
-      const dToDesired = dist2(node, desiredEscortPoint);
-      if (dToDesired > 16) continue;
-      const dToHuman = dist2(node, predictedHuman);
-      if (dToHuman < 2.8 || dToHuman > 18) continue;
+    this.pruneDangerEvents(now);
+    const hx = Number(predictedHuman.x) || 0;
+    const hz = Number(predictedHuman.z) || 0;
+    for (let i = 0; i < this.pedNodes.length; i += 1) {
+      const node = this.pedNodes[i];
+      const ddx = node.x - desiredEscortPoint.x;
+      const ddz = node.z - desiredEscortPoint.z;
+      const dToDesiredSq = ddx * ddx + ddz * ddz;
+      if (dToDesiredSq > 256) continue;
+      const hdx = node.x - hx;
+      const hdz = node.z - hz;
+      const dToHumanSq = hdx * hdx + hdz * hdz;
+      if (dToHumanSq < 7.84 || dToHumanSq > 324) continue;
       if (this.isNodeReservedByOther(node.id, botId, now)) continue;
 
-      const danger = this.dangerScoreAt(node, now);
+      const dToDesired = Math.sqrt(dToDesiredSq);
+      const danger = this.dangerScoreAt(node, now, true);
       let score = -dToDesired * 1.6 - danger * 16;
       if (underFire && node.kind === "cover") score += 7.5;
       if (score > bestScore) {

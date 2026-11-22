@@ -113,7 +113,9 @@ export async function setup(ctx) {
     return worldHit;
   };
 
-  physics.lineOfSight = (from, to, excludeEntityId = null, targetEntityId = null) => {
+  const VEHICLE_PIERCE_KINDS = new Set(["vehicle-chassis", "vehicle-ballast", "vehicle-presence"]);
+
+  physics.lineOfSight = (from, to, excludeEntityId = null, targetEntityId = null, options = null) => {
     const dx = (Number(to?.x) || 0) - (Number(from?.x) || 0);
     const fromHeight = physics.characterAimHeight?.(excludeEntityId) ?? 1;
     const toHeight = physics.characterAimHeight?.(targetEntityId) ?? 1;
@@ -121,18 +123,36 @@ export async function setup(ctx) {
     const dz = (Number(to?.z) || 0) - (Number(from?.z) || 0);
     const distance = Math.hypot(dx, dy, dz);
     if (distance < 0.001) return true;
-    const hit = physics.raycast(
-      {
-        x: Number(from?.x) || 0,
-        y: (Number(from?.y) || 0) + fromHeight,
-        z: Number(from?.z) || 0,
-      },
-      { x: dx, y: dy, z: dz },
-      distance + 0.15,
-      excludeEntityId,
-    );
-    if (!hit) return true;
-    return targetEntityId !== null && hit.entityId === targetEntityId;
+    const pierceVehicles = Boolean(options?.pierceVehicles);
+    const targetVehicleId = options?.targetVehicleId ?? null;
+    const dirX = dx / distance;
+    const dirY = dy / distance;
+    const dirZ = dz / distance;
+    let startOffset = 0;
+    const maxSteps = pierceVehicles ? 8 : 1;
+    for (let stepIdx = 0; stepIdx < maxSteps; stepIdx += 1) {
+      const remaining = distance + 0.15 - startOffset;
+      if (remaining <= 0.05) return true;
+      const hit = physics.raycast(
+        {
+          x: (Number(from?.x) || 0) + dirX * startOffset,
+          y: (Number(from?.y) || 0) + fromHeight + dirY * startOffset,
+          z: (Number(from?.z) || 0) + dirZ * startOffset,
+        },
+        { x: dirX, y: dirY, z: dirZ },
+        remaining,
+        excludeEntityId,
+      );
+      if (!hit) return true;
+      if (targetEntityId !== null && hit.entityId === targetEntityId) return true;
+      const hitVehicleId = hit.worldObject?.vehicleId ?? hit.worldObject?.bodyId ?? null;
+      if (targetVehicleId && hitVehicleId === targetVehicleId) return true;
+      if (!pierceVehicles) return false;
+      const hitKind = hit.worldObject?.kind ?? null;
+      if (!VEHICLE_PIERCE_KINDS.has(hitKind)) return false;
+      startOffset += Math.max(0.45, (Number(hit.distance) || 0) + 0.45);
+    }
+    return false;
   };
 
   if (originalStats) {

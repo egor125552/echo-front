@@ -62,6 +62,32 @@ export async function setup(ctx) {
     const transform = ctx.components.get(entityId, "Transform");
     if (!transform) return null;
 
+    if (physics.isOpenSky?.(
+      transform.x,
+      transform.y + CANOPY_OVERHEAD_ORIGIN,
+      transform.z,
+      CANOPY_RADIUS + 0.5,
+    )) {
+      const acousticZone = typeof map.acousticZoneAt === "function"
+        ? map.acousticZoneAt(transform)
+        : null;
+      return {
+        compression: 0,
+        hard: false,
+        boundarySnag: false,
+        reason: null,
+        overheadDistance: null,
+        minSideDistance: null,
+        sideHitCount: 0,
+        forwardDistance: null,
+        obstacleKind: null,
+        obstacleName: null,
+        acousticZone,
+        indoor: false,
+        confined: false,
+      };
+    }
+
     const overheadOrigin = {
       x: transform.x,
       y: transform.y + CANOPY_OVERHEAD_ORIGIN,

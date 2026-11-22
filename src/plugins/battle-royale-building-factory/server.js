@@ -276,23 +276,30 @@ export async function setup(ctx) {
     const halfWidth = Math.abs(finite(entry.spec.width)) / 2;
     const halfDepth = Math.abs(finite(entry.spec.depth)) / 2;
     const y = finite(floor.y);
-    const height = Math.max(1.8, finite(floor.height, 2.8));
+    const isRoof = Boolean(floor.roof);
+    const height = isRoof
+      ? Math.max(0.62, Math.min(0.85, finite(floor.parapetHeight, 0.72)))
+      : Math.max(1.8, finite(floor.height, 2.8));
     for (const side of ["north", "south", "west", "east"]) {
       const sideDoors = floorDoors.filter((door) => String(door.side ?? "east") === side);
       const length = side === "north" || side === "south"
         ? Math.abs(finite(entry.spec.width))
         : Math.abs(finite(entry.spec.depth));
-      for (const segment of wallSegments(length, sideDoors)) {
+      const roofOpenings = isRoof && length >= 7
+        ? [{ offset: 0, width: Math.min(5.2, Math.max(3.4, length * 0.34)) }]
+        : [];
+      for (const segment of wallSegments(length, [...sideDoors, ...roofOpenings])) {
         const center = (segment.start + segment.end) / 2;
         const halfSegment = (segment.end - segment.start) / 2;
         const common = {
-          kind: "building-wall",
+          kind: isRoof ? "building-parapet" : "building-wall",
+          parapet: isRoof,
           buildingId: entry.id,
           material: floor.wallMaterial ?? entry.spec.wallMaterial ?? "concrete",
-          accessibleName: "стена",
+          accessibleName: isRoof ? "край крыши" : "стена",
           y,
           height,
-          acousticOcclusion: profile.wallOcclusion,
+          acousticOcclusion: isRoof ? 0.25 : profile.wallOcclusion,
         };
         if (side === "north" || side === "south") {
           addWall({

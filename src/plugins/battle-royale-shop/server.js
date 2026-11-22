@@ -7,6 +7,9 @@ export const ARMOR_PLATES_COST = 600;
 export const MARKSMAN_COST = 700;
 export const SNIPER_COST = 1100;
 export const JUGGERNAUT_DROP_COST = 2200;
+export const MINES_COST = 450;
+export const MINI_NUKE_COST = 2500;
+export const ELECTRO_DROP_COST = 3000;
 export const KILL_CASH_REWARD = 300;
 export const AIRDROP_CASH_REWARD = 1800;
 export const JUGGERNAUT_CASH_REWARD = 2500;
@@ -21,6 +24,7 @@ export const SHOP_STATIONS = Object.freeze([
   { id: "shop-two-storey", name: "Магазин у двухэтажного дома", x: 118, y: 0, z: 120 },
   { id: "shop-loot-house", name: "Магазин у дома с припасами", x: -158, y: 0, z: 95 },
   { id: "shop-forest-hut", name: "Магазин у домика лесника", x: -96, y: 0, z: -75 },
+  { id: "shop-residence", name: "Магазин у Резиденции", x: 115, y: 0, z: -164 },
 ]);
 
 export const manifest = {
@@ -99,6 +103,7 @@ export async function setup(ctx) {
   const botParachutes = ctx.services.has("bot-parachutes") ? ctx.services.get("bot-parachutes") : null;
   const tutorial = ctx.services.has("battle-royale-tutorial") ? ctx.services.get("battle-royale-tutorial") : null;
   const getCrateGenerator = () => (ctx.services.has("crate-generator") ? ctx.services.get("crate-generator") : null);
+  const getSpecialOps = () => (ctx.services.has("special-ops") ? ctx.services.get("special-ops") : null);
 
   const balances = new Map();
   const proximityPrompts = new Map();
@@ -583,6 +588,115 @@ export async function setup(ctx) {
       return { ok: true, itemId, crateId: crate?.id ?? null, balance: balanceOf(buyerId) };
     }
 
+    if (itemId === "mines") {
+      if (cash < MINES_COST) {
+        ctx.events.emit("shop:purchase-failed", {
+          entityId: buyerId,
+          itemId,
+          reason: "insufficient-funds",
+          required: MINES_COST,
+          balance: cash,
+          now,
+        });
+        return { ok: false, reason: "insufficient-funds", required: MINES_COST, balance: cash };
+      }
+      const specialOps = getSpecialOps();
+      const added = specialOps?.grantMines?.(buyerId, 2) ?? 0;
+      if (!added) {
+        ctx.events.emit("shop:purchase-failed", { entityId: buyerId, itemId, reason: "capacity-full", now });
+        return { ok: false, reason: "capacity-full" };
+      }
+      spendCash(buyerId, MINES_COST);
+      ctx.events.emit("shop:purchased", {
+        entityId: buyerId,
+        itemId,
+        itemName: `Мины (+${added} шт.)`,
+        cost: MINES_COST,
+        balance: balanceOf(buyerId),
+        mines: specialOps?.mineCountOf?.(buyerId) ?? 0,
+        shopId: shop.id,
+        shopName: shop.name,
+        now,
+      });
+      return { ok: true, itemId, added, balance: balanceOf(buyerId) };
+    }
+
+    if (itemId === "mini-nuke") {
+      if (cash < MINI_NUKE_COST) {
+        ctx.events.emit("shop:purchase-failed", {
+          entityId: buyerId,
+          itemId,
+          reason: "insufficient-funds",
+          required: MINI_NUKE_COST,
+          balance: cash,
+          now,
+        });
+        return { ok: false, reason: "insufficient-funds", required: MINI_NUKE_COST, balance: cash };
+      }
+      const specialOps = getSpecialOps();
+      const added = specialOps?.grantNuke?.(buyerId, 1000) ?? 0;
+      if (!added) {
+        ctx.events.emit("shop:purchase-failed", { entityId: buyerId, itemId, reason: "capacity-full", now });
+        return { ok: false, reason: "capacity-full" };
+      }
+      spendCash(buyerId, MINI_NUKE_COST);
+      ctx.events.emit("shop:purchased", {
+        entityId: buyerId,
+        itemId,
+        itemName: `Мини-ядерка (+${added} ударов)`,
+        cost: MINI_NUKE_COST,
+        balance: balanceOf(buyerId),
+        miniNukes: specialOps?.nukeCountOf?.(buyerId) ?? 0,
+        shopId: shop.id,
+        shopName: shop.name,
+        now,
+      });
+      return { ok: true, itemId, added, balance: balanceOf(buyerId) };
+    }
+
+    if (itemId === "electro-drop") {
+      if (cash < ELECTRO_DROP_COST) {
+        ctx.events.emit("shop:purchase-failed", {
+          entityId: buyerId,
+          itemId,
+          reason: "insufficient-funds",
+          required: ELECTRO_DROP_COST,
+          balance: cash,
+          now,
+        });
+        return { ok: false, reason: "insufficient-funds", required: ELECTRO_DROP_COST, balance: cash };
+      }
+      const crateGenerator = getCrateGenerator();
+      if (!crateGenerator?.spawnElectroLukashenkoDrop) {
+        ctx.events.emit("shop:purchase-failed", { entityId: buyerId, itemId, reason: "unavailable", now });
+        return { ok: false, reason: "unavailable" };
+      }
+      spendCash(buyerId, ELECTRO_DROP_COST);
+      const dropX = finite(shop.x) + (finite(transform.x) >= finite(shop.x) ? 14 : -14);
+      const dropZ = finite(shop.z) + (finite(transform.z) >= finite(shop.z) ? 14 : -14);
+      const crate = crateGenerator.spawnElectroLukashenkoDrop({
+        x: dropX,
+        z: dropZ,
+        nearEntityId: buyerId,
+        now,
+        reason: "shop-purchase",
+      });
+      ctx.events.emit("shop:purchased", {
+        entityId: buyerId,
+        itemId,
+        itemName: "Сброс груза «Электрический Лукашенко»",
+        crateId: crate?.id ?? null,
+        cost: ELECTRO_DROP_COST,
+        balance: balanceOf(buyerId),
+        shopId: shop.id,
+        shopName: shop.name,
+        x: crate?.x ?? dropX,
+        z: crate?.z ?? dropZ,
+        now,
+      });
+      return { ok: true, itemId, crateId: crate?.id ?? null, balance: balanceOf(buyerId) };
+    }
+
     return { ok: false, reason: "unknown-item" };
   }
 
@@ -623,6 +737,9 @@ export async function setup(ctx) {
         marksman: MARKSMAN_COST,
         sniper: SNIPER_COST,
         juggernautDrop: JUGGERNAUT_DROP_COST,
+        mines: MINES_COST,
+        miniNuke: MINI_NUKE_COST,
+        electroDrop: ELECTRO_DROP_COST,
         bountyContract: 0,
       },
       turboPurchasedCount: turboPurchased,
@@ -703,9 +820,9 @@ export async function setup(ctx) {
   ctx.events.on("loot:opened", (payload = {}) => {
     const entityId = payload.entityId;
     if (!entityId) return;
-    if (payload.loot === "juggernaut") {
+    if (payload.loot === "juggernaut" || payload.loot === "electro-lukashenko") {
       stimulants.grantJuggernautStims?.(entityId);
-      grantCash(entityId, JUGGERNAUT_CASH_REWARD, "juggernaut", {
+      grantCash(entityId, JUGGERNAUT_CASH_REWARD, payload.loot, {
         crateId: payload.crateId ?? null,
         x: payload.x ?? 0,
         y: payload.y ?? 0,
@@ -908,6 +1025,9 @@ export async function setup(ctx) {
       MARKSMAN_COST,
       SNIPER_COST,
       JUGGERNAUT_DROP_COST,
+      MINES_COST,
+      MINI_NUKE_COST,
+      ELECTRO_DROP_COST,
       KILL_CASH_REWARD,
       AIRDROP_CASH_REWARD,
       JUGGERNAUT_CASH_REWARD,

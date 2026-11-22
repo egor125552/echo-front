@@ -361,13 +361,35 @@ export async function setup(ctx) {
             transform.angle += input.turn * turnSpeed * safeDt;
           }
 
+          const inputLength = Math.hypot(rawForward, rawStrafe);
+          if (transform.crouching && input.sprint && inputLength > 0.15) {
+            transform.crouching = false;
+            transform.inCover = false;
+            transform.coverKind = null;
+            transform.coverLabel = null;
+            ctx.events.emit("tactics:stance-changed", {
+              entityId,
+              crouching: false,
+              inCover: false,
+              coverKind: null,
+              coverLabel: null,
+              reason: "sprint",
+              now,
+            });
+          }
+          const baseSpeed = input.sprint ? 5.4 : (transform.crouching ? 2.15 : 3.25);
           const speed = Number.isFinite(transform.movementSpeed)
             ? Math.max(0, transform.movementSpeed)
-            : (input.sprint ? 5.4 : 3.25);
-          const inputLength = Math.hypot(rawForward, rawStrafe);
+            : baseSpeed;
           const scale = inputLength > 1 ? 1 / inputLength : 1;
           const forward = rawForward * scale;
           const strafe = rawStrafe * scale;
+
+          if (entity.electroJumpActive) {
+            transform.grounded = false;
+            transform.verticalVelocity = 0;
+            continue;
+          }
 
           const distance = speed * safeDt;
           let dx = (
@@ -482,7 +504,9 @@ export async function setup(ctx) {
               x: transform.x,
               y: transform.y,
               z: transform.z,
-              radius: transform.downed ? 12 : (input.sprint ? FOOTSTEP_SPRINT_RADIUS : FOOTSTEP_WALK_RADIUS),
+              radius: transform.downed
+                ? 12
+                : (input.sprint ? FOOTSTEP_SPRINT_RADIUS : (transform.crouching ? 14 : FOOTSTEP_WALK_RADIUS)),
             });
           }
         }

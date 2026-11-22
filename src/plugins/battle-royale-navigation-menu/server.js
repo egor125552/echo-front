@@ -31,15 +31,18 @@ export async function setup(ctx) {
   };
 
   matchApi.snapshotFor = (playerId, now = Date.now()) => {
-    const snapshot = originalSnapshotFor(playerId, now);
-    const items = navigation.availableTargets(playerId).map(publicTarget);
-    return {
-      ...snapshot,
-      navigation: {
-        ...(snapshot.navigation ?? {}),
-        menuTitle: "Карта",
-        items,
-      },
+    const run = () => {
+      const snapshot = originalSnapshotFor(playerId, now);
+      const items = navigation.availableTargets(playerId).map(publicTarget);
+      return {
+        ...snapshot,
+        navigation: {
+          ...(snapshot.navigation ?? {}),
+          menuTitle: "Карта",
+          items,
+        },
+      };
     };
+    return navigation.withTargetCache ? navigation.withTargetCache(run) : run();
   };
 }

@@ -1,14 +1,36 @@
+import { evaluateCoverProtection } from "../../game/crouch-squad-inventory.js";
+
 export const MAX_PROJECTILE_POOL = 192;
 export const PROJECTILE_MAX_STEP = 1 / 60;
 export const DEFAULT_PROJECTILE_RADIUS = 0.004;
 export const DEFAULT_PROJECTILE_MASS = 0.006;
 
+export const WEAPON_FALLOFF_PROFILES = Object.freeze({
+  pistol: Object.freeze({ fullRange: 10, maxRange: 28, minMultiplier: 0.4 }),
+  rifle: Object.freeze({ fullRange: 12, maxRange: 28, minMultiplier: 0.45 }),
+  marksman: Object.freeze({ fullRange: 20, maxRange: 92, minMultiplier: 0.38 }),
+  sniper: Object.freeze({ fullRange: 25, maxRange: 155, minMultiplier: 0.35 }),
+  "electro-rifle": Object.freeze({ fullRange: 250, maxRange: 280, minMultiplier: 1.0 }),
+});
+
+export function computeDistanceDamageMultiplier(distanceMeters, weaponId = null, weaponRange = null) {
+  const dist = Math.max(0, Number(distanceMeters) || 0);
+  const profile = weaponId ? WEAPON_FALLOFF_PROFILES[weaponId] : null;
+  const maxRange = Math.max(1, Number(weaponRange) || profile?.maxRange || 30);
+  const fullRange = profile ? Math.min(profile.fullRange, maxRange * 0.85) : maxRange * 0.3;
+  const minMultiplier = profile ? profile.minMultiplier : 0.4;
+  if (dist <= fullRange) return 1;
+  const span = Math.max(1, maxRange - fullRange);
+  const t = Math.max(0, Math.min(1, (dist - fullRange) / span));
+  return Number((1 - (1 - minMultiplier) * t).toFixed(4));
+}
+
 export const manifest = {
   id: "rapier-projectiles",
-  version: "1.2.0",
+  version: "1.3.0",
   requires: ["rapier-physics", "entities", "teams", "combat"],
   optional: ["battle-royale-vehicle", "battle-royale-vehicle-fleet"],
-  capabilities: ["services.consume", "services.provide", "events.emit"],
+  capabilities: ["services.consume", "services.provide", "events.emit", "components.read"],
 };
 
 function finite(value, fallback = 0) {
@@ -160,6 +182,14 @@ export async function setup(ctx) {
       damage: 0,
       speed: 0,
       range: 0,
+      originX: 0,
+      originY: 0,
+      originZ: 0,
+      dirX: 0,
+      dirY: 0,
+      dirZ: -1,
+      piercesVehicles: false,
+      piercedVehicleCount: 0,
       radius: DEFAULT_PROJECTILE_RADIUS,
       mass: DEFAULT_PROJECTILE_MASS,
       lifetimeSeconds: 0,
@@ -228,11 +258,23 @@ export async function setup(ctx) {
     slot.spawnedAt = finite(spec.now, currentNow);
     slot.lastReason = "flying";
 
+    const originX = finite(spec.origin?.x);
+    const originY = finite(spec.origin?.y, 1);
+    const originZ = finite(spec.origin?.z);
+    slot.originX = originX;
+    slot.originY = originY;
+    slot.originZ = originZ;
+    slot.dirX = direction.x;
+    slot.dirY = direction.y;
+    slot.dirZ = direction.z;
+    slot.piercesVehicles = Boolean(spec.piercesVehicles || weaponId === "electro-rifle");
+    slot.piercedVehicleCount = 0;
+
     setSlotEnabled(slot, true);
     slot.body.setTranslation({
-      x: finite(spec.origin?.x),
-      y: finite(spec.origin?.y, 1),
-      z: finite(spec.origin?.z),
+      x: originX,
+      y: originY,
+      z: originZ,
     }, true);
     slot.body.setLinvel({
       x: direction.x * speed,
@@ -287,13 +329,54 @@ export async function setup(ctx) {
     const state = vehicles.stateFor?.(vehicleId) ?? null;
     const occupants = [state?.driverId ?? vehicles.driverId?.(vehicleId) ?? null, ...(state?.passengerIds ?? vehicles.passengerIds?.(vehicleId) ?? [])]
       .filter(Boolean);
-    if (!occupants.length) return { vehicleId, targetId: null, multiplier: 0, kind: state?.kind ?? object.vehicleKind ?? null };
+    if (!occupants.length) return { vehicleId, targetId: null, hostile: [], multiplier: 0, kind: state?.kind ?? object.vehicleKind ?? null };
     const hostile = occupants.filter(id => id !== shooterId && teams.teamOf(id) !== teams.teamOf(shooterId));
-    if (!hostile.length) return { vehicleId, targetId: null, multiplier: 0, kind: state?.kind ?? object.vehicleKind ?? null, friendlyBlocked: true };
+    if (!hostile.length) return { vehicleId, targetId: null, hostile: [], multiplier: 0, kind: state?.kind ?? object.vehicleKind ?? null, friendlyBlocked: true };
     const seed = Math.abs(String(slot?.projectileId ?? "").split("").reduce((n, ch) => ((n * 33) ^ ch.charCodeAt(0)) | 0, 5381));
     const targetId = hostile[seed % hostile.length];
     const kind = state?.kind ?? object.vehicleKind ?? null;
-    return { vehicleId, targetId, multiplier: kind === "supercar" ? 0.5 : 0.35, kind };
+    const multiplier = slot?.piercesVehicles ? 1 : (kind === "supercar" ? 0.5 : 0.35);
+    return { vehicleId, targetId, hostile, multiplier, kind };
+  }
+
+  function advanceProjectilePastVehicle(slot, impactPos, vehicleId) {
+    const dx = slot.dirX;
+    const dy = slot.dirY;
+    const dz = slot.dirZ;
+    let exitPos = {
+      x: impactPos.x + dx * 2.6,
+      y: impactPos.y + dy * 2.6,
+      z: impactPos.z + dz * 2.6,
+    };
+    if (typeof physics.raycast === "function") {
+      for (let dist = 0.35; dist <= 6.0; dist += 0.3) {
+        const probe = {
+          x: impactPos.x + dx * dist,
+          y: impactPos.y + dy * dist,
+          z: impactPos.z + dz * dist,
+        };
+        const hit = physics.raycast(probe, { x: dx, y: dy, z: dz }, 0.32, slot.shooterId);
+        const hitVid = hit?.worldObject?.vehicleId ?? hit?.worldObject?.bodyId ?? null;
+        if (!hit || hitVid !== vehicleId) {
+          exitPos = hit?.entityId
+            ? probe
+            : {
+                x: probe.x + dx * 0.15,
+                y: probe.y + dy * 0.15,
+                z: probe.z + dz * 0.15,
+              };
+          break;
+        }
+      }
+    }
+    slot.piercedVehicleCount += 1;
+    slot.body.setTranslation(exitPos, true);
+    slot.body.setLinvel({
+      x: dx * slot.speed,
+      y: dy * slot.speed,
+      z: dz * slot.speed,
+    }, true);
+    slot.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
   function resolveContact(slot, otherHandle, now) {
@@ -306,43 +389,151 @@ export async function setup(ctx) {
     const vehicleHit = !targetId ? vehicleOccupantForCollider(slot, otherHandle) : null;
     if (vehicleHit?.targetId) targetId = vehicleHit.targetId;
     if (targetId === slot.shooterId && !vehicleHit?.vehicleId) return;
+
+    const position = slot.body.translation();
+    const velocity = slot.body.linvel();
+    const impactX = finite(position?.x);
+    const impactY = finite(position?.y);
+    const impactZ = finite(position?.z);
+
+    // Vehicle-piercing weapon hitting an empty/parked car hull punches straight through it!
+    if (
+      slot.piercesVehicles
+      && vehicleHit?.vehicleId
+      && !vehicleHit.targetId
+      && !vehicleHit.friendlyBlocked
+      && slot.piercedVehicleCount < 3
+    ) {
+      ctx.events.emit("sound:spatial", {
+        entityId: slot.shooterId,
+        key: "armor.hit",
+        surface: "metal",
+        x: impactX,
+        y: impactY,
+        z: impactZ,
+        radius: 65,
+      });
+      advanceProjectilePastVehicle(slot, { x: impactX, y: impactY, z: impactZ }, vehicleHit.vehicleId);
+      return;
+    }
+
     const target = targetId ? entities.get(targetId) : null;
     const sameTeam = targetId
       ? teams.teamOf(slot.shooterId) === teams.teamOf(targetId)
       : Boolean(vehicleHit?.friendlyBlocked);
     let damaged = false;
     let damageResult = null;
-    const damageAmount = slot.damage * (vehicleHit?.targetId ? vehicleHit.multiplier : 1);
+    const travelDistance = Math.hypot(
+      impactX - slot.originX,
+      impactY - slot.originY,
+      impactZ - slot.originZ,
+    );
+    const distanceMultiplier = computeDistanceDamageMultiplier(travelDistance, slot.weaponId, slot.range);
+    const vehicleMultiplier = vehicleHit?.targetId ? vehicleHit.multiplier : 1;
+    const totalMultiplier = distanceMultiplier * vehicleMultiplier;
+    const damageAmount = slot.damage > 0
+      ? Math.max(1, Math.round(slot.damage * totalMultiplier))
+      : 0;
 
+    let blockedByCover = false;
     if (target?.alive && targetId !== slot.shooterId && !sameTeam) {
-      damageResult = combat.damage(targetId, damageAmount, {
-        attackerId: slot.shooterId,
-        weaponId: slot.weaponId,
+      const targetTransform = ctx.components.get(targetId, "Transform");
+      const shooterTransform = ctx.components.get(slot.shooterId, "Transform");
+      const rawCoverCheck = evaluateCoverProtection({
+        targetTransform,
+        shooterTransform,
         projectileId: slot.projectileId,
-        now,
       });
-      damaged = Boolean((Number(damageResult?.applied) || 0) > 0
-        || (Number(damageResult?.armorAbsorbed) || 0) > 0);
-      hitTotal += 1;
+      // Vehicle-piercing rounds shred straight through vehicle cover!
+      const pierceCover = Boolean(slot.piercesVehicles && rawCoverCheck.coverKind === "vehicle");
+      const coverCheck = pierceCover
+        ? { ...rawCoverCheck, blockedByCover: false, damageScale: 1 }
+        : rawCoverCheck;
+      if (coverCheck.blockedByCover) {
+        blockedByCover = true;
+        ctx.events.emit("tactics:cover-blocked", {
+          targetId,
+          shooterId: slot.shooterId,
+          weaponId: slot.weaponId,
+          inCover: coverCheck.inCover,
+          coverKind: coverCheck.coverKind,
+          ricochetMaterial: coverCheck.ricochetMaterial,
+          x: impactX,
+          y: impactY,
+          z: impactZ,
+          now,
+        });
+        if (coverCheck.inCover) {
+          ctx.events.emit("sound:spatial", {
+            entityId: targetId,
+            key: "armor.hit",
+            surface: coverCheck.ricochetMaterial ?? "concrete",
+            x: impactX,
+            y: impactY,
+            z: impactZ,
+            radius: 42,
+          });
+        }
+      } else {
+        const finalDamage = damageAmount > 0
+          ? Math.max(1, Math.round(damageAmount * coverCheck.damageScale))
+          : 0;
+        const targetsToHit = (slot.piercesVehicles && vehicleHit?.hostile?.length > 1)
+          ? vehicleHit.hostile
+          : [targetId];
+        if (slot.piercesVehicles && vehicleHit?.vehicleId) {
+          ctx.events.emit("sound:spatial", {
+            entityId: slot.shooterId,
+            key: "armor.break",
+            surface: "metal",
+            x: impactX,
+            y: impactY,
+            z: impactZ,
+            radius: 75,
+          });
+        }
+        for (const hitTargetId of targetsToHit) {
+          const hitEntity = entities.get(hitTargetId);
+          if (!hitEntity?.alive) continue;
+          const res = combat.damage(hitTargetId, finalDamage, {
+            attackerId: slot.shooterId,
+            weaponId: slot.weaponId,
+            projectileId: slot.projectileId,
+            distance: travelDistance,
+            distanceMultiplier,
+            crouchMitigated: coverCheck.crouching,
+            inCover: coverCheck.inCover,
+            vehiclePierced: Boolean(slot.piercesVehicles && vehicleHit?.vehicleId),
+            now,
+          });
+          if (hitTargetId === targetId) damageResult = res;
+          if ((Number(res?.applied) || 0) > 0 || (Number(res?.armorAbsorbed) || 0) > 0) {
+            damaged = true;
+          }
+        }
+        hitTotal += 1;
+      }
     } else if (!targetId) {
       worldImpactTotal += 1;
     }
 
-    const position = slot.body.translation();
-    const velocity = slot.body.linvel();
     ctx.events.emit("projectile:impact", {
       projectileId: slot.projectileId,
       shooterId: slot.shooterId,
       targetId,
       vehicleId: vehicleHit?.vehicleId ?? null,
       vehicleKind: vehicleHit?.kind ?? null,
-      damageMultiplier: vehicleHit?.targetId ? vehicleHit.multiplier : 1,
+      vehiclePierced: Boolean(slot.piercesVehicles && vehicleHit?.vehicleId),
+      damageMultiplier: totalMultiplier,
+      distanceMultiplier,
+      distance: travelDistance,
       weaponId: slot.weaponId,
       damaged,
+      blockedByCover,
       friendBlocked: Boolean(sameTeam),
-      x: finite(position?.x),
-      y: finite(position?.y),
-      z: finite(position?.z),
+      x: impactX,
+      y: impactY,
+      z: impactZ,
       speed: Math.hypot(finite(velocity?.x), finite(velocity?.y), finite(velocity?.z)),
       radius: slot.radius,
       mass: slot.mass,

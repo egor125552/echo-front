@@ -29,6 +29,77 @@ export function plateCountForArmor(value, plateValue = ARMOR_PLATE_VALUE) {
   return Math.ceil(current / plateValue);
 }
 
+export function computeArmorAbsorption({
+  armorCurrent = 0,
+  armorMaximum = 150,
+  incomingDamage = 0,
+  armorMultiplier = 1,
+  shattersArmor = false,
+  isJuggernaut = false,
+  distanceMultiplier = 1,
+} = {}) {
+  const before = Math.max(0, Number(armorCurrent) || 0);
+  const maximum = Math.max(before, Number(armorMaximum) || 0);
+  const remaining = Math.max(0, Number(incomingDamage) || 0);
+  if (before <= 0 || remaining <= 0) {
+    return { brokenArmor: 0, remainingDamage: remaining, armorAfter: before, armorBroke: false };
+  }
+
+  const heavyArmor = Boolean(isJuggernaut || maximum > 200);
+  const distFactor = Math.max(0.25, Math.min(1, Number(distanceMultiplier) || 1));
+  const baseMultiplier = Math.max(1, Number(armorMultiplier) || 1);
+
+  if (heavyArmor) {
+    // Juggernaut heavy plating never shatters in a single hit and resists bonus
+    // armor-piercing multipliers (especially snipers and long-range shots).
+    const heavyMultiplier = shattersArmor
+      ? 0.65
+      : baseMultiplier > 1
+        ? 0.75
+        : 0.85;
+    const rawArmorDamage = Math.max(1, Math.round(remaining * heavyMultiplier));
+    const brokenArmor = Math.min(before, rawArmorDamage);
+    const damageConsumedByArmor = brokenArmor < before
+      ? remaining
+      : Math.min(remaining, Math.round(brokenArmor / heavyMultiplier));
+    const armorAfter = Math.max(0, before - brokenArmor);
+    return {
+      brokenArmor,
+      remainingDamage: Math.max(0, remaining - damageConsumedByArmor),
+      armorAfter,
+      armorBroke: before > 0 && armorAfter <= 0,
+    };
+  }
+
+  if (baseMultiplier === 1 && !shattersArmor) {
+    const absorbed = Math.min(before, remaining);
+    const armorAfter = Math.max(0, before - absorbed);
+    return {
+      brokenArmor: absorbed,
+      remainingDamage: Math.max(0, remaining - absorbed),
+      armorAfter,
+      armorBroke: before > 0 && armorAfter <= 0,
+    };
+  }
+
+  const rawArmorDamage = Math.round(remaining * baseMultiplier);
+  const effectiveShatter = Boolean(shattersArmor) && distFactor >= 0.65;
+  const brokenArmor = effectiveShatter
+    ? before
+    : Math.min(before, rawArmorDamage);
+  const damageConsumedByArmor = Math.min(
+    remaining,
+    Math.round(brokenArmor / baseMultiplier),
+  );
+  const armorAfter = Math.max(0, before - brokenArmor);
+  return {
+    brokenArmor,
+    remainingDamage: Math.max(0, remaining - damageConsumedByArmor),
+    armorAfter,
+    armorBroke: before > 0 && armorAfter <= 0,
+  };
+}
+
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const plating = new Map();
@@ -138,6 +209,26 @@ export async function setup(ctx) {
     return added;
   }
 
+  function takePlates(entityId, count = 1) {
+    const entity = entities.get(entityId);
+    const armor = armorState(entityId);
+    if (!entity?.alive || !armor) return 0;
+    const safeCount = Math.max(0, Math.floor(Number(count) || 0));
+    if (!safeCount) return 0;
+    const removed = Math.min(safeCount, Math.max(0, armor.reserve));
+    if (removed > 0) {
+      armor.reserve -= removed;
+      emitChanged(entityId);
+    }
+    return removed;
+  }
+
+  function remainingReserveCapacity(entityId) {
+    const armor = armorState(entityId);
+    if (!armor) return 0;
+    return Math.max(0, armor.reserveCapacity - armor.reserve);
+  }
+
   function grantSatchel(entityId) {
     const entity = entities.get(entityId);
     const armor = armorState(entityId);
@@ -158,6 +249,20 @@ export async function setup(ctx) {
     armor.hasSatchel = true;
     armor.reserveCapacity = 12;
     armor.reserve = 12;
+    emitChanged(entityId);
+    return true;
+  }
+
+  function grantElectroLukashenkoArmor(entityId) {
+    const entity = entities.get(entityId);
+    const armor = armorState(entityId);
+    if (!entity?.alive || !armor) return false;
+    armor.plateValue = 100;
+    armor.maximum = 800;
+    armor.current = 800;
+    armor.hasSatchel = true;
+    armor.reserveCapacity = 14;
+    armor.reserve = 14;
     emitChanged(entityId);
     return true;
   }
@@ -255,39 +360,20 @@ export async function setup(ctx) {
     const shattersArmor = Boolean(packet.shattersArmor ?? weaponDef?.shattersArmor);
 
     cancelPlating(packet.targetId, "damaged");
-    const before = armor.current;
+    const result = computeArmorAbsorption({
+      armorCurrent: armor.current,
+      armorMaximum: armor.maximum,
+      incomingDamage: packet.remaining,
+      armorMultiplier,
+      shattersArmor,
+      isJuggernaut: Boolean(target.juggernaut),
+      distanceMultiplier: packet.distanceMultiplier ?? 1,
+    });
 
-    if (armorMultiplier === 1 && !shattersArmor) {
-      const absorbed = Math.min(armor.current, packet.remaining);
-      armor.current -= absorbed;
-      packet.remaining = Math.max(0, packet.remaining - absorbed);
-      packet.armorAbsorbed = absorbed;
-      packet.armorBroke = before > 0 && armor.current <= 0;
-      emitChanged(packet.targetId);
-      if (packet.armorBroke) {
-        const pos = entityPosition(packet.targetId);
-        ctx.events.emit("sound:spatial", {
-          entityId: packet.targetId,
-          key: "armor.break",
-          ...pos,
-        });
-      }
-      return;
-    }
-
-    const rawArmorDamage = Math.round(packet.remaining * armorMultiplier);
-    const brokenArmor = shattersArmor
-      ? before
-      : Math.min(armor.current, rawArmorDamage);
-    const damageConsumedByArmor = Math.min(
-      packet.remaining,
-      Math.round(brokenArmor / armorMultiplier),
-    );
-
-    armor.current = Math.max(0, armor.current - brokenArmor);
-    packet.remaining = Math.max(0, packet.remaining - damageConsumedByArmor);
-    packet.armorAbsorbed = brokenArmor;
-    packet.armorBroke = before > 0 && armor.current <= 0;
+    armor.current = result.armorAfter;
+    packet.remaining = result.remainingDamage;
+    packet.armorAbsorbed = result.brokenArmor;
+    packet.armorBroke = result.armorBroke;
     emitChanged(packet.targetId);
     if (packet.armorBroke) {
       const pos = entityPosition(packet.targetId);
@@ -316,8 +402,11 @@ export async function setup(ctx) {
     tick,
     describe,
     grantPlates,
+    takePlates,
+    remainingReserveCapacity,
     grantSatchel,
     grantJuggernautArmor,
+    grantElectroLukashenkoArmor,
     isPlating(entityId) {
       return plating.has(entityId);
     },

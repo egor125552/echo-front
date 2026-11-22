@@ -655,13 +655,73 @@ test("gamepad-input plugin supports Hold Triangle for armor plating with immedia
     buttons[9].pressed = true;
     fakeNow += 40;
     sampled = baseInput.sample();
-    assert.equal(sampled.stimulantPressed, true, "D-Pad Up triggers stimulant / self-revive");
-    assert.equal(sampled.navigationTogglePressed, true, "D-Pad Down toggles route guidance");
-    assert.equal(sampled.navigationPrevPressed, true, "D-Pad Left selects previous navigation target");
-    assert.equal(sampled.navigationNextPressed, true, "D-Pad Right selects next navigation target");
+    assert.equal(sampled.stimulantPressed, true, "D-Pad Up triggers stimulant immediately when no electro-rifle");
     assert.equal(sampled.jumpPressed, true, "Square triggers jump");
     assert.equal(sampled.navigationFacePressed, true, "R3 on ground auto-faces navigation target");
     assert.deepEqual(overlayToggles, ["map", "menu"], "Select toggles map and Start toggles menu");
+
+    // Release D-Pad Down / Left / Right after short tap (<380ms) -> navigation actions
+    buttons[12].pressed = false;
+    buttons[13].pressed = false;
+    buttons[14].pressed = false;
+    buttons[15].pressed = false;
+    buttons[2].pressed = false;
+    buttons[11].pressed = false;
+    buttons[8].pressed = false;
+    buttons[9].pressed = false;
+    fakeNow += 100;
+    sampled = baseInput.sample();
+    assert.equal(sampled.navigationTogglePressed, true, "Short tap D-Pad Down toggles route guidance");
+    assert.equal(sampled.navigationPrevPressed, true, "Short tap D-Pad Left selects previous navigation target");
+    assert.equal(sampled.navigationNextPressed, true, "Short tap D-Pad Right selects next navigation target");
+
+    // 4. Special-ops D-Pad holds: Left hold = Mine, Right hold = Mini-Nuke, Up hold (with electro-rifle) = Electro-Rifle mode
+    events.emit("game:snapshot", {
+      playerId: "p1",
+      entities: [{ id: "p1", alive: true, downed: false, armor: 100, armorMax: 150, armorReserve: 3 }],
+      specialOps: { mines: 2, miniNukes: 1, nukeAiming: false, hasElectroRifle: true },
+    });
+    buttons[14].pressed = true;
+    buttons[15].pressed = true;
+    buttons[12].pressed = true;
+    fakeNow += 40;
+    sampled = baseInput.sample();
+    assert.equal(sampled.minePressed, false, "Mine waits for hold threshold");
+    assert.equal(sampled.nukePressed, false, "Nuke waits for hold threshold");
+    assert.equal(sampled.electroModePressed, false, "Electro mode waits for hold threshold");
+
+    fakeNow += 420;
+    sampled = baseInput.sample();
+    assert.equal(sampled.minePressed, true, "Hold D-Pad Left plants a mine");
+    assert.equal(sampled.nukePressed, true, "Hold D-Pad Right aims/launches Mini-Nuke");
+    assert.equal(sampled.electroModePressed, true, "Hold D-Pad Up switches Electro-Rifle mode");
+    buttons[14].pressed = false;
+    buttons[15].pressed = false;
+    buttons[12].pressed = false;
+    fakeNow += 40;
+    baseInput.sample();
+
+    // 5. While Mini-Nuke aiming is active: L1/R1 cycle distance and Circle cancels aiming
+    events.emit("game:snapshot", {
+      playerId: "p1",
+      entities: [{ id: "p1", alive: true, downed: false, armor: 100, armorMax: 150, armorReserve: 3 }],
+      specialOps: { mines: 2, miniNukes: 1, nukeAiming: true, hasElectroRifle: true },
+    });
+    buttons[4].pressed = true; // L1
+    fakeNow += 40;
+    sampled = baseInput.sample();
+    assert.equal(sampled.nukeCycleDelta, -1, "L1 cycles Mini-Nuke distance closer while aiming");
+    buttons[4].pressed = false;
+    buttons[5].pressed = true; // R1
+    fakeNow += 40;
+    sampled = baseInput.sample();
+    assert.equal(sampled.nukeCycleDelta, 1, "R1 cycles Mini-Nuke distance farther while aiming");
+    buttons[5].pressed = false;
+    buttons[1].pressed = true; // Circle
+    fakeNow += 40;
+    sampled = baseInput.sample();
+    assert.equal(sampled.nukeCancelPressed, true, "Circle cancels Mini-Nuke aiming");
+    buttons[1].pressed = false;
   } finally {
     Object.assign(globalThis, {
       window: old.window,

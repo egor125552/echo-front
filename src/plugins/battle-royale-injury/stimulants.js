@@ -276,6 +276,54 @@ export function createStimulants(ctx) {
     grantFast,
     grantTurbo,
     grantJuggernautStims,
+    take(entityId, kind = "standard", amount = 1) {
+      const qty = Math.max(0, Math.floor(Number(amount) || 0));
+      if (!qty) return 0;
+      if (kind === "turbo") {
+        const have = turboCount(entityId);
+        const removed = Math.min(have, qty);
+        if (removed > 0) turboStock.set(entityId, have - removed);
+        return removed;
+      }
+      if (kind === "fast") {
+        const have = fastCount(entityId);
+        const removed = Math.min(have, qty);
+        if (removed > 0) fastStock.set(entityId, have - removed);
+        return removed;
+      }
+      const have = count(entityId);
+      const removed = Math.min(have, qty);
+      if (removed > 0) stock.set(entityId, have - removed);
+      return removed;
+    },
+    grantTransfer(entityId, kind = "standard", amount = 1) {
+      const qty = Math.max(0, Math.floor(Number(amount) || 0));
+      if (!qty) return 0;
+      if (kind === "turbo") {
+        const have = turboCount(entityId);
+        const maxCarry = Math.max(TURBO_STIM_CAPACITY, 10);
+        const added = Math.min(qty, Math.max(0, maxCarry - have));
+        if (added > 0) turboStock.set(entityId, have + added);
+        return added;
+      }
+      if (kind === "fast") {
+        const have = fastCount(entityId);
+        const maxCarry = Math.max(FAST_STIM_CAPACITY, 20);
+        const added = Math.min(qty, Math.max(0, maxCarry - have));
+        if (added > 0) fastStock.set(entityId, have + added);
+        return added;
+      }
+      const have = count(entityId);
+      const maxCarry = Math.max(STIM_CAPACITY, 20);
+      const added = Math.min(qty, Math.max(0, maxCarry - have));
+      if (added > 0) stock.set(entityId, have + added);
+      return added;
+    },
+    remainingCapacity(entityId, kind = "standard") {
+      if (kind === "turbo") return Math.max(0, Math.max(TURBO_STIM_CAPACITY, 10) - turboCount(entityId));
+      if (kind === "fast") return Math.max(0, Math.max(FAST_STIM_CAPACITY, 20) - fastCount(entityId));
+      return Math.max(0, Math.max(STIM_CAPACITY, 20) - count(entityId));
+    },
     start,
     tick,
     cancel,

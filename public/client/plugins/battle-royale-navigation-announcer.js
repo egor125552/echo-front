@@ -48,6 +48,10 @@ export async function setup(ctx) {
       announce("Цель навигации недоступна.");
       return;
     }
+    if (packet.event === "navigation:warning") {
+      announce(payload.text || "Внутри лабиринта и бункера Резиденции автоведение отключено. Ориентируйся сам по звуку!", { interrupt: true, repeat: true });
+      return;
+    }
     if (packet.event === "vehicle:dropzone-placed") {
       const name = payload.vehicleName || "Внедорожник";
       announce(`${name} рядом с местом посадки. ${roundedMeters(payload.distance)} метров.`, { interrupt: false, repeat: true });

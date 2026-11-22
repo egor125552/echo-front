@@ -8,6 +8,8 @@ export const GAMEPAD_TRIGGER_DEADZONE = 0.08;
 export const GAMEPAD_CHANGE_INTERVAL_MS = 34;
 export const GAMEPAD_AXIS_EPSILON = 0.025;
 export const GAMEPAD_ARMOR_HOLD_MS = 380;
+export const GAMEPAD_SQUAD_HOLD_MS = 420;
+export const GAMEPAD_SPECIAL_HOLD_MS = 380;
 
 function clampAxis(value) {
   return Math.max(-1, Math.min(1, Number(value) || 0));
@@ -56,7 +58,7 @@ function ensureAccessibleHelp() {
   if (!heading || typeof document.createElement !== "function") return;
   const help = document.createElement("p");
   help.id = "gamepad-controls-help";
-  help.textContent = "Геймпад: левый стик — движение, правый стик — поворот камеры и персонажа. Крестик (A) — бег при удержании пешком, в воздухе — раскрыть парашют. Квадрат (X) — прыжок. Кружок (B) — отпустить тело в прыжке или срезать открытый парашют. Треугольник (Y) — короткое нажатие открывает двери, ящики или магазин, поднимает напарника или сажает в машину; удержание Треугольника (Y) на полсекунды с последующим отпусканием запускает надевание бронепластин. Крестовина вверх — стимулятор (в нокауте сразу берёт быстрый 1-секундный стимулятор, если куплен), L2 пешком — турбо-стимулятор (600 HP). Крестовина влево и вправо — выбор цели навигации, крестовина вниз — включить или выключить ведение по маршруту. Нажатие правого стика (R3) — автоповорот к цели навигации (в воздухе — статус полёта). Кнопка Share/View — карта, Options/Menu — меню игры. L1 и R1 — смена оружия, R2 — огонь.";
+  help.textContent = "Геймпад: левый стик — движение (в суперпрыжке тоже поворачивает тело и курс полёта), правый стик — поворот камеры и персонажа. Крестик (A) — бег при удержании пешком, в воздухе и в суперпрыжке — раскрыть парашют. Квадрат (X) — прыжок; в костюме «Электрический Лукашенко» удержание Квадрата запускает суперпрыжок вверх и далеко вперёд, отпускание переводит в свободный полёт (в полёте: Квадрат или R2 — удар вниз со взрывом, Крестик — парашют, или просто лети до приземления). Кружок (B) — присесть или укрыться за машиной и стеной (в прыжке — поза паркура, под куполом — срезать парашют, при наведении мини-ядерки — отменить запуск). Треугольник (Y) — короткое нажатие открывает двери, ящики или магазин, поднимает напарника или сажает в машину; удержание Треугольника (Y) на полсекунды с последующим отпусканием запускает надевание бронепластин. Крестовина вверх коротко — стимулятор (в нокауте срабатывает сразу без задержки), удержание крестовины вверх — переключить режим электро-автомата (Шок, Цепная молния, Перегрузка). L2 пешком — турбо-стимулятор (600 HP). Крестовина влево коротко — предыдущая цель навигации, удержание крестовины влево — поставить мину под ноги. Крестовина вправо коротко — следующая цель навигации, удержание крестовины вправо — навести мини-ядерку (при наведении L1 и R1 или крестовина влево-вправо меняют дальность включая «Под себя 4 м», R2 — запуск, Кружок — отмена). Крестовина вниз коротко — включить или выключить маршрут, удержание крестовины вниз — меню команд напарникам, инвентаря и Спецарсенала. Нажатие правого стика (R3) — автоповорот к цели навигации (в воздухе — статус полёта). Кнопка Share/View — карта, Options/Menu — меню игры. L1 и R1 — смена оружия, R2 — огонь.";
   heading.insertAdjacentElement?.("afterend", help);
 }
 
@@ -71,6 +73,7 @@ export async function setup(ctx) {
   let pendingAnalogNotify = false;
   let latestParachute = null;
   let latestSelf = null;
+  let latestSpecialOps = null;
   let driving = false;
   let analog = {
     moveForward: 0,
@@ -85,6 +88,17 @@ export async function setup(ctx) {
   let triangleHoldStartedAt = null;
   let triangleArmorTriggered = false;
   let triangleDeferredTap = false;
+  let squareHoldStartedAt = null;
+  let squareElectroTriggered = false;
+  let squareDeferredTap = false;
+  let dpadDownHoldStartedAt = null;
+  let dpadDownSquadTriggered = false;
+  let dpadLeftHoldStartedAt = null;
+  let dpadLeftMineTriggered = false;
+  let dpadRightHoldStartedAt = null;
+  let dpadRightNukeTriggered = false;
+  let dpadUpHoldStartedAt = null;
+  let dpadUpElectroTriggered = false;
   let firePressed = false;
   let reload = false;
   let selectDelta = 0;
@@ -97,6 +111,14 @@ export async function setup(ctx) {
   let parachutePressed = false;
   let posePressed = false;
   let jumpPressed = false;
+  let minePressed = false;
+  let nukePressed = false;
+  let nukeCycleDelta = 0;
+  let nukeCancelPressed = false;
+  let electroModePressed = false;
+  let electroJumpPressed = false;
+  let electroJumpHeld = false;
+  let electroJumpReleased = false;
   let navigationNextPressed = false;
   let navigationPrevPressed = false;
   let navigationTogglePressed = false;
@@ -207,6 +229,17 @@ export async function setup(ctx) {
     triangleHoldStartedAt = null;
     triangleArmorTriggered = false;
     triangleDeferredTap = false;
+    dpadDownHoldStartedAt = null;
+    dpadDownSquadTriggered = false;
+    dpadLeftHoldStartedAt = null;
+    dpadLeftMineTriggered = false;
+    squareHoldStartedAt = null;
+    squareElectroTriggered = false;
+    squareDeferredTap = false;
+    dpadRightHoldStartedAt = null;
+    dpadRightNukeTriggered = false;
+    dpadUpHoldStartedAt = null;
+    dpadUpElectroTriggered = false;
     firePressed = false;
     reload = false;
     selectDelta = 0;
@@ -219,6 +252,14 @@ export async function setup(ctx) {
     parachutePressed = false;
     posePressed = false;
     jumpPressed = false;
+    minePressed = false;
+    nukePressed = false;
+    nukeCycleDelta = 0;
+    nukeCancelPressed = false;
+    electroModePressed = false;
+    electroJumpPressed = false;
+    electroJumpHeld = false;
+    electroJumpReleased = false;
     navigationNextPressed = false;
     navigationPrevPressed = false;
     navigationTogglePressed = false;
@@ -287,23 +328,106 @@ export async function setup(ctx) {
     const dpadLeft = buttonEdge(gamepad, 14);
     const dpadRight = buttonEdge(gamepad, 15);
 
-    // Cross/A is contextual: sprint while held on foot, deploy/redeploy in air.
-    if (cross.pressed && latestParachute?.airborne && !driving) {
+    const isElectroSuit = Boolean(latestSpecialOps?.electroLukashenko);
+    const electroPhase = latestSpecialOps?.electroJumpPhase || "ready";
+    const electroAirborne = electroPhase === "rising" || electroPhase === "gliding";
+    const electroFuelMs = Number(latestSpecialOps?.electroJumpFuelMs) || 0;
+
+    // Cross/A is contextual: sprint while held on foot, deploy/redeploy parachute in air OR from Electro Super-Jump!
+    if (cross.pressed && (latestParachute?.airborne || electroAirborne) && !driving) {
       parachutePressed = true;
+      pulseGamepadConfirm({ duration: 95, weak: 0.65, strong: 0.8 });
       emitChanged("gamepad:cross:parachute", true);
     }
 
-    // Circle/B explicitly cuts an open canopy; on foot/jump it triggers parkour ragdoll pose.
+    // Circle/B: cancels active Mini-Nuke aim, cuts an open canopy, or crouches/parkour pose.
     if (circle.pressed && !driving) {
-      if (latestParachute?.deployed) parachutePressed = true;
-      else posePressed = true;
-      emitChanged("gamepad:circle", true);
+      if (latestSpecialOps?.nukeAiming) {
+        nukeCancelPressed = true;
+        pulseGamepadConfirm({ duration: 75, weak: 0.45, strong: 0.45 });
+        emitChanged("gamepad:circle:nuke-cancel", true);
+      } else {
+        if (latestParachute?.deployed) parachutePressed = true;
+        else posePressed = true;
+        emitChanged("gamepad:circle", true);
+      }
     }
 
-    // Square/X is the dedicated jump button (weapons reload automatically).
+    // Square/X:
+    // - On ground in Electro-Lukashenko suit: HOLD Square (>=240ms) -> rocket UP (to 600m) + accelerate FAR FORWARD (up to 15s fuel);
+    //   RELEASE Square at any time -> immediately start falling (gliding); short tap -> normal jump!
+    // - While falling ("gliding") in Electro-Lukashenko:
+    //   * HOLD Square (>=220ms, while 15s fuel remains) -> re-ignite upward & forward thrust!
+    //   * Short tap Square (<220ms) -> Meteor Slam straight DOWN!
+    //   * Cross (X/A) -> Open Parachute straight from flight!
+    // - While rising: releasing Square cuts thrust immediately -> fall; tapping again if not holding slams.
     if (square.pressed && !driving) {
-      jumpPressed = true;
-      emitChanged("gamepad:square:jump", true);
+      if (electroPhase === "gliding") {
+        if (electroFuelMs > 120) {
+          squareHoldStartedAt = now;
+          squareElectroTriggered = false;
+          squareDeferredTap = true;
+        } else {
+          electroJumpPressed = true;
+          squareHoldStartedAt = null;
+          squareElectroTriggered = false;
+          squareDeferredTap = false;
+          pulseGamepadConfirm({ duration: 130, weak: 0.9, strong: 1.0 });
+          emitChanged("gamepad:square:electro-slam", true);
+        }
+      } else if (electroPhase === "rising") {
+        electroJumpPressed = true;
+        electroJumpHeld = false;
+        squareHoldStartedAt = null;
+        squareElectroTriggered = false;
+        squareDeferredTap = false;
+        pulseGamepadConfirm({ duration: 130, weak: 0.9, strong: 1.0 });
+        emitChanged("gamepad:square:electro-slam", true);
+      } else if (isElectroSuit && !latestParachute?.airborne) {
+        squareHoldStartedAt = now;
+        squareElectroTriggered = false;
+        squareDeferredTap = true;
+      } else {
+        jumpPressed = true;
+        emitChanged("gamepad:square:jump", true);
+      }
+    } else if (square.down && !driving && squareHoldStartedAt != null) {
+      const thresholdMs = electroPhase === "gliding" ? 220 : 240;
+      if (!squareElectroTriggered && now - squareHoldStartedAt >= thresholdMs) {
+        squareElectroTriggered = true;
+        squareDeferredTap = false;
+        electroJumpHeld = true;
+        if (electroPhase !== "gliding") {
+          electroJumpPressed = true;
+        }
+        pulseGamepadConfirm({ duration: 140, weak: 0.85, strong: 0.96 });
+        emitChanged(electroPhase === "gliding" ? "gamepad:square:electro-reboost" : "gamepad:square:electro-jump", true);
+      } else if (squareElectroTriggered) {
+        electroJumpHeld = true;
+      }
+    } else if (square.released) {
+      const wasHeldBoost = squareElectroTriggered;
+      electroJumpHeld = false;
+      if (!driving && wasHeldBoost) {
+        electroJumpReleased = true;
+        emitChanged("gamepad:square:electro-jump-release", true);
+      } else if (!driving && squareDeferredTap && !wasHeldBoost) {
+        if (electroPhase === "gliding") {
+          electroJumpPressed = true;
+          pulseGamepadConfirm({ duration: 130, weak: 0.9, strong: 1.0 });
+          emitChanged("gamepad:square:electro-slam", true);
+        } else {
+          jumpPressed = true;
+          emitChanged("gamepad:square:jump", true);
+        }
+      }
+      squareHoldStartedAt = null;
+      squareElectroTriggered = false;
+      squareDeferredTap = false;
+    } else if (!square.down && electroJumpHeld) {
+      electroJumpHeld = false;
+      electroJumpReleased = true;
+      emitChanged("gamepad:square:electro-jump-release", true);
     }
 
     // Triangle/Y:
@@ -351,20 +475,64 @@ export async function setup(ctx) {
       }
     }
 
+    const menusOpen = Boolean(ctx.services.has("menus") && ctx.services.get("menus")?.open);
+    const aimingNuke = Boolean(latestSpecialOps?.nukeAiming) && !driving && !menusOpen;
+
     if (l1.pressed && !driving) {
-      selectDelta = -1;
-      emitChanged("gamepad:l1", true);
+      if (aimingNuke) {
+        nukeCycleDelta = -1;
+        pulseGamepadConfirm({ duration: 65, weak: 0.5, strong: 0.55 });
+        emitChanged("gamepad:l1:nuke-distance-prev", true);
+      } else {
+        selectDelta = -1;
+        emitChanged("gamepad:l1", true);
+      }
     }
     if (r1.pressed && !driving) {
-      selectDelta = 1;
-      emitChanged("gamepad:r1", true);
+      if (aimingNuke) {
+        nukeCycleDelta = 1;
+        pulseGamepadConfirm({ duration: 65, weak: 0.5, strong: 0.55 });
+        emitChanged("gamepad:r1:nuke-distance-next", true);
+      } else {
+        selectDelta = 1;
+        emitChanged("gamepad:r1", true);
+      }
     }
 
-    // D-Pad Up: Use stimulant (heal on foot or self-revive when downed; prefers bought 1s stim when downed)
-    if (dpadUp.pressed && !driving) {
-      stimulantPressed = true;
-      pulseGamepadConfirm({ duration: 90, weak: 0.62, strong: 0.78 });
-      emitChanged("gamepad:dpad-up:stimulant", true);
+    // D-Pad Up:
+    // - When downed or without electro-rifle: immediate stimulant on press (zero delay!).
+    // - On foot with electro-rifle: short tap (<380ms) uses stimulant; hold (>=380ms) switches electro-rifle mode.
+    if (menusOpen || driving) {
+      dpadUpHoldStartedAt = null;
+      dpadUpElectroTriggered = false;
+    } else if (dpadUp.pressed) {
+      const canCycleElectro = Boolean(latestSpecialOps?.hasElectroRifle) && !latestSelf?.downed;
+      if (!canCycleElectro) {
+        stimulantPressed = true;
+        pulseGamepadConfirm({ duration: 90, weak: 0.62, strong: 0.78 });
+        emitChanged("gamepad:dpad-up:stimulant", true);
+        dpadUpHoldStartedAt = null;
+        dpadUpElectroTriggered = false;
+      } else {
+        dpadUpHoldStartedAt = now;
+        dpadUpElectroTriggered = false;
+      }
+    } else if (dpadUp.down && dpadUpHoldStartedAt != null) {
+      if (!dpadUpElectroTriggered && (now - dpadUpHoldStartedAt) >= GAMEPAD_SPECIAL_HOLD_MS) {
+        dpadUpElectroTriggered = true;
+        electroModePressed = true;
+        pulseGamepadConfirm({ duration: 110, weak: 0.76, strong: 0.92 });
+        emitChanged("gamepad:dpad-up:electro-mode", true);
+      }
+    } else if (dpadUp.released) {
+      const wasShortTap = dpadUpHoldStartedAt != null && !dpadUpElectroTriggered;
+      dpadUpHoldStartedAt = null;
+      dpadUpElectroTriggered = false;
+      if (wasShortTap) {
+        stimulantPressed = true;
+        pulseGamepadConfirm({ duration: 90, weak: 0.62, strong: 0.78 });
+        emitChanged("gamepad:dpad-up:stimulant", true);
+      }
     }
 
     // L2 on foot: Use Turbo Stimulant (600 HP)
@@ -374,20 +542,90 @@ export async function setup(ctx) {
       emitChanged("gamepad:l2:turbo-stimulant", true);
     }
 
-    // D-Pad Left / Right: Cycle navigation targets backward / forward
-    if (dpadLeft.pressed) {
-      navigationPrevPressed = true;
-      emitChanged("gamepad:dpad-left:nav-prev", true);
-    }
-    if (dpadRight.pressed) {
-      navigationNextPressed = true;
-      emitChanged("gamepad:dpad-right:nav-next", true);
+    // D-Pad Left: Short tap -> prev nav target (or closer nuke distance when aiming); Hold (>=380ms) -> Plant Mine!
+    if (menusOpen) {
+      dpadLeftHoldStartedAt = null;
+      dpadLeftMineTriggered = false;
+    } else if (dpadLeft.pressed) {
+      dpadLeftHoldStartedAt = now;
+      dpadLeftMineTriggered = false;
+    } else if (dpadLeft.down && dpadLeftHoldStartedAt != null && !driving) {
+      if (!dpadLeftMineTriggered && (now - dpadLeftHoldStartedAt) >= GAMEPAD_SPECIAL_HOLD_MS) {
+        dpadLeftMineTriggered = true;
+        minePressed = true;
+        pulseGamepadConfirm({ duration: 120, weak: 0.78, strong: 0.95 });
+        emitChanged("gamepad:dpad-left:mine", true);
+      }
+    } else if (dpadLeft.released) {
+      const wasShortTap = dpadLeftHoldStartedAt != null && !dpadLeftMineTriggered;
+      dpadLeftHoldStartedAt = null;
+      dpadLeftMineTriggered = false;
+      if (wasShortTap) {
+        if (aimingNuke) {
+          nukeCycleDelta = -1;
+          pulseGamepadConfirm({ duration: 65, weak: 0.5, strong: 0.55 });
+          emitChanged("gamepad:dpad-left:nuke-distance-prev", true);
+        } else {
+          navigationPrevPressed = true;
+          emitChanged("gamepad:dpad-left:nav-prev", true);
+        }
+      }
     }
 
-    // D-Pad Down: Toggle active navigation route guidance
-    if (dpadDown.pressed) {
-      navigationTogglePressed = true;
-      emitChanged("gamepad:dpad-down:nav-toggle", true);
+    // D-Pad Right: Short tap -> next nav target (or farther nuke distance when aiming); Hold (>=380ms) -> Aim/Launch Mini-Nuke!
+    if (menusOpen) {
+      dpadRightHoldStartedAt = null;
+      dpadRightNukeTriggered = false;
+    } else if (dpadRight.pressed) {
+      dpadRightHoldStartedAt = now;
+      dpadRightNukeTriggered = false;
+    } else if (dpadRight.down && dpadRightHoldStartedAt != null && !driving) {
+      if (!dpadRightNukeTriggered && (now - dpadRightHoldStartedAt) >= GAMEPAD_SPECIAL_HOLD_MS) {
+        dpadRightNukeTriggered = true;
+        nukePressed = true;
+        pulseGamepadConfirm({ duration: 135, weak: 0.85, strong: 1.0 });
+        emitChanged("gamepad:dpad-right:nuke", true);
+      }
+    } else if (dpadRight.released) {
+      const wasShortTap = dpadRightHoldStartedAt != null && !dpadRightNukeTriggered;
+      dpadRightHoldStartedAt = null;
+      dpadRightNukeTriggered = false;
+      if (wasShortTap) {
+        if (aimingNuke) {
+          nukeCycleDelta = 1;
+          pulseGamepadConfirm({ duration: 65, weak: 0.5, strong: 0.55 });
+          emitChanged("gamepad:dpad-right:nuke-distance-next", true);
+        } else {
+          navigationNextPressed = true;
+          emitChanged("gamepad:dpad-right:nav-next", true);
+        }
+      }
+    }
+
+    // D-Pad Down: Short tap toggles active navigation route; Hold (~420ms) opens Squad & Inventory menu.
+    if (menusOpen) {
+      dpadDownHoldStartedAt = null;
+      dpadDownSquadTriggered = false;
+    } else if (dpadDown.pressed) {
+      dpadDownHoldStartedAt = now;
+      dpadDownSquadTriggered = false;
+    } else if (dpadDown.down && dpadDownHoldStartedAt != null) {
+      if (!dpadDownSquadTriggered && (now - dpadDownHoldStartedAt) >= GAMEPAD_SQUAD_HOLD_MS) {
+        dpadDownSquadTriggered = true;
+        pulseGamepadConfirm({ duration: 115, weak: 0.72, strong: 0.9 });
+        if (typeof input.triggerVirtualAction === "function") {
+          input.triggerVirtualAction("squad-menu");
+        }
+        emitChanged("gamepad:dpad-down:squad-menu", true);
+      }
+    } else if (dpadDown.released) {
+      const wasShortTap = dpadDownHoldStartedAt != null && !dpadDownSquadTriggered;
+      dpadDownHoldStartedAt = null;
+      dpadDownSquadTriggered = false;
+      if (wasShortTap) {
+        navigationTogglePressed = true;
+        emitChanged("gamepad:dpad-down:nav-toggle", true);
+      }
     }
 
     // R3 (Right Stick Click): Parachute status in air, or auto-face navigation target on ground
@@ -485,6 +723,14 @@ export async function setup(ctx) {
       parachutePressed: Boolean(sampled.parachutePressed || parachutePressed),
       posePressed: Boolean(sampled.posePressed || posePressed),
       jumpPressed: Boolean(sampled.jumpPressed || jumpPressed),
+      minePressed: Boolean(sampled.minePressed || minePressed),
+      nukePressed: Boolean(sampled.nukePressed || nukePressed),
+      nukeCycleDelta: Number(sampled.nukeCycleDelta) || nukeCycleDelta,
+      nukeCancelPressed: Boolean(sampled.nukeCancelPressed || nukeCancelPressed),
+      electroModePressed: Boolean(sampled.electroModePressed || electroModePressed),
+      electroJumpPressed: Boolean(sampled.electroJumpPressed || electroJumpPressed),
+      electroJumpHeld: Boolean(sampled.electroJumpHeld || electroJumpHeld),
+      electroJumpReleased: Boolean(sampled.electroJumpReleased || electroJumpReleased),
       navigationNextPressed: Boolean(sampled.navigationNextPressed || navigationNextPressed),
       navigationPrevPressed: Boolean(sampled.navigationPrevPressed || navigationPrevPressed),
       navigationTogglePressed: Boolean(sampled.navigationTogglePressed || navigationTogglePressed),
@@ -501,6 +747,13 @@ export async function setup(ctx) {
     parachutePressed = false;
     posePressed = false;
     jumpPressed = false;
+    minePressed = false;
+    nukePressed = false;
+    nukeCycleDelta = 0;
+    nukeCancelPressed = false;
+    electroModePressed = false;
+    electroJumpPressed = false;
+    electroJumpReleased = false;
     navigationNextPressed = false;
     navigationPrevPressed = false;
     navigationTogglePressed = false;
@@ -513,6 +766,7 @@ export async function setup(ctx) {
     const self = snapshot?.entities?.find((entity) => entity.id === pid);
     latestSelf = self ?? null;
     latestParachute = self?.parachute ?? null;
+    latestSpecialOps = snapshot?.specialOps ?? null;
     const selfDriving = (snapshot?.vehicles ?? []).some(
       (vehicle) => vehicle?.driverId === pid,
     );
@@ -532,6 +786,7 @@ export async function setup(ctx) {
     driving = false;
     latestSelf = null;
     latestParachute = null;
+    latestSpecialOps = null;
     reset("network-disconnected");
   });
 

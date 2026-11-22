@@ -33,6 +33,15 @@ function neutralizeGameplay(sample = {}) {
     interactPressed: false,
     parachutePressed: false,
     posePressed: false,
+    crouchPressed: false,
+    minePressed: false,
+    nukePressed: false,
+    nukeCycleDelta: 0,
+    nukeCancelPressed: false,
+    electroModePressed: false,
+    electroJumpPressed: false,
+    electroJumpHeld: false,
+    electroJumpReleased: false,
     jumpPressed: false,
     navigationNextPressed: false,
     navigationTogglePressed: false,
@@ -78,14 +87,18 @@ function createMobileButtons() {
   map.type = "button";
   map.textContent = "Карта";
   map.dataset.accessibleMenu = "map";
-  row.append(menu, map);
+  const squad = document.createElement("button");
+  squad.type = "button";
+  squad.textContent = "Отряд и инвентарь";
+  squad.dataset.accessibleMenu = "squad";
+  row.append(menu, map, squad);
   controls.prepend(row);
 
   const legacyNext = controls.querySelector('[data-navigation-action="next"]');
   const legacyToggle = controls.querySelector('[data-navigation-action="toggle"]');
   if (legacyNext) legacyNext.hidden = true;
   if (legacyToggle) legacyToggle.hidden = true;
-  return { menu, map };
+  return { menu, map, squad };
 }
 
 export async function setup(ctx) {
@@ -105,6 +118,12 @@ export async function setup(ctx) {
   let pendingNavigation = null;
   let pendingRoomRule = null;
   let pendingShopBuy = null;
+  let pendingSquadOrder = null;
+  let pendingInventoryAction = null;
+  let pendingSpecialAction = null;
+  const parcelItems = new Map(); // itemId -> quantity
+  const parcelRecipients = new Set(); // squadmate entityId
+  let suppressDownUntilRelease = false;
   let gamepadFrame = 0;
   let previousPadButtons = new Map();
   let twoFingerTimer = null;
@@ -249,6 +268,9 @@ export async function setup(ctx) {
     const isAi = (enemyAi?.mode ?? enemyAi?.enemyAiMode) === "ai";
     const items = [
       { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
+      ...(network.mode === "battle-royale"
+        ? [{ label: "Отряд и инвентарь", action: () => show(squadHubScreen(), { push: true }) }]
+        : []),
       {
         label: `Режим ботов: ${isAi ? "Боты с ИИ (враги и напарники)" : "Обычные боты"}`,
         action: () => {
@@ -259,13 +281,26 @@ export async function setup(ctx) {
             ? "Включён режим: боты с ИИ (враги и напарники)."
             : "Включён режим: обычные боты.");
           screen = mainScreen();
-          index = 2;
+          index = network.mode === "battle-royale" ? 3 : 2;
           render();
         },
       },
     ];
     if (isRoomHost()) {
       items.push({ label: "Настройки комнаты", action: () => show(roomSettingsScreen(), { push: true }) });
+    }
+    const self = latestSnapshot?.entities?.find((entity) => entity.id === network.playerId) ?? null;
+    const canRestartBr = network.mode === "battle-royale"
+      && !network.tutorial
+      && Boolean(self && (!self.alive || latestSnapshot?.spectator?.active || latestSnapshot?.match?.ended));
+    if (canRestartBr) {
+      items.unshift({
+        label: "Начать новый матч",
+        action: () => {
+          closeMenu({ announceClose: false });
+          ctx.events.emit("match:restart-requested", { mode: "battle-royale" });
+        },
+      });
     }
     items.unshift({ label: "Продолжить игру", action: () => closeMenu() });
     return {
@@ -410,6 +445,10 @@ export async function setup(ctx) {
     const marksmanCost = Number(prices.marksman) || 700;
     const sniperCost = Number(prices.sniper) || 1100;
     const juggernautDropCost = Number(prices.juggernautDrop) || 2200;
+    const minesCost = Number(prices.mines) || 450;
+    const miniNukeCost = Number(prices.miniNuke) || 2500;
+    const electroDropCost = Number(prices.electroDrop) || 3000;
+    const specialOps = latestSnapshot?.specialOps ?? {};
     const marksmanOwned = Boolean(shopState.marksmanOwned ?? self?.weapons?.includes?.("marksman"));
     const sniperOwned = Boolean(shopState.sniperOwned ?? self?.weapons?.includes?.("sniper"));
     const deadMates = Array.isArray(shopState.deadTeammates) ? shopState.deadTeammates : [];
@@ -434,8 +473,20 @@ export async function setup(ctx) {
       });
     }
     items.push({
+      label: `Вызвать сброс «Электрический Лукашенко» (800 HP, 800 брони, электро-автомат, мини-ядерка) — ${electroDropCost} долларов`,
+      action: () => queueBuy("electro-drop"),
+    });
+    items.push({
       label: `Вызвать сброс Джаггернаута (600 брони, 700 здоровья, гора стимуляторов — стягивает всех врагов) — ${juggernautDropCost} долларов`,
       action: () => queueBuy("juggernaut-drop"),
+    });
+    items.push({
+      label: `Мини-ядерка (+1000 ударов по выбранной точке, в запасе ${specialOps.miniNukes ?? 0}) — ${miniNukeCost} долларов`,
+      action: () => queueBuy("mini-nuke"),
+    });
+    items.push({
+      label: `Мины (+2 штуки, в запасе ${specialOps.mines ?? 0} из ${specialOps.maxMines ?? 6}) — ${minesCost} долларов`,
+      action: () => queueBuy("mines"),
     });
     items.push({
       label: `Усиленный стимулятор (подъём за 1 секунду) — ${fastCost} долларов (в запасе ${self?.fastStimulants ?? 0})`,
@@ -488,6 +539,538 @@ export async function setup(ctx) {
     };
   }
 
+  function squadMenuData() {
+    const data = latestSnapshot?.squadMenu ?? {};
+    const inventory = data.inventory ?? { categories: [], items: [] };
+    const squadmates = Array.isArray(data.squadmates) ? data.squadmates : [];
+    return {
+      categories: Array.isArray(inventory.categories) ? inventory.categories : [],
+      items: Array.isArray(inventory.items) ? inventory.items : [],
+      squadmates,
+    };
+  }
+
+  function queueSquadOrder(order, targetIds = null) {
+    pendingSquadOrder = {
+      order,
+      ...(Array.isArray(targetIds) && targetIds.length ? { targetIds } : {}),
+    };
+    ctx.events.emit("input:changed", { reason: `squad:order:${order}` });
+  }
+
+  function queueInventoryAction(action) {
+    pendingInventoryAction = action;
+    ctx.events.emit("input:changed", { reason: `inventory:${action?.type ?? "action"}` });
+  }
+
+  function queueSpecialAction(action) {
+    pendingSpecialAction = action;
+    ctx.events.emit("input:changed", { reason: `special:${action?.type ?? "action"}` });
+  }
+
+  function arsenalScreen() {
+    const ops = latestSnapshot?.specialOps ?? {};
+    const mines = Number(ops.mines) || 0;
+    const maxMines = Number(ops.maxMines) || 6;
+    const nukes = Number(ops.miniNukes) || 0;
+    const hasElectro = Boolean(ops.hasElectroRifle);
+    const modeLabel = ops.electroMode?.label || "Шок (ломает броню и подбрасывает)";
+    const nukeDistLabel = ops.nukeDistance?.label || "Средне (52 м)";
+    const items = [
+      {
+        label: `Поставить мину под ноги (осталось ${mines} из ${maxMines})`,
+        action: () => {
+          queueSpecialAction({ type: "plant-mine" });
+          closeMenu({ announceClose: false });
+        },
+      },
+      {
+        label: ops.nukeAiming
+          ? `Запустить мини-ядерку сейчас! Дистанция: ${nukeDistLabel}`
+          : `Мини-ядерка: навести удар (осталось ${nukes})`,
+        action: () => {
+          queueSpecialAction({ type: ops.nukeAiming ? "nuke-launch" : "nuke-aim" });
+          closeMenu({ announceClose: false });
+        },
+      },
+      {
+        label: "Запустить мини-ядерку: Под себя (4 м — опасно!)",
+        action: () => {
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 4 });
+          closeMenu({ announceClose: false });
+        },
+      },
+      {
+        label: "Запустить мини-ядерку: Близко (24 м вперёд)",
+        action: () => {
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 24 });
+          closeMenu({ announceClose: false });
+        },
+      },
+      {
+        label: "Запустить мини-ядерку: Средне (52 м вперёд)",
+        action: () => {
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 52 });
+          closeMenu({ announceClose: false });
+        },
+      },
+      {
+        label: "Запустить мини-ядерку: Далеко (86 м вперёд)",
+        action: () => {
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 86 });
+          closeMenu({ announceClose: false });
+        },
+      },
+      ...(hasElectro
+        ? [{
+            label: `Сменить режим электро-автомата (сейчас: ${modeLabel})`,
+            action: () => {
+              queueSpecialAction({ type: "cycle-electro-mode" });
+              closeMenu({ announceClose: false });
+            },
+          }]
+        : [{
+            label: "Электро-автомат (нет — найди в бункере Резиденции или закажи в магазине)",
+            action: () => announce("Электро-автомата пока нет. Его можно забрать в бункере Резиденции или заказать сброс груза в магазине."),
+          }]),
+      { label: "Назад", action: goBack },
+    ];
+    return {
+      id: "special-arsenal",
+      title: `Спецарсенал. Мины: ${mines}, мини-ядерки: ${nukes}`,
+      items,
+    };
+  }
+
+  function bunkerPuzzleScreen(override = null) {
+    const puzzle = override ?? latestSnapshot?.specialOps?.bunkerPuzzle ?? null;
+    const stage = Number(puzzle?.stage) || 1;
+    const totalStages = Number(puzzle?.totalStages) || 3;
+    const hint = puzzle?.hint || "Подбери пару контактов по подсказке";
+    const switches = Array.isArray(puzzle?.switches) && puzzle.switches.length
+      ? puzzle.switches
+      : [
+          { id: 1, label: "Контакт 1 (север, низкий гул)" },
+          { id: 2, label: "Контакт 2 (восток, искра)" },
+          { id: 3, label: "Контакт 3 (юг, высокий писк)" },
+          { id: 4, label: "Контакт 4 (запад, двойной щелчок)" },
+        ];
+    const items = switches.map((sw) => ({
+      label: `Замкнуть ${sw.label}`,
+      action: () => {
+        queueSpecialAction({ type: "bunker-puzzle-step", switchId: sw.id });
+      },
+    }));
+    items.push({ label: "Повторить подсказку", action: () => announce(`Этап ${stage} из ${totalStages}. ${hint}`) });
+    items.push({ label: "Отойти от замка", action: () => closeMenu() });
+    return {
+      id: "bunker-puzzle",
+      title: `Адаптивный замок бункера (${stage}/${totalStages}). ${hint}`,
+      items,
+    };
+  }
+
+  function quantityPresetsFor(item) {
+    const available = Math.max(0, Math.floor(Number(item?.quantity) || 0));
+    if (available <= 0) return [];
+    const step = Math.max(1, Math.floor(Number(item?.unitStep) || 1));
+    const values = [];
+    const pushUnique = (qty, label) => {
+      const clamped = Math.max(1, Math.min(available, Math.floor(qty)));
+      if (values.some((entry) => entry.qty === clamped)) return;
+      values.push({ qty: clamped, label });
+    };
+    if (step === 1) {
+      pushUnique(1, "1 шт.");
+      if (available >= 2) pushUnique(2, "2 шт.");
+      if (available >= 3) pushUnique(3, "3 шт.");
+      if (available >= 4) pushUnique(Math.floor(available / 2), `Половину (${Math.floor(available / 2)} шт.)`);
+      if (available > 1) pushUnique(available, `Все (${available} шт.)`);
+    } else {
+      pushUnique(step, `${Math.min(available, step)} шт.`);
+      if (available > step) pushUnique(step * 2, `${Math.min(available, step * 2)} шт.`);
+      if (available >= step * 2) pushUnique(Math.floor(available / 2), `Половину (${Math.floor(available / 2)} шт.)`);
+      if (available > step) pushUnique(available, `Все (${available} шт.)`);
+    }
+    return values;
+  }
+
+  function squadHubScreen() {
+    const { items, squadmates } = squadMenuData();
+    const aliveMates = squadmates.filter((m) => m.alive && !m.downed);
+    const parcelCount = [...parcelItems.values()].reduce((acc, qty) => acc + qty, 0);
+    const ops = latestSnapshot?.specialOps ?? {};
+    return {
+      id: "squad-hub",
+      title: `Отряд и инвентарь. Напарников в строю: ${aliveMates.length}`,
+      items: [
+        {
+          label: `Команды напарникам (${aliveMates.length} в строю)`,
+          action: () => show(squadOrderScopeScreen(), { push: true }),
+        },
+        {
+          label: `Инвентарь по категориям (${items.length} поз., без денег)`,
+          action: () => show(inventoryCategoriesScreen(), { push: true }),
+        },
+        {
+          label: `Спецарсенал: мины (${ops.mines ?? 0}), мини-ядерки (${ops.miniNukes ?? 0}), электро-автомат`,
+          action: () => show(arsenalScreen(), { push: true }),
+        },
+        {
+          label: parcelCount > 0
+            ? `Собрать посылку нескольким напарникам (в посылке: ${parcelCount} шт.)`
+            : "Собрать посылку нескольким напарникам",
+          action: () => show(batchTransferScreen(), { push: true }),
+        },
+        {
+          label: "Состояние напарников",
+          action: () => show(squadStatusScreen(), { push: true }),
+        },
+        { label: "Вернуться в игру", action: () => closeMenu() },
+      ],
+    };
+  }
+
+  function squadOrderScopeScreen() {
+    const { squadmates } = squadMenuData();
+    const aliveMates = squadmates.filter((m) => m.alive && !m.downed);
+    const items = [];
+    if (!aliveMates.length) {
+      items.push({
+        label: "Нет живых напарников для выполнения команд",
+        action: () => announce("Сейчас нет живых напарников."),
+      });
+    } else {
+      items.push({
+        label: `Всем напарникам (${aliveMates.length})`,
+        action: () => show(squadOrderActionScreen(null, "Всем напарникам"), { push: true }),
+      });
+      for (const mate of aliveMates) {
+        const distText = mate.distanceMeters != null ? `, ${Math.round(mate.distanceMeters)} м` : "";
+        const coverText = mate.inCover && mate.coverLabel ? `, ${mate.coverLabel}` : "";
+        items.push({
+          label: `${mate.name}${distText}${coverText}`,
+          action: () => show(squadOrderActionScreen([mate.id], mate.name), { push: true }),
+        });
+      }
+    }
+    items.push({ label: "Назад", action: goBack });
+    return {
+      id: "squad-order-scope",
+      title: "Кому отдать команду",
+      items,
+    };
+  }
+
+  function squadOrderActionScreen(targetIds, scopeLabel) {
+    const send = (order) => {
+      queueSquadOrder(order, targetIds);
+      closeMenu({ announceClose: false });
+    };
+    return {
+      id: "squad-order-actions",
+      title: `Команда: ${scopeLabel}`,
+      items: [
+        { label: "Идти туда (вперёд по направлению взгляда)", action: () => send("move") },
+        { label: "Ко мне (следовать за мной)", action: () => send("follow") },
+        { label: "В укрытие (присесть за машиной или стеной)", action: () => send("cover") },
+        { label: "Атаковать свободно", action: () => send("attack") },
+        { label: "Держать позицию", action: () => send("hold") },
+        { label: "Назад", action: goBack },
+      ],
+    };
+  }
+
+  function squadStatusScreen() {
+    const { squadmates } = squadMenuData();
+    const items = squadmates.length
+      ? squadmates.map((mate) => {
+          const stance = mate.inCover && mate.coverLabel
+            ? `присел ${mate.coverLabel}`
+            : (mate.crouching ? "присел" : "стоит");
+          const order = mate.orderLabel ? `, команда: ${mate.orderLabel}` : "";
+          const dist = mate.distanceMeters != null ? `, ${Math.round(mate.distanceMeters)} м` : "";
+          const stateText = mate.downed ? "в нокауте" : `здоровье ${mate.health}, броня ${mate.armor}, ${stance}`;
+          return {
+            label: `${mate.name}: ${stateText}${dist}${order}`,
+            action: () => announce(`${mate.name}: ${stateText}${dist}${order}`),
+          };
+        })
+      : [{ label: "Живых напарников сейчас нет", action: () => announce("Живых напарников сейчас нет.") }];
+    items.push({ label: "Назад", action: goBack });
+    return {
+      id: "squad-status",
+      title: "Состояние отряда",
+      items,
+    };
+  }
+
+  function inventoryCategoriesScreen() {
+    const { categories } = squadMenuData();
+    const items = [];
+    if (!categories.length) {
+      items.push({
+        label: "Инвентарь пуст (деньги не выбрасываются и не передаются)",
+        action: () => announce("В инвентаре нет предметов для сброса или передачи."),
+      });
+    } else {
+      for (const category of categories) {
+        const totalQty = category.items.reduce((acc, item) => acc + (Number(item.quantity) || 0), 0);
+        items.push({
+          label: `${category.label} (${category.items.length} поз., всего ${totalQty})`,
+          action: () => show(inventoryCategoryItemsScreen(category.id, category.label), { push: true }),
+        });
+      }
+    }
+    items.push({
+      label: "Собрать посылку нескольким напарникам",
+      action: () => show(batchTransferScreen(), { push: true }),
+    });
+    items.push({ label: "Назад", action: goBack });
+    return {
+      id: "inventory-categories",
+      title: "Инвентарь по категориям (без денег)",
+      items,
+    };
+  }
+
+  function inventoryCategoryItemsScreen(categoryId, categoryLabel) {
+    const { categories } = squadMenuData();
+    const category = categories.find((entry) => entry.id === categoryId);
+    const list = category?.items ?? [];
+    const items = list.length
+      ? list.map((item) => ({
+          label: `${item.label}: ${item.quantity} шт.`,
+          action: () => show(inventoryItemActionsScreen(item.id), { push: true }),
+        }))
+      : [{ label: "В этой категории пусто", action: () => announce("В этой категории нет предметов.") }];
+    items.push({ label: "Назад", action: goBack });
+    return {
+      id: `inventory-cat-${categoryId}`,
+      categoryId,
+      categoryLabel,
+      title: `Категория: ${categoryLabel}`,
+      items,
+    };
+  }
+
+  function inventoryItemActionsScreen(itemId) {
+    const { items: invItems, squadmates } = squadMenuData();
+    const item = invItems.find((entry) => entry.id === itemId);
+    const aliveMates = squadmates.filter((m) => m.alive && !m.downed);
+    if (!item || item.quantity <= 0) {
+      return {
+        id: "inventory-item-empty",
+        title: "Предмет закончился",
+        items: [{ label: "Назад", action: goBack }],
+      };
+    }
+    const items = [
+      {
+        label: "Выбросить на землю (выбрать количество)",
+        action: () => show(inventoryQuantityScreen(item, "drop"), { push: true }),
+      },
+      ...(aliveMates.length
+        ? [{
+            label: "Передать напарнику (выбрать количество)",
+            action: () => show(inventoryQuantityScreen(item, "transfer"), { push: true }),
+          }]
+        : [{
+            label: "Передать напарнику (нет живых напарников)",
+            action: () => announce("Нет живых напарников для передачи."),
+          }]),
+      {
+        label: "Добавить в общую посылку (для нескольких напарников)",
+        action: () => {
+          const step = Math.max(1, Math.floor(Number(item.unitStep) || 1));
+          const current = parcelItems.get(item.id) ?? 0;
+          const next = Math.min(item.quantity, current + step);
+          parcelItems.set(item.id, next);
+          announce(`В посылке: ${item.label} — ${next} шт.`);
+          show(batchTransferScreen(), { push: true });
+        },
+      },
+      { label: "Назад", action: goBack },
+    ];
+    return {
+      id: "inventory-item-actions",
+      itemId: item.id,
+      title: `${item.label} (в наличии ${item.quantity} шт.)`,
+      items,
+    };
+  }
+
+  function inventoryQuantityScreen(item, mode) {
+    const presets = quantityPresetsFor(item);
+    const items = presets.map((preset) => ({
+      label: mode === "drop"
+        ? `Выбросить: ${preset.label}`
+        : `Передать: ${preset.label}`,
+      action: () => {
+        if (mode === "drop") {
+          queueInventoryAction({ type: "drop", itemId: item.id, quantity: preset.qty });
+          closeMenu({ announceClose: false });
+        } else {
+          show(inventoryRecipientPickerScreen(item, preset.qty), { push: true });
+        }
+      },
+    }));
+    items.push({ label: "Назад", action: goBack });
+    return {
+      id: `inventory-qty-${mode}`,
+      title: `${mode === "drop" ? "Сколько выбросить" : "Сколько передать"}: ${item.label}`,
+      items,
+    };
+  }
+
+  function inventoryRecipientPickerScreen(item, quantity) {
+    const { squadmates } = squadMenuData();
+    const aliveMates = squadmates.filter((m) => m.alive && !m.downed);
+    const items = [];
+    if (aliveMates.length > 1) {
+      items.push({
+        label: `Разделить между всеми живыми напарниками (${aliveMates.length})`,
+        action: () => {
+          queueInventoryAction({
+            type: "transfer",
+            items: [{ itemId: item.id, quantity }],
+            recipientIds: aliveMates.map((m) => m.id),
+          });
+          closeMenu({ announceClose: false });
+        },
+      });
+    }
+    for (const mate of aliveMates) {
+      items.push({
+        label: `Передать напарнику: ${mate.name} (здоровье ${mate.health}, броня ${mate.armor})`,
+        action: () => {
+          queueInventoryAction({
+            type: "transfer",
+            items: [{ itemId: item.id, quantity }],
+            recipientIds: [mate.id],
+          });
+          closeMenu({ announceClose: false });
+        },
+      });
+    }
+    items.push({ label: "Назад", action: goBack });
+    return {
+      id: "inventory-recipient-picker",
+      title: `Кому передать: ${item.label} (${quantity} шт.)`,
+      items,
+    };
+  }
+
+  function batchTransferScreen() {
+    const { items: invItems, squadmates } = squadMenuData();
+    const aliveMates = squadmates.filter((m) => m.alive && !m.downed);
+    const invById = new Map(invItems.map((entry) => [entry.id, entry]));
+
+    // Prune stale parcel items or dead recipients
+    for (const [itemId, qty] of [...parcelItems.entries()]) {
+      const stock = invById.get(itemId);
+      if (!stock || stock.quantity <= 0) parcelItems.delete(itemId);
+      else if (qty > stock.quantity) parcelItems.set(itemId, stock.quantity);
+    }
+    const aliveIds = new Set(aliveMates.map((m) => m.id));
+    for (const id of [...parcelRecipients]) {
+      if (!aliveIds.has(id)) parcelRecipients.delete(id);
+    }
+    if (!parcelRecipients.size && aliveMates.length) {
+      for (const mate of aliveMates) parcelRecipients.add(mate.id);
+    }
+
+    const items = [];
+    const packedList = [...parcelItems.entries()]
+      .filter(([, qty]) => qty > 0)
+      .map(([itemId, quantity]) => ({ itemId, quantity, label: invById.get(itemId)?.label ?? itemId }));
+
+    if (packedList.length && parcelRecipients.size) {
+      const summary = packedList.map((entry) => `${entry.label} ×${entry.quantity}`).join(", ");
+      items.push({
+        label: `Передать посылку (${summary}) — получателей: ${parcelRecipients.size}`,
+        action: () => {
+          queueInventoryAction({
+            type: "transfer",
+            items: packedList.map(({ itemId, quantity }) => ({ itemId, quantity })),
+            recipientIds: [...parcelRecipients],
+          });
+          parcelItems.clear();
+          closeMenu({ announceClose: false });
+        },
+      });
+    }
+
+    if (aliveMates.length) {
+      items.push({
+        label: parcelRecipients.size === aliveMates.length
+          ? `Получатели: выбраны все живые (${aliveMates.length}) — снять выбор`
+          : `Выбрать всех живых напарников (${aliveMates.length})`,
+        action: () => {
+          if (parcelRecipients.size === aliveMates.length) parcelRecipients.clear();
+          else aliveMates.forEach((m) => parcelRecipients.add(m.id));
+          screen = batchTransferScreen();
+          render();
+          announce(`Выбрано получателей: ${parcelRecipients.size}.`);
+        },
+      });
+      for (const mate of aliveMates) {
+        const checked = parcelRecipients.has(mate.id);
+        items.push({
+          label: `${checked ? "[Выбран]" : "[Не выбран]"} ${mate.name} (здоровье ${mate.health}, броня ${mate.armor})`,
+          action: () => {
+            if (parcelRecipients.has(mate.id)) parcelRecipients.delete(mate.id);
+            else parcelRecipients.add(mate.id);
+            screen = batchTransferScreen();
+            render();
+            announce(`${mate.name}: ${parcelRecipients.has(mate.id) ? "выбран" : "снят"}.`);
+          },
+        });
+      }
+    } else {
+      items.push({
+        label: "Нет живых напарников для передачи посылки",
+        action: () => announce("Нет живых напарников."),
+      });
+    }
+
+    for (const invItem of invItems) {
+      const step = Math.max(1, Math.floor(Number(invItem.unitStep) || 1));
+      const inParcel = parcelItems.get(invItem.id) ?? 0;
+      items.push({
+        label: `${invItem.label}: в посылке ${inParcel} из ${invItem.quantity} (+${step}, до максимума сбросит в 0)`,
+        action: () => {
+          const next = inParcel >= invItem.quantity ? 0 : Math.min(invItem.quantity, inParcel + step);
+          if (next <= 0) parcelItems.delete(invItem.id);
+          else parcelItems.set(invItem.id, next);
+          screen = batchTransferScreen();
+          render();
+          announce(`${invItem.label}: в посылке ${next} из ${invItem.quantity}.`);
+        },
+      });
+    }
+
+    if (packedList.length) {
+      items.push({
+        label: "Очистить посылку",
+        action: () => {
+          parcelItems.clear();
+          screen = batchTransferScreen();
+          index = 0;
+          render();
+          announce("Посылка очищена.");
+        },
+      });
+    }
+    items.push({ label: "Назад", action: goBack });
+
+    return {
+      id: "batch-transfer",
+      title: `Посылка напарникам. Предметов: ${packedList.length}, получателей: ${parcelRecipients.size}`,
+      items,
+    };
+  }
+
   function openMain() {
     if (!network.connected) return;
     stack = [];
@@ -502,6 +1085,17 @@ export async function setup(ctx) {
     }
     stack = [];
     show(mapScreen());
+  }
+
+  function openSquadMenu({ fromGamepadHold = false } = {}) {
+    if (!network.connected) return;
+    if (network.mode !== "battle-royale") {
+      announce("Меню отряда и инвентаря доступно в королевской битве.");
+      return;
+    }
+    if (fromGamepadHold) suppressDownUntilRelease = true;
+    stack = [];
+    show(squadHubScreen());
   }
 
   function openShop() {
@@ -541,9 +1135,15 @@ export async function setup(ctx) {
     const navigation = pendingNavigation;
     const roomRule = pendingRoomRule;
     const shopBuy = pendingShopBuy;
+    const squadOrder = pendingSquadOrder;
+    const inventoryAction = pendingInventoryAction;
+    const specialAction = pendingSpecialAction;
     pendingNavigation = null;
     pendingRoomRule = null;
     pendingShopBuy = null;
+    pendingSquadOrder = null;
+    pendingInventoryAction = null;
+    pendingSpecialAction = null;
     return {
       ...base,
       ...(navigation ? {
@@ -552,6 +1152,9 @@ export async function setup(ctx) {
       } : {}),
       ...(roomRule ? { socialRoomRule: roomRule } : {}),
       ...(shopBuy ? { shopBuy } : {}),
+      ...(squadOrder ? { squadOrder } : {}),
+      ...(inventoryAction ? { inventoryAction } : {}),
+      ...(specialAction ? { specialAction } : {}),
     };
   };
 
@@ -572,6 +1175,12 @@ export async function setup(ctx) {
       openMap();
       return;
     }
+    if (!open && event.code === "KeyI") {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      openSquadMenu();
+      return;
+    }
     if (!open && event.code === "Enter") {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -579,7 +1188,7 @@ export async function setup(ctx) {
     }
     if (!open) return;
 
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "KeyM"].includes(event.code)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "KeyM", "KeyI"].includes(event.code)) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -588,12 +1197,12 @@ export async function setup(ctx) {
     else if (event.code === "ArrowDown") move(1);
     else if (event.code === "ArrowLeft" || event.code === "Escape") goBack();
     else if (event.code === "ArrowRight" || event.code === "Enter") activate();
-    else if (event.code === "KeyM") closeMenu();
+    else if (event.code === "KeyM" || event.code === "KeyI") closeMenu();
   }, { capture: true, passive: false });
 
   window.addEventListener("keyup", (event) => {
-    if (!open && event.code !== "KeyM" && event.code !== "Enter") return;
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "KeyM"].includes(event.code)) {
+    if (!open && event.code !== "KeyM" && event.code !== "KeyI" && event.code !== "Enter") return;
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "KeyM", "KeyI"].includes(event.code)) {
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -601,6 +1210,7 @@ export async function setup(ctx) {
 
   mobile.menu?.addEventListener("click", () => open ? closeMenu() : openMain());
   mobile.map?.addEventListener("click", openMap);
+  mobile.squad?.addEventListener("click", () => open && screen?.id === "squad-hub" ? closeMenu() : openSquadMenu());
   ui.resume.addEventListener("click", closeMenu);
 
   ctx.events.on("input:touch", ({ control, down } = {}) => {
@@ -608,13 +1218,38 @@ export async function setup(ctx) {
     if (control === "map") openMap();
     else if (control === "menu") openMain();
     else if (control === "shop") openShop();
+    else if (control === "squad-menu") openSquadMenu({ fromGamepadHold: true });
   });
   ctx.events.on("gesture:action", ({ action } = {}) => {
     if (action === "map") openMap();
     else if (action === "menu") openMain();
+    else if (action === "squad-menu") openSquadMenu();
   });
   ctx.events.on("game:event", (packet) => {
     const p = packet?.payload ?? {};
+    if (packet?.event === "bunker:puzzle-opened" && p.entityId === network.playerId) {
+      stack = [];
+      show(bunkerPuzzleScreen({
+        stage: p.stage,
+        totalStages: p.totalStages,
+        hint: p.hint,
+      }));
+      return;
+    }
+    if (packet?.event === "bunker:puzzle-step" && p.entityId === network.playerId) {
+      if (p.text) announce(p.text);
+      if (p.solved) {
+        if (open && screen?.id === "bunker-puzzle") closeMenu({ announceClose: false });
+      } else if (open && screen?.id === "bunker-puzzle") {
+        screen = bunkerPuzzleScreen({
+          stage: p.currentStage,
+          totalStages: p.totalStages,
+          hint: p.nextHint || latestSnapshot?.specialOps?.bunkerPuzzle?.hint || "",
+        });
+        ui.title.textContent = screen.title;
+      }
+      return;
+    }
     if (packet?.event === "shop:open-requested" && p.entityId === network.playerId) {
       openShop();
       return;
@@ -711,6 +1346,9 @@ export async function setup(ctx) {
     const leftPressed = padEdge(gamepad, 14);
     const rightPressed = padEdge(gamepad, 15);
 
+    const downIsHeld = padButton(gamepad, 13);
+    if (!downIsHeld) suppressDownUntilRelease = false;
+
     if (!open) {
       if (optionsPressed) openMain();
       else if (viewPressed) openMap();
@@ -721,7 +1359,7 @@ export async function setup(ctx) {
     if (optionsPressed || bPressed) goBack();
     else if (viewPressed && screen?.id === "map") closeMenu();
     else if (upPressed) move(-1);
-    else if (downPressed) move(1);
+    else if (downPressed && !suppressDownUntilRelease) move(1);
     else if (leftPressed) goBack();
     else if (rightPressed || aPressed) activate();
   }
@@ -800,6 +1438,11 @@ export async function setup(ctx) {
     pendingNavigation = null;
     pendingRoomRule = null;
     pendingShopBuy = null;
+    pendingSquadOrder = null;
+    pendingInventoryAction = null;
+    pendingSpecialAction = null;
+    parcelItems.clear();
+    parcelRecipients.clear();
     cancelTwoFingerHold();
     closeMenu({ announceClose: false });
   });
@@ -808,6 +1451,7 @@ export async function setup(ctx) {
     openMain,
     openMap,
     openShop,
+    openSquadMenu,
     close: closeMenu,
     get open() { return open; },
     get screen() { return screen?.id ?? null; },

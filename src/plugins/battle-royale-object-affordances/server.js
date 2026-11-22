@@ -189,6 +189,7 @@ export async function setup(ctx) {
         entityId,
         crateId: crate.id,
         loot: crate.loot,
+        dropItem: crate.dropItem ?? null,
         x: crate.x,
         y: crate.y,
         z: crate.z,

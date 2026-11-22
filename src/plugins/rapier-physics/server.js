@@ -59,6 +59,16 @@ async function createRapierPhysics() {
   const dynamicBodies = new Map();
   const colliderToEntity = new Map();
   const colliderMetadata = new Map();
+  const staticColliders = new Map();
+  let spatialIndexDirty = true;
+  let groundSupports = [];
+  let elevatedSupports = [];
+  let boundaryColliders = [];
+  let maxSupportTopY = 0;
+  let maxStaticNonBoundaryTopY = 0;
+  let staticWorldRevision = 0;
+  let maxDynamicTopY = -Infinity;
+  let dynamicMaxDirty = true;
   let batchDepth = 0;
   let queryDirty = false;
   let dynamicsSteps = 0;
@@ -71,6 +81,113 @@ async function createRapierPhysics() {
   let lastStepWallMs = null;
   let maxStepWallMs = 0;
   const stepWallSamples = [];
+
+  function ensureStaticSpatialIndex() {
+    if (!spatialIndexDirty) return;
+    groundSupports = [];
+    elevatedSupports = [];
+    boundaryColliders = [];
+    maxSupportTopY = 0;
+    maxStaticNonBoundaryTopY = 0;
+    for (const entry of staticColliders.values()) {
+      if (!entry.enabled) continue;
+      if (entry.isBoundary) {
+        boundaryColliders.push(entry);
+      } else if (entry.topY > maxStaticNonBoundaryTopY) {
+        maxStaticNonBoundaryTopY = entry.topY;
+      }
+      if (entry.isSupport) {
+        if (entry.topY > maxSupportTopY) maxSupportTopY = entry.topY;
+        if (entry.isGround) groundSupports.push(entry);
+        else elevatedSupports.push(entry);
+      }
+    }
+    spatialIndexDirty = false;
+  }
+
+  function registerStaticCollider(collider, spec, bounds) {
+    const kind = String(spec?.kind ?? "");
+    const isGround = kind === "ground";
+    const isSupport = CHARACTER_SUPPORT_KINDS.has(kind);
+    const isBoundary = kind === "world-boundary";
+    staticColliders.set(collider.handle, {
+      handle: collider.handle,
+      kind,
+      enabled: true,
+      isGround,
+      isSupport,
+      isBoundary,
+      minX: bounds.minX,
+      maxX: bounds.maxX,
+      minZ: bounds.minZ,
+      maxZ: bounds.maxZ,
+      bottomY: bounds.bottomY,
+      topY: bounds.topY,
+    });
+    spatialIndexDirty = true;
+    staticWorldRevision += 1;
+  }
+
+  function fastVerticalSupportHit(ox, oy, oz, maxDistance) {
+    ensureStaticSpatialIndex();
+    if (groundSupports.length !== 1) return undefined;
+    const ground = groundSupports[0];
+    if (oy < ground.topY) return undefined;
+    for (let i = 0; i < elevatedSupports.length; i += 1) {
+      const sup = elevatedSupports[i];
+      if (ox >= sup.minX - 0.05 && ox <= sup.maxX + 0.05
+        && oz >= sup.minZ - 0.05 && oz <= sup.maxZ + 0.05) {
+        return undefined;
+      }
+    }
+    if (ox < ground.minX || ox > ground.maxX || oz < ground.minZ || oz > ground.maxZ) {
+      return null;
+    }
+    const distance = oy - ground.topY;
+    if (distance > maxDistance) return null;
+    return {
+      entityId: null,
+      distance,
+      colliderHandle: ground.handle,
+      worldObject: colliderMetadata.get(ground.handle) ?? null,
+    };
+  }
+
+  function ensureMaxDynamicTopY() {
+    if (!dynamicMaxDirty) return maxDynamicTopY;
+    let maxY = -Infinity;
+    for (const entry of dynamicBodies.values()) {
+      const sleeping = entry.body.isSleeping();
+      if (!sleeping || !entry.wasSleeping) {
+        entry.cachedTopY = entry.body.translation().y + entry.halfY + 1.5;
+        entry.wasSleeping = sleeping;
+      }
+      if (entry.cachedTopY > maxY) maxY = entry.cachedTopY;
+    }
+    maxDynamicTopY = maxY;
+    dynamicMaxDirty = false;
+    return maxDynamicTopY;
+  }
+
+  function isOpenSky(x, y, z, horizontalMargin = 4) {
+    ensureStaticSpatialIndex();
+    const minY = Number(y) || 0;
+    if (minY <= maxStaticNonBoundaryTopY + 1) return false;
+    // If any unmanaged dynamic body (e.g. ragdoll) exists in the Rapier world, fall back.
+    if (world.bodies.len() !== dynamicBodies.size) return false;
+    if (dynamicBodies.size > 0 && minY <= ensureMaxDynamicTopY() + 1) return false;
+    const px = Number(x) || 0;
+    const pz = Number(z) || 0;
+    const pad = Math.max(0, Number(horizontalMargin) || 0) + 1;
+    for (let i = 0; i < boundaryColliders.length; i += 1) {
+      const b = boundaryColliders[i];
+      if (px >= b.minX - pad && px <= b.maxX + pad
+        && pz >= b.minZ - pad && pz <= b.maxZ + pad) {
+        return false;
+      }
+    }
+    return true;
+  }
 
   function wallNow() {
     return typeof performance !== "undefined" && typeof performance.now === "function"
@@ -141,9 +258,8 @@ async function createRapierPhysics() {
   function classifyContactForce(record) {
     const kind1 = record.collider1?.worldObject?.kind ?? null;
     const kind2 = record.collider2?.worldObject?.kind ?? null;
-    const supportKinds = new Set(["ground", "building-floor", "building-stair"]);
-    const supportPair = supportKinds.has(kind1) || supportKinds.has(kind2);
-    const dynamicInfo = supportKinds.has(kind1) ? record.collider2 : record.collider1;
+    const supportPair = CHARACTER_SUPPORT_KINDS.has(kind1) || CHARACTER_SUPPORT_KINDS.has(kind2);
+    const dynamicInfo = CHARACTER_SUPPORT_KINDS.has(kind1) ? record.collider2 : record.collider1;
     const mass = supportPair ? dynamicMassFor(dynamicInfo) : null;
     const weight = mass ? mass * 9.81 : null;
     const supportLoadRatio = weight ? record.totalForceMagnitude / weight : null;
@@ -258,6 +374,17 @@ async function createRapierPhysics() {
         .setTranslation(x, y + height / 2, z),
     );
     rememberCollider(collider, { ...spec, height });
+    const absHx = Math.abs(Number(hx) || 0);
+    const absHz = Math.abs(Number(hz) || 0);
+    const absH = Math.abs(Number(height) || 0);
+    registerStaticCollider(collider, spec, {
+      minX: (Number(x) || 0) - absHx,
+      maxX: (Number(x) || 0) + absHx,
+      minZ: (Number(z) || 0) - absHz,
+      maxZ: (Number(z) || 0) + absHz,
+      bottomY: Number(y) || 0,
+      topY: (Number(y) || 0) + absH,
+    });
     syncQueries();
     return collider;
   }
@@ -269,6 +396,17 @@ async function createRapierPhysics() {
         .setTranslation(x, y - thickness / 2, z),
     );
     rememberCollider(collider, { ...spec, thickness });
+    const absHx = Math.abs(Number(hx) || 0);
+    const absHz = Math.abs(Number(hz) || 0);
+    const absT = Math.abs(Number(thickness) || 0);
+    registerStaticCollider(collider, spec, {
+      minX: (Number(x) || 0) - absHx,
+      maxX: (Number(x) || 0) + absHx,
+      minZ: (Number(z) || 0) - absHz,
+      maxZ: (Number(z) || 0) + absHz,
+      bottomY: (Number(y) || 0) - absT,
+      topY: Number(y) || 0,
+    });
     syncQueries();
     return collider;
   }
@@ -281,6 +419,15 @@ async function createRapierPhysics() {
     const horizontalRun = Math.max(0.01, Math.abs(Number(run) || 0));
     const verticalRise = Math.max(0, Number(rise) || 0);
     const rampWidth = Math.max(0.02, Math.abs(Number(width) || 0));
+    const rampHalfSpan = Math.max(horizontalRun, rampWidth) * 0.5 + Math.abs(Number(thickness) || 0.2) + 1.0;
+    const rampBounds = {
+      minX: (Number(x) || 0) - rampHalfSpan,
+      maxX: (Number(x) || 0) + rampHalfSpan,
+      minZ: (Number(z) || 0) - rampHalfSpan,
+      maxZ: (Number(z) || 0) + rampHalfSpan,
+      bottomY: (Number(y) || 0) - Math.abs(Number(thickness) || 0.2) - 0.5,
+      topY: (Number(y) || 0) + verticalRise + Math.abs(Number(thickness) || 0.2) + 0.5,
+    };
     if (spec.kind === "building-stair") {
       const shape = RAPIER.ColliderDesc.convexHull(stairHullPoints(
         horizontalRun, verticalRise, rampWidth, thickness, risesToward,
@@ -290,6 +437,7 @@ async function createRapierPhysics() {
       rememberCollider(collider, {
         ...spec, run: horizontalRun, rise: verticalRise, width: rampWidth, thickness,
       });
+      registerStaticCollider(collider, spec, rampBounds);
       syncQueries();
       return collider;
     }
@@ -315,13 +463,21 @@ async function createRapierPhysics() {
       thickness,
       slopeAngle: angle,
     });
+    registerStaticCollider(collider, spec, rampBounds);
     syncQueries();
     return collider;
   }
 
   function setWallEnabled(collider, enabled) {
     if (!collider) return false;
-    collider.setEnabled(Boolean(enabled));
+    const nextEnabled = Boolean(enabled);
+    collider.setEnabled(nextEnabled);
+    const entry = staticColliders.get(collider.handle);
+    if (entry && entry.enabled !== nextEnabled) {
+      entry.enabled = nextEnabled;
+      spatialIndexDirty = true;
+      staticWorldRevision += 1;
+    }
     syncQueries();
     return true;
   }
@@ -329,6 +485,10 @@ async function createRapierPhysics() {
   function removeWall(collider) {
     if (!collider) return false;
     colliderMetadata.delete(collider.handle);
+    if (staticColliders.delete(collider.handle)) {
+      spatialIndexDirty = true;
+      staticWorldRevision += 1;
+    }
     world.removeCollider(collider, true);
     syncQueries();
     return true;
@@ -382,33 +542,59 @@ async function createRapierPhysics() {
     syncQueries();
   }
 
-  function setCharacterDowned(entityId, downed) {
+  function setCharacterDowned(entityId, downed, options = {}) {
     const entry = characters.get(entityId);
     if (!entry) return false;
     if (entry.downed === Boolean(downed)) return true;
     const feet = position(entityId);
     const halfHeight = downed ? 0.05 : CHARACTER_HALF_HEIGHT;
     const baseOffset = halfHeight + CHARACTER_RADIUS + CHARACTER_CONTROLLER_OFFSET;
-    const center = { ...feet, y: feet.y + baseOffset + (downed ? 0 : 0.06) };
+    let center = { ...feet, y: feet.y + baseOffset + (downed ? 0 : 0.06) };
     const shape = new RAPIER.Capsule(halfHeight, CHARACTER_RADIUS);
     if (!downed) {
-      let blocked = false;
-      world.intersectionsWithShape(
-        center,
-        { x: 0, y: 0, z: 0, w: 1 },
-        shape,
-        (collider) => {
-          if (isCharacterCollider(collider)) return true;
-          const kind = colliderMetadata.get(collider.handle)?.kind ?? null;
-          if (CHARACTER_SUPPORT_KINDS.has(kind) || kind === "projectile") return true;
-          blocked = true;
+      const isCenterBlocked = (candidate) => {
+        let blocked = false;
+        world.intersectionsWithShape(
+          candidate,
+          { x: 0, y: 0, z: 0, w: 1 },
+          shape,
+          (collider) => {
+            if (isCharacterCollider(collider)) return true;
+            const kind = colliderMetadata.get(collider.handle)?.kind ?? null;
+            if (CHARACTER_SUPPORT_KINDS.has(kind) || kind === "projectile") return true;
+            blocked = true;
+            return false;
+          },
+          RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+          undefined,
+          entry.collider,
+        );
+        return blocked;
+      };
+      if (isCenterBlocked(center)) {
+        let resolved = null;
+        if (options?.allowNudge !== false) {
+          const radii = [0.35, 0.65, 0.95];
+          const dirs = [
+            [1, 0], [-1, 0], [0, 1], [0, -1],
+            [0.707, 0.707], [-0.707, 0.707], [0.707, -0.707], [-0.707, -0.707],
+          ];
+          outer: for (const radius of radii) {
+            for (const [dx, dz] of dirs) {
+              const candidate = { x: center.x + dx * radius, y: center.y, z: center.z + dz * radius };
+              if (!isCenterBlocked(candidate)) {
+                resolved = candidate;
+                break outer;
+              }
+            }
+          }
+        }
+        if (resolved) {
+          center = resolved;
+        } else if (!options?.force) {
           return false;
-        },
-        RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
-        undefined,
-        entry.collider,
-      );
-      if (blocked) return false;
+        }
+      }
     }
     entry.collider.setShape(shape);
     entry.collider.setTranslation(center);
@@ -462,8 +648,17 @@ async function createRapierPhysics() {
       x, y, z, hx, hy, hz,
       ...metadata,
     });
-    const entry = { id: bodyId, body, colliders: [collider] };
+    const halfY = Math.max(0.01, Math.abs(Number(hy) || 0.5));
+    const entry = {
+      id: bodyId,
+      body,
+      colliders: [collider],
+      halfY,
+      cachedTopY: (Number(y) || 0) + halfY + 1.5,
+      wasSleeping: false,
+    };
     dynamicBodies.set(bodyId, entry);
+    dynamicMaxDirty = true;
     world.propagateModifiedBodyPositionsToColliders?.();
     return entry;
   }
@@ -501,6 +696,9 @@ async function createRapierPhysics() {
       ...metadata,
     });
     entry.colliders.push(collider);
+    entry.halfY = Math.max(entry.halfY || 0.5, Math.abs(Number(y) || 0) + Math.abs(Number(hy) || 0.25));
+    entry.wasSleeping = false;
+    dynamicMaxDirty = true;
     world.propagateModifiedBodyPositionsToColliders?.();
     return collider;
   }
@@ -510,13 +708,18 @@ async function createRapierPhysics() {
   }
 
   function setDynamicBodyTranslation(bodyId, position = {}, wake = true) {
-    const body = dynamicBodies.get(bodyId)?.body;
+    const entry = dynamicBodies.get(bodyId);
+    const body = entry?.body;
     if (!body) return null;
+    const ny = Number(position.y) || 0;
     body.setTranslation({
       x: Number(position.x) || 0,
-      y: Number(position.y) || 0,
+      y: ny,
       z: Number(position.z) || 0,
     }, Boolean(wake));
+    entry.cachedTopY = ny + (entry.halfY || 0.5) + 1.5;
+    entry.wasSleeping = false;
+    dynamicMaxDirty = true;
     world.propagateModifiedBodyPositionsToColliders?.();
     return dynamicBodyState(bodyId);
   }
@@ -558,6 +761,7 @@ async function createRapierPhysics() {
     for (const collider of entry.colliders) colliderMetadata.delete(collider.handle);
     world.removeRigidBody(entry.body);
     dynamicBodies.delete(bodyId);
+    dynamicMaxDirty = true;
     return true;
   }
 
@@ -567,6 +771,7 @@ async function createRapierPhysics() {
     world.timestep = clamp(dt, MIN_TIMESTEP, MAX_TIMESTEP);
     const wallStartedAt = wallNow();
     world.step(eventQueue);
+    dynamicMaxDirty = true;
     lastStepWallMs = Math.max(0, wallNow() - wallStartedAt);
     maxStepWallMs = Math.max(maxStepWallMs, lastStepWallMs);
     stepWallSamples.push(lastStepWallMs);
@@ -591,13 +796,23 @@ async function createRapierPhysics() {
   }
 
   function supportSurfaceBelow(position, baseOffset = CHARACTER_BASE_OFFSET) {
+    const maxDist = baseOffset + CHARACTER_SUPPORT_SNAP_DISTANCE + CHARACTER_SUPPORT_PENETRATION_LIMIT;
+    const fast = fastVerticalSupportHit(position.x, position.y, position.z, maxDist);
+    if (fast !== undefined) {
+      if (!fast) return null;
+      return {
+        y: position.y - fast.distance,
+        colliderHandle: fast.colliderHandle,
+        worldObject: fast.worldObject,
+      };
+    }
     const ray = new RAPIER.Ray(
       { x: position.x, y: position.y, z: position.z },
      { x: 0, y: -1, z: 0 },
     );
     const hit = world.castRay(
       ray,
-      baseOffset + CHARACTER_SUPPORT_SNAP_DISTANCE + CHARACTER_SUPPORT_PENETRATION_LIMIT,
+      maxDist,
       true,
       undefined,
       undefined,
@@ -619,6 +834,10 @@ async function createRapierPhysics() {
 
   function stabilizeCharacterOnSupport(position, dy, baseOffset) {
     if (dy > 0) return { position, grounded: false };
+    ensureStaticSpatialIndex();
+    if (position.y - (baseOffset + CHARACTER_SUPPORT_SNAP_DISTANCE + CHARACTER_SUPPORT_PENETRATION_LIMIT) > maxSupportTopY) {
+      return { position, grounded: false };
+    }
     const support = supportSurfaceBelow(position, baseOffset);
     if (!support) return { position, grounded: false };
     const desiredCenterY = support.y + baseOffset;
@@ -699,6 +918,15 @@ async function createRapierPhysics() {
   }
 
   function raycastSupportWorld(origin, direction, maxDistance) {
+    if (direction.x === 0 && direction.z === 0 && (direction.y ?? 0) < 0) {
+      const fast = fastVerticalSupportHit(
+        origin.x,
+        origin.y ?? 1,
+        origin.z,
+        maxDistance,
+      );
+      if (fast !== undefined) return fast;
+    }
     const ray = makeRay(origin, direction);
     const hit = world.castRay(
       ray,
@@ -761,20 +989,45 @@ async function createRapierPhysics() {
     };
   }
 
-  function lineOfSight(from, to, excludeEntityId = null, targetEntityId = null) {
+  const VEHICLE_PIERCE_KINDS = new Set(["vehicle-chassis", "vehicle-ballast", "vehicle-presence"]);
+
+  function lineOfSight(from, to, excludeEntityId = null, targetEntityId = null, options = null) {
     const dx = to.x - from.x;
     const dy = (to.y ?? 0) - (from.y ?? 0);
     const dz = to.z - from.z;
     const distance = Math.hypot(dx, dy, dz);
     if (distance < 0.001) return true;
-    const hit = raycast(
-      { x: from.x, y: (from.y ?? 0) + 1, z: from.z },
-      { x: dx, y: dy, z: dz },
-      distance + 0.15,
-      excludeEntityId,
-    );
-    if (!hit) return true;
-    return targetEntityId !== null && hit.entityId === targetEntityId;
+    const pierceVehicles = Boolean(options?.pierceVehicles);
+    const targetVehicleId = options?.targetVehicleId ?? null;
+    const dirX = dx / distance;
+    const dirY = dy / distance;
+    const dirZ = dz / distance;
+    let startOffset = 0;
+    const maxSteps = pierceVehicles ? 8 : 1;
+    for (let stepIdx = 0; stepIdx < maxSteps; stepIdx += 1) {
+      const remaining = distance + 0.15 - startOffset;
+      if (remaining <= 0.05) return true;
+      const hit = raycast(
+        {
+          x: from.x + dirX * startOffset,
+          y: (from.y ?? 0) + 1 + dirY * startOffset,
+          z: from.z + dirZ * startOffset,
+        },
+        { x: dirX, y: dirY, z: dirZ },
+        remaining,
+        excludeEntityId,
+      );
+      if (!hit) return true;
+      if (targetEntityId !== null && hit.entityId === targetEntityId) return true;
+      const hitVehicleId = hit.worldObject?.vehicleId ?? hit.worldObject?.bodyId ?? null;
+      if (targetVehicleId && hitVehicleId === targetVehicleId) return true;
+      if (!pierceVehicles) return false;
+      const hitKind = hit.worldObject?.kind ?? null;
+      if (!VEHICLE_PIERCE_KINDS.has(hitKind)) return false;
+      const advance = Math.max(0.45, (Number(hit.distance) || 0) + 0.45);
+      startOffset += advance;
+    }
+    return false;
   }
 
   return {
@@ -798,6 +1051,8 @@ async function createRapierPhysics() {
     raycast,
     raycastWorld,
     raycastSupportWorld,
+    isOpenSky,
+    staticWorldRevision() { return staticWorldRevision; },
     shapeCastCapsule,
     lineOfSight,
     syncQueries,

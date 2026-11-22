@@ -520,7 +520,12 @@ export async function setup(ctx) {
   }
 
   function recordAirdropInterest(payload = {}, now = Date.now()) {
-    if (payload?.juggernaut || payload?.loot === "juggernaut") {
+    if (
+      payload?.juggernaut
+      || payload?.loot === "juggernaut"
+      || payload?.electroLukashenko
+      || payload?.loot === "electro-lukashenko"
+    ) {
       return recordJuggernautInterest(payload, now).assigned;
     }
     const dropPoint = {

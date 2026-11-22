@@ -207,6 +207,23 @@ export async function setup(ctx) {
       0,
       -(Number(state.simulatedVerticalVelocity) || Number(transform.verticalVelocity) || 0),
     );
+    const glideSpeed = state.phase === "deployed" ? Math.max(0, Number(state.glideSpeed) || 0) : 0;
+    const worldRev = physics.staticWorldRevision?.() ?? -1;
+    const cached = state._probeCache;
+    if (
+      cached
+      && cached.worldRev === worldRev
+      && cached.raycastRef === physics.raycastWorld
+      && cached.x === transform.x
+      && cached.y === transform.y
+      && cached.z === transform.z
+      && cached.angle === transform.angle
+      && cached.downwardSpeed === downwardSpeed
+      && cached.glideSpeed === glideSpeed
+    ) {
+      return cached.result;
+    }
+
     const current = rayDistanceAt(transform.x, transform.y, transform.z);
     state.groundDistance = current.distance;
 
@@ -216,7 +233,6 @@ export async function setup(ctx) {
     let bestDistance = current.distance;
     let bestKind = current.hit?.worldObject?.kind ?? null;
 
-    const glideSpeed = state.phase === "deployed" ? Math.max(0, Number(state.glideSpeed) || 0) : 0;
     const headingX = Math.sin(Number(transform.angle) || 0);
     const headingZ = -Math.cos(Number(transform.angle) || 0);
 
@@ -240,7 +256,7 @@ export async function setup(ctx) {
     state.timeToImpact = bestTime;
     state.predictedImpactDistance = bestDistance;
     state.predictedImpactKind = bestKind;
-    return {
+    const result = {
       hit: current.hit,
       distance: current.distance,
       downwardSpeed,
@@ -248,6 +264,18 @@ export async function setup(ctx) {
       predictedImpactDistance: bestDistance,
       predictedImpactKind: bestKind,
     };
+    state._probeCache = {
+      worldRev,
+      raycastRef: physics.raycastWorld,
+      x: transform.x,
+      y: transform.y,
+      z: transform.z,
+      angle: transform.angle,
+      downwardSpeed,
+      glideSpeed,
+      result,
+    };
+    return result;
   }
 
   function stateFor(entityId) {

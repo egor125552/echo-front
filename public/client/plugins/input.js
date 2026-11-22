@@ -25,6 +25,15 @@ export function sampleKeyboardState(pressed, {
   turboStimulantPressed = false,
   parachutePressed = false,
   interactPressed = false,
+  crouchPressed = false,
+  minePressed = false,
+  nukePressed = false,
+  nukeCycleDelta = 0,
+  nukeCancelPressed = false,
+  electroModePressed = false,
+  electroJumpPressed = false,
+  electroJumpHeld = false,
+  electroJumpReleased = false,
 } = {}) {
   const weaponModifier = pressed.has("KeyZ");
   return {
@@ -42,6 +51,15 @@ export function sampleKeyboardState(pressed, {
     turboStimulantPressed,
     parachutePressed,
     interactPressed,
+    crouchPressed,
+    minePressed,
+    nukePressed,
+    nukeCycleDelta,
+    nukeCancelPressed,
+    electroModePressed,
+    electroJumpPressed,
+    electroJumpHeld,
+    electroJumpReleased,
   };
 }
 
@@ -80,11 +98,29 @@ export async function setup(ctx) {
   let turboStimulantPressed = false;
   let parachutePressed = false;
   let interactPressed = false;
+  let crouchPressed = false;
+  let minePressed = false;
+  let nukePressed = false;
+  let nukeCycleDelta = 0;
+  let nukeCancelPressed = false;
+  let electroModePressed = false;
+  let electroJumpPressed = false;
+  let electroJumpHeld = false;
+  let electroJumpReleased = false;
+  let electroSuitActive = false;
+  let electroJumpAirborne = false;
+  let electroJumpPhase = "ready";
+  let electroJumpFuelMs = 0;
+  let spaceElectroTriggered = false;
+  let spaceHoldTimer = null;
+  let keyJHoldTimer = null;
+  let keyJBoostTriggered = false;
 
   const clickSuppression = new WeakMap();
   const handled = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space",
-    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE", "KeyN", "KeyU", "KeyT",
+    "ShiftLeft", "ShiftRight", "KeyX", "KeyZ", "KeyR", "KeyB", "KeyE", "KeyN", "KeyU", "KeyT", "KeyV",
+    "KeyG", "KeyH", "KeyK", "KeyJ",
   ]);
   const opposite = { forward: "back", back: "forward", left: "right", right: "left" };
   const movementButtons = [...document.querySelectorAll("[data-touch-control]")];
@@ -198,6 +234,14 @@ export async function setup(ctx) {
     else if (action === "turbo-stimulant") turboStimulantPressed = true;
     else if (action === "interact") interactPressed = true;
     else if (action === "parachute") parachutePressed = true;
+    else if (action === "crouch") crouchPressed = true;
+    else if (action === "mine") minePressed = true;
+    else if (action === "nuke") nukePressed = true;
+    else if (action === "nuke-cycle-next") nukeCycleDelta = 1;
+    else if (action === "nuke-cycle-prev") nukeCycleDelta = -1;
+    else if (action === "nuke-cancel") nukeCancelPressed = true;
+    else if (action === "electro-mode") electroModePressed = true;
+    else if (action === "electro-jump") electroJumpPressed = true;
     else if (
       action === "parkour-pose"
       || action === "parachute-status"
@@ -205,9 +249,10 @@ export async function setup(ctx) {
       || action === "map"
       || action === "menu"
       || action === "shop"
+      || action === "squad-menu"
     ) {
       emitTouch(action, true);
-      if (action !== "parachute-status" && action !== "map" && action !== "menu") {
+      if (action !== "parachute-status" && action !== "map" && action !== "menu" && action !== "squad-menu") {
         notifyChanged(`virtual:${action}`);
       }
       return true;
@@ -275,6 +320,25 @@ export async function setup(ctx) {
     turboStimulantPressed = false;
     parachutePressed = false;
     interactPressed = false;
+    crouchPressed = false;
+    minePressed = false;
+    nukePressed = false;
+    nukeCycleDelta = 0;
+    nukeCancelPressed = false;
+    electroModePressed = false;
+    electroJumpPressed = false;
+    electroJumpHeld = false;
+    electroJumpReleased = false;
+    spaceElectroTriggered = false;
+    keyJBoostTriggered = false;
+    if (spaceHoldTimer != null) {
+      clearTimeout(spaceHoldTimer);
+      spaceHoldTimer = null;
+    }
+    if (keyJHoldTimer != null) {
+      clearTimeout(keyJHoldTimer);
+      keyJHoldTimer = null;
+    }
     syncPressedState();
     if (hadState) {
       ctx.events.emit("input:reset", { reason });
@@ -306,8 +370,52 @@ export async function setup(ctx) {
       if (event.code === "KeyN") stimulantPressed = true;
       if (event.code === "KeyU") fastStimulantPressed = true;
       if (event.code === "KeyT") turboStimulantPressed = true;
-      if (event.code === "Space") parachutePressed = true;
+      if (event.code === "Space") {
+        if (electroJumpAirborne) {
+          // While gliding/rising in Super-Jump: Space deploys parachute (KeyJ or KeyX slams down!)
+          parachutePressed = true;
+        } else {
+          parachutePressed = true;
+          if (electroSuitActive) {
+            if (spaceHoldTimer != null) clearTimeout(spaceHoldTimer);
+            spaceElectroTriggered = false;
+            spaceHoldTimer = setTimeout(() => {
+              spaceHoldTimer = null;
+              if (enabled && pressed.has("Space") && electroSuitActive) {
+                spaceElectroTriggered = true;
+                electroJumpPressed = true;
+                electroJumpHeld = true;
+                notifyChanged("key:Space:electro-jump");
+              }
+            }, 240);
+          }
+        }
+      }
       if (event.code === "KeyE") interactPressed = true;
+      if (event.code === "KeyV") crouchPressed = true;
+      if (event.code === "KeyG") minePressed = true;
+      if (event.code === "KeyH") nukePressed = true;
+      if (event.code === "KeyK") electroModePressed = true;
+      if (event.code === "KeyJ") {
+        if (electroJumpPhase === "gliding" && electroJumpFuelMs > 120) {
+          if (keyJHoldTimer != null) clearTimeout(keyJHoldTimer);
+          keyJBoostTriggered = false;
+          keyJHoldTimer = setTimeout(() => {
+            keyJHoldTimer = null;
+            if (enabled && pressed.has("KeyJ") && electroJumpPhase === "gliding") {
+              keyJBoostTriggered = true;
+              electroJumpHeld = true;
+              notifyChanged("key:KeyJ:electro-reboost");
+            }
+          }, 220);
+        } else {
+          electroJumpPressed = true;
+          if (!electroJumpAirborne && electroSuitActive) {
+            keyJBoostTriggered = true;
+            electroJumpHeld = true;
+          }
+        }
+      }
       if (pressed.has("KeyZ") && event.code === "ArrowLeft") selectDelta = -1;
       if (pressed.has("KeyZ") && event.code === "ArrowRight") selectDelta = 1;
       pressed.add(event.code);
@@ -321,11 +429,44 @@ export async function setup(ctx) {
     if (!handled.has(event.code)) return;
     if (isUiControlTarget(event.target) && !pressed.has(event.code)) return;
     if (enabled) event.preventDefault();
+    if (event.code === "Space") {
+      if (spaceHoldTimer != null) {
+        clearTimeout(spaceHoldTimer);
+        spaceHoldTimer = null;
+      }
+      if (spaceElectroTriggered) {
+        spaceElectroTriggered = false;
+        electroJumpHeld = false;
+        electroJumpReleased = true;
+      }
+    }
+    if (event.code === "KeyJ") {
+      if (keyJHoldTimer != null) {
+        clearTimeout(keyJHoldTimer);
+        keyJHoldTimer = null;
+        if (electroJumpPhase === "gliding") {
+          electroJumpPressed = true;
+        }
+      }
+      if (keyJBoostTriggered) {
+        keyJBoostTriggered = false;
+        electroJumpHeld = false;
+        electroJumpReleased = true;
+      }
+    }
     const wasPressed = releaseKeyboardKey(pressed, event.code);
     if (enabled && wasPressed) ctx.events.emit("input:key", { code: event.code, down: false });
     if (enabled && wasPressed && event.code === "KeyX") ctx.events.emit("input:fire-stop", {});
     if (wasPressed) notifyChanged(`key:${event.code}:up`);
   }, { capture: true, passive: false });
+
+  ctx.events.on("game:snapshot", (snapshot) => {
+    electroSuitActive = Boolean(snapshot?.specialOps?.electroLukashenko);
+    const phase = snapshot?.specialOps?.electroJumpPhase || "ready";
+    electroJumpPhase = phase;
+    electroJumpAirborne = phase === "rising" || phase === "gliding";
+    electroJumpFuelMs = Number(snapshot?.specialOps?.electroJumpFuelMs) || 0;
+  });
 
   window.addEventListener("blur", () => resetPressed("blur"));
   document.addEventListener("visibilitychange", () => { if (document.hidden) resetPressed("hidden"); });
@@ -441,6 +582,11 @@ export async function setup(ctx) {
       if (action === "fast-stimulant") fastStimulantPressed = true;
       if (action === "turbo-stimulant") turboStimulantPressed = true;
       if (action === "interact") interactPressed = true;
+      if (action === "crouch") crouchPressed = true;
+      if (action === "mine") minePressed = true;
+      if (action === "nuke") nukePressed = true;
+      if (action === "electro-mode") electroModePressed = true;
+      if (action === "electro-jump") electroJumpPressed = true;
       emitTouch(action, true);
       notifyChanged(`touch:${action}`);
     });
@@ -481,6 +627,15 @@ export async function setup(ctx) {
         turboStimulantPressed,
         parachutePressed,
         interactPressed,
+        crouchPressed,
+        minePressed,
+        nukePressed,
+        nukeCycleDelta,
+        nukeCancelPressed,
+        electroModePressed,
+        electroJumpPressed,
+        electroJumpHeld,
+        electroJumpReleased,
       });
       firePressed = false;
       reload = false;
@@ -491,6 +646,14 @@ export async function setup(ctx) {
       turboStimulantPressed = false;
       parachutePressed = false;
       interactPressed = false;
+      crouchPressed = false;
+      minePressed = false;
+      nukePressed = false;
+      nukeCycleDelta = 0;
+      nukeCancelPressed = false;
+      electroModePressed = false;
+      electroJumpPressed = false;
+      electroJumpReleased = false;
       return sample;
     },
   });

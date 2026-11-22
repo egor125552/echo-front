@@ -267,6 +267,9 @@ export function formatJournalEventAsText(eventName, payload = {}, resolveName = 
     case "battle-royale:zone-damage":
       return `${nameOf(p.entityId)} получает урон от бури за пределами зоны (${Math.round(Number(p.damage) || 0)} ед.).`;
     case "battle-royale:ended":
+      if (p.squadVictory) {
+        return `Королевская битва завершена. Победил отряд${p.winnerId ? ` (${nameOf(p.winnerId)})` : ""}.`;
+      }
       return `Королевская битва завершена.${p.winnerId ? ` Победитель: ${nameOf(p.winnerId)}.` : ""}`;
     case "combat:damage": {
       const attacker = p.attackerId ? nameOf(p.attackerId) : "Неизвестный";

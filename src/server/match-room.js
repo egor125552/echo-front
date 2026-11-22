@@ -6,7 +6,11 @@ import { handleEngineLabRequest } from "./engine-lab.js";
 import {
   activeSocketCount,
   cleanupDeadline,
+  createSuggestedBattleRoyaleRoom,
+  decideBattleRoyaleJoinRecovery,
+  isRedirectedSocket,
   normalizePlayerSessionId,
+  otherActiveSocketCount,
   reconnectExpired,
 } from "./room-lifecycle.js";
 import { advanceSimulation, SIMULATION_TICK_MS } from "./game-clock.js";
@@ -89,7 +93,7 @@ export class MatchRoom extends DurableObject {
       await this.syncAiBudgetState();
       this.applyEnemyAiMode(enemyAi);
       for (const ws of sockets) {
-        if (ws.readyState === 3) continue;
+        if (ws.readyState === 3 || isRedirectedSocket(ws)) continue;
         const attachment = ws.deserializeAttachment();
         if (!attachment?.playerId) continue;
         try { this.game.api.connectHuman(attachment.playerId); } catch (error) {
@@ -182,6 +186,26 @@ export class MatchRoom extends DurableObject {
       });
     }
     return this.game;
+  }
+
+  async resetGame(mode = "tdm", { tutorial = false } = {}) {
+    this.stopGameLoop();
+    if (this.game) {
+      try { await this.game.host.stop(); } catch {}
+      this.game = null;
+    }
+    this.mode = null;
+    this.lab = null;
+    this.tutorial = false;
+    this.disconnectedHumans.clear();
+    this.snapshotStreams = new WeakMap();
+    this.hotReconnectUntil = 0;
+    this.lastStepAt = Date.now();
+    this.lastSnapshotAt = 0;
+    this.diagnosticsStats = freshDiagnosticsStats();
+    this.inputSamples = [];
+    this.clearRuntimeError();
+    return this.ensureGame(mode, { tutorial });
   }
 
   aiDecisionsService() {
@@ -295,7 +319,7 @@ export class MatchRoom extends DurableObject {
 
   socketsForPlayer(playerId, excludedSocket = null) {
     return this.ctx.getWebSockets().filter((socket) => {
-      if (!socket || socket === excludedSocket || socket.readyState === 3) return false;
+      if (!socket || socket === excludedSocket || socket.readyState === 3 || isRedirectedSocket(socket)) return false;
       try { return socket.deserializeAttachment()?.playerId === playerId; } catch { return false; }
     });
   }
@@ -532,6 +556,48 @@ export class MatchRoom extends DurableObject {
       const requestedPlayerId = normalizePlayerSessionId(requestUrl.searchParams.get("player"));
       playerId = requestedPlayerId ?? crypto.randomUUID();
       const previousSockets = this.socketsForPlayer(playerId);
+      const otherActiveHumans = otherActiveSocketCount(this.ctx.getWebSockets(), previousSockets);
+      this.disconnectedHumans.delete(playerId);
+
+      phase = "connect-human";
+      let joined;
+      try {
+        joined = this.game.api.connectHuman(playerId);
+      } catch (joinError) {
+        const recovery = decideBattleRoyaleJoinRecovery({
+          mode,
+          error: joinError,
+          otherActiveHumans,
+        });
+        if (recovery === "reset-room") {
+          phase = "reset-stale-game";
+          await this.resetGame(mode, { tutorial });
+          await this.syncAiBudgetState();
+          this.applyEnemyAiMode(enemyAi);
+          this.hotReconnectUntil = 0;
+          this.lastStepAt = Date.now();
+          phase = "connect-human";
+          joined = this.game.api.connectHuman(playerId);
+        } else if (recovery === "redirect-room") {
+          phase = "redirect-busy-room";
+          const pair = Object.values(new WebSocketPair());
+          const client = pair[0];
+          server = pair[1];
+          this.ctx.acceptWebSocket(server);
+          server.serializeAttachment({ redirected: true, playerId, mode, tutorial });
+          const suggestedRoom = createSuggestedBattleRoyaleRoom(Date.now(), crypto.randomUUID().slice(0, 6));
+          server.send(JSON.stringify({
+            type: "room-busy",
+            reason: "battle-royale-in-progress",
+            mode,
+            suggestedRoom,
+          }));
+          server.close(4009, "Match already in progress");
+          return new Response(null, { status: 101, webSocket: client });
+        } else {
+          throw joinError;
+        }
+      }
 
       phase = "create-websocket-pair";
       const pair = Object.values(new WebSocketPair());
@@ -539,10 +605,7 @@ export class MatchRoom extends DurableObject {
       server = pair[1];
       this.ctx.acceptWebSocket(server);
       server.serializeAttachment({ playerId, mode, tutorial, enemyAi, snapshotProtocol });
-      this.disconnectedHumans.delete(playerId);
 
-      phase = "connect-human";
-      const joined = this.game.api.connectHuman(playerId);
       phase = "initial-snapshot";
       const initialSnapshot = typeof this.game.api.snapshotFor === "function"
         ? this.game.api.snapshotFor(playerId)
@@ -585,6 +648,7 @@ export class MatchRoom extends DurableObject {
   async webSocketMessage(ws, message) {
     if (typeof message !== "string") return;
     const attachment = ws.deserializeAttachment();
+    if (attachment?.redirected) return;
     const mode = attachment?.mode ?? "tdm";
     const tutorial = attachment?.tutorial === true;
     const playerId = attachment?.playerId ?? null;
@@ -630,7 +694,9 @@ export class MatchRoom extends DurableObject {
 
   markSocketDisconnected(ws) {
     this.snapshotStreams.delete(ws);
-    const playerId = ws.deserializeAttachment()?.playerId;
+    const attachment = ws.deserializeAttachment();
+    if (attachment?.redirected) return;
+    const playerId = attachment?.playerId;
     if (!playerId || !this.game) return;
     if (this.socketsForPlayer(playerId, ws).length) return;
     this.game.api.suspendHuman(playerId);
@@ -639,6 +705,7 @@ export class MatchRoom extends DurableObject {
 
   async webSocketClose(ws) {
     try {
+      if (isRedirectedSocket(ws)) return;
       this.markSocketDisconnected(ws);
       this.broadcastSnapshot(true);
       await this.scheduleCleanupIfEmpty(ws);
@@ -653,6 +720,7 @@ export class MatchRoom extends DurableObject {
 
   async webSocketError(ws) {
     try {
+      if (isRedirectedSocket(ws)) return;
       this.markSocketDisconnected(ws);
       await this.scheduleCleanupIfEmpty(ws);
     } catch (error) {
@@ -706,6 +774,7 @@ export class MatchRoom extends DurableObject {
     this.diagnosticsStats.eventBroadcasts += 1;
     this.diagnosticsStats.eventPacketsBroadcast += packets.length;
     for (const socket of this.ctx.getWebSockets()) {
+      if (isRedirectedSocket(socket)) continue;
       try {
         const playerId = socket.deserializeAttachment()?.playerId;
         const selected = typeof this.game.api.eventsForPlayer === "function"
@@ -747,6 +816,7 @@ export class MatchRoom extends DurableObject {
         return;
       }
       for (const socket of this.ctx.getWebSockets()) {
+        if (isRedirectedSocket(socket)) continue;
         try {
           socket.send(message);
           if (performanceSample) {
@@ -766,11 +836,14 @@ export class MatchRoom extends DurableObject {
       return;
     }
 
+    const sockets = this.ctx.getWebSockets().filter((socket) => !isRedirectedSocket(socket));
+    if (!sockets.length) return;
+    const poolEntities = sockets.length > 1;
     // Pool semantically identical rows across personalized snapshots. Every
     // player still gets their own map, navigation and other private state.
     // This allows the lossless patcher to reuse entity deltas for 50+ viewers.
-    const sharedEntities = new Map();
-    const deltaMemo = new WeakMap();
+    const sharedEntities = poolEntities ? new Map() : null;
+    const deltaMemo = poolEntities ? new WeakMap() : null;
     const fleet = this.game.host.services.has("vehicles")
       ? this.game.host.services.get("vehicles") : null;
     const originalFleetSnapshot = typeof fleet?.snapshot === "function" ? fleet.snapshot : null;
@@ -789,11 +862,12 @@ export class MatchRoom extends DurableObject {
     }
     try {
       const sendSnapshots = () => {
-        for (const socket of this.ctx.getWebSockets()) {
+        for (const socket of sockets) {
           try {
-            const playerId = socket.deserializeAttachment()?.playerId;
+            const attachment = socket.deserializeAttachment();
+            const playerId = attachment?.playerId;
             const snapshot = this.game.api.snapshotFor(playerId, now);
-            if (Array.isArray(snapshot.entities)) {
+            if (poolEntities && Array.isArray(snapshot.entities)) {
               snapshot.entities = snapshot.entities.map(entity => {
                 if (!entity || typeof entity.id !== "string") return entity;
                 const json = JSON.stringify(entity);
@@ -803,7 +877,6 @@ export class MatchRoom extends DurableObject {
                 return entity;
               });
             }
-            const attachment = socket.deserializeAttachment();
             let message;
             if (attachment?.snapshotProtocol === "delta-v1") {
               const previous = this.snapshotStreams.get(socket);

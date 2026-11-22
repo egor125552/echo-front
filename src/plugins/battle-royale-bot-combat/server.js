@@ -1,5 +1,6 @@
 import { getSharedTacticalCombatNet } from "../../ai/tactical-combat-net.js";
 import { getSharedTacticalNodeGrid } from "../../ai/tactical-node-grid.js";
+import { selectBotStimulantKind } from "../../game/crouch-squad-inventory.js";
 
 export const BOT_VISIBLE_MEMORY_MS = 10_000;
 export const BOT_DAMAGE_MEMORY_MS = 12_000;
@@ -434,6 +435,29 @@ export async function setup(ctx) {
     if (reviverId && entities.get(reviverId)?.bot) {
       combatNet.recordCombatOutcome(reviverId, 1.0, tNow);
     }
+  });
+
+  ctx.events.on("injury:stim-cancelled", ({ entityId, reason, now } = {}) => {
+    if (!entityId) return;
+    const state = ctx.components.get(entityId, "Bot");
+    if (!state) return;
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    if (reason === "damaged") state.lastStimCancelledAt = tNow;
+  });
+
+  ctx.events.on("injury:stim-completed", ({ entityId, stimKind, revived, health, now } = {}) => {
+    if (!entityId || stimKind !== "turbo" || revived) return;
+    const bot = entities.get(entityId);
+    if (!bot?.alive || !bot.bot || !bot.humanSquad) return;
+    const tNow = Number.isFinite(now) ? Number(now) : Date.now();
+    ctx.events.emit("squad:callout", {
+      kind: "squad-turbo-stim",
+      text: `${bot.name ?? "Напарник"} вколол турбо-стимулятор: здоровье ${Math.round(Number(health) || 600)}.`,
+      speakerId: bot.id,
+      recipientId: bot.humanSquad,
+      teamId: bot.team,
+      now: tNow,
+    });
   });
 
   function estimateTargetVelocity(entityId, targetTransform, now) {
@@ -920,12 +944,15 @@ export async function setup(ctx) {
     const specialCrates = (map.crates ?? []).filter((c) => (
       c
       && !c.opened
-      && (c.juggernaut || c.loot === "juggernaut" || c.airdrop || c.loot === "airdrop")
+      && (c.loot === "electro-lukashenko" || c.juggernaut || c.loot === "juggernaut" || c.airdrop || c.loot === "airdrop")
       && Math.hypot(Number(c.x) || 0, Number(c.z) || 0) <= zoneSafeEarly
-      && distance2(transform, c) <= (c.juggernaut || c.loot === "juggernaut" ? 195 : 165)
+      && distance2(transform, c) <= (c.loot === "electro-lukashenko" ? 240 : (c.juggernaut || c.loot === "juggernaut" ? 195 : 165))
     ));
     if (specialCrates.length > 0) {
       specialCrates.sort((a, b) => {
+        const aElectro = a.loot === "electro-lukashenko";
+        const bElectro = b.loot === "electro-lukashenko";
+        if (aElectro !== bElectro) return aElectro ? -1 : 1;
         const aJug = Boolean(a.juggernaut || a.loot === "juggernaut");
         const bJug = Boolean(b.juggernaut || b.loot === "juggernaut");
         if (aJug !== bJug) return aJug ? -1 : 1;
@@ -942,6 +969,47 @@ export async function setup(ctx) {
         z: Number(chosenSpecial.z) || 0,
         expiresAt: now + 3500,
       };
+    }
+
+    // Active shop steering for rich enemy bots: sprint to shop to buy back dead squadmates, Electro-Lukashenko, or Mini-Nuke!
+    const shopService = getShop();
+    const botEntity = entities.get(botId);
+    if (
+      shopService
+      && botEntity?.bot
+      && !botEntity.humanSquad
+      && (now - (Number(botEntity.lastShopVisitAt) || 0) >= 14_000)
+    ) {
+      const cash = Number(shopService.balanceOf?.(botId)) || 0;
+      const desc = cash >= 1000 ? (shopService.describeFor?.(botId) ?? {}) : null;
+      const buybackCost = Number(desc?.prices?.buyback) || 1500;
+      const electroCost = Number(desc?.prices?.electroDrop) || 3000;
+      const nukeCost = Number(desc?.prices?.miniNuke) || 2500;
+      const hasDeadSquadmates = Boolean(desc?.deadTeammates?.length > 0);
+      const wantsShopVisit = (hasDeadSquadmates && cash >= buybackCost)
+        || (!botEntity.electroLukashenko && cash >= electroCost)
+        || cash >= nukeCost;
+      if (wantsShopVisit) {
+        const safeShops = (shopService.stations?.() ?? []).filter((st) => {
+          if (!st || Math.hypot(Number(st.x) || 0, Number(st.z) || 0) > zoneSafeEarly) return false;
+          const dist = distance2(transform, st);
+          return dist > 6.5 && dist <= (hasDeadSquadmates ? 230 : 175);
+        });
+        if (safeShops.length > 0) {
+          safeShops.sort((a, b) => distance2(transform, a) - distance2(transform, b));
+          const chosenShop = safeShops[0];
+          return {
+            kind: "squad-loot-interest",
+            buildingId: null,
+            shopId: chosenShop.id,
+            priorityVisit: true,
+            x: Number(chosenShop.x) || 0,
+            y: 0,
+            z: Number(chosenShop.z) || 0,
+            expiresAt: now + 3500,
+          };
+        }
+      }
     }
 
     let targetBuilding = null;
@@ -2712,9 +2780,16 @@ export async function setup(ctx) {
         );
       if (shouldSelfRevive) {
         movement.setInput(bot.id, {});
-        const used = stimulants.useAny
-          ? stimulants.useAny(bot.id, now)
-          : stimulants.start(bot.id, now);
+        const chosenDownedStim = selectBotStimulantKind({
+          downed: true,
+          standardCount: stimulants.count?.(bot.id) ?? 0,
+          fastCount: stimulants.fastCount?.(bot.id) ?? 0,
+          turboCount: stimulants.turboCount?.(bot.id) ?? 0,
+          enemiesNearby: Boolean(nearbyStandingEnemies || allyUnderFire),
+        });
+        const used = chosenDownedStim
+          ? stimulants.start(bot.id, now, chosenDownedStim)
+          : (stimulants.useAny ? stimulants.useAny(bot.id, now) : stimulants.start(bot.id, now));
         if (used) {
           state.squadRoleActive = "self-revive";
           state.nextThinkAt = now + 80;
@@ -2856,9 +2931,32 @@ export async function setup(ctx) {
     );
     const hp = ctx.components.get(bot.id, "Health");
     const minReserveStims = bot.humanSquad ? 1 : 0;
+    const recentlyDamagedForStim = Boolean(state.lastDamagedAt && now - state.lastDamagedAt <= 1100);
+    const stimCooldownActive = Boolean(state.lastStimCancelledAt && now - state.lastStimCancelledAt <= 1500);
+    const enemiesNearbyForStim = Boolean(
+      standingEnemies.length > 0
+      || (state.memory && state.memory.expiresAt > now && state.memory.transform && distance3(transform, state.memory.transform) <= 45)
+      || (state.distantContact && state.distantContact.expiresAt > now),
+    );
+    const standingStimKind = stimulants && hp
+      ? selectBotStimulantKind({
+        downed: false,
+        health: hp.current,
+        maxHealth: hp.maximum,
+        standardCount: stimulants.count?.(bot.id) ?? 0,
+        fastCount: stimulants.fastCount?.(bot.id) ?? 0,
+        turboCount: stimulants.turboCount?.(bot.id) ?? 0,
+        minReserveStims,
+        enemiesVisible: standingEnemies.length > 0,
+        enemiesNearby: enemiesNearbyForStim,
+        inCover: Boolean(transform?.inCover || transform?.crouching),
+        recentlyDamaged: recentlyDamagedForStim,
+        stimCooldownActive,
+      })
+      : null;
     const needsStimHeal = Boolean(
       stimulants
-      && (stimulants.isUsing(bot.id) || ((stimulants.totalCount?.(bot.id) ?? stimulants.count(bot.id)) > minReserveStims && hp && hp.current < hp.maximum * 0.65)),
+      && (stimulants.isUsing(bot.id) || Boolean(standingStimKind)),
     );
     const hasUnopenedCrateNearby = Array.isArray(map?.crates) && map.crates.some(
       (c) => c && !c.opened && distance2(transform, c) <= 35,
@@ -2901,6 +2999,136 @@ export async function setup(ctx) {
       return;
     }
 
+    if (standingStimKind && stimulants && !stimulants.isUsing(bot.id)) {
+      const earlyRally = !visibleEnemies.length ? squadRallyInterest(bot.id, transform, now) : null;
+      const blockedByEscort = Boolean(bot.humanSquad && earlyRally?.separatedByStructure);
+      if (!blockedByEscort) {
+        stimulants.start(bot.id, now, standingStimKind);
+      }
+    }
+
+    const tacticsService = ctx.services.has("tactics-inventory")
+      ? ctx.services.get("tactics-inventory")
+      : null;
+    if (bot.humanSquad && tacticsService) {
+      const humanLeader = entities.get(bot.humanSquad);
+      const humanTransform = humanLeader?.alive ? ctx.components.get(humanLeader.id, "Transform") : null;
+      const activeOrder = tacticsService.squadOrderFor?.(bot.id, now) ?? null;
+
+      if (activeOrder?.type === "move" && activeOrder.point) {
+        const distToOrder = distance3(transform, activeOrder.point);
+        if (visibleEnemies.length && distToOrder <= 8) {
+          const primary = visibleEnemies[0];
+          if (executeEngage(bot, transform, state, {
+            goal: "engage",
+            targetEntityId: primary.entityId,
+            desiredRange: 10,
+            tactic: "flank",
+          }, visibleEnemies, now)) return;
+        }
+        if (distToOrder > 2.8) {
+          tacticsService.setCrouch?.(bot.id, false, { now, silent: true, reason: "order-move" });
+          moveTowardPosition(bot, transform, state, activeOrder.point, now, {
+            sprint: distToOrder > 8,
+            thinkDelay: 120,
+            stopDistance: 2.4,
+          });
+          return;
+        }
+        tacticsService.setCrouch?.(bot.id, true, { now, silent: true, reason: "order-arrived-cover" });
+        if (visibleEnemies.length) {
+          const primary = visibleEnemies[0];
+          if (executeEngage(bot, transform, state, {
+            goal: "engage",
+            targetEntityId: primary.entityId,
+            desiredRange: 10,
+            tactic: "space",
+          }, visibleEnemies, now)) return;
+        }
+        movement.setInput(bot.id, { forward: 0, strafe: 0, turn: 0, sprint: false, fireHeld: false });
+        return;
+      }
+
+      if (activeOrder?.type === "follow" && humanTransform) {
+        const distToLeader = distance3(transform, humanTransform);
+        if (distToLeader > 4.5) {
+          tacticsService.setCrouch?.(bot.id, false, { now, silent: true, reason: "order-follow" });
+          moveTowardPosition(bot, transform, state, humanTransform, now, {
+            sprint: distToLeader > 9,
+            thinkDelay: 120,
+            stopDistance: 3.4,
+          });
+          if (visibleEnemies.length) {
+            const primary = visibleEnemies[0];
+            weapons.fire(bot.id, now);
+            void primary;
+          }
+          return;
+        }
+      }
+
+      if (activeOrder?.type === "cover") {
+        const currentCover = tacticsService.coverAt?.(transform);
+        if (!currentCover?.active) {
+          const coverSpot = tacticsService.findCoverPoint?.(transform, 14);
+          if (coverSpot && distance3(transform, coverSpot) > 1.6) {
+            moveTowardPosition(bot, transform, state, coverSpot, now, {
+              sprint: true,
+              thinkDelay: 120,
+              stopDistance: 1.2,
+            });
+            return;
+          }
+        }
+        tacticsService.setCrouch?.(bot.id, true, { now, silent: true, reason: "order-cover" });
+        if (visibleEnemies.length) {
+          const primary = visibleEnemies[0];
+          const aimAngle = Math.atan2(
+            (Number(primary.transform.x) || 0) - transform.x,
+            -(Number(primary.transform.z) || 0) + transform.z,
+          );
+          movement.setInput(bot.id, { forward: 0, strafe: 0, targetAngle: aimAngle, sprint: false, fireHeld: true });
+          weapons.fire(bot.id, now);
+          return;
+        }
+        movement.setInput(bot.id, { forward: 0, strafe: 0, turn: 0, sprint: false, fireHeld: false });
+        return;
+      }
+
+      if (activeOrder?.type === "hold") {
+        const holdPoint = activeOrder.holdPoint ?? transform;
+        const distHold = distance3(transform, holdPoint);
+        if (distHold > 2.6) {
+          moveTowardPosition(bot, transform, state, holdPoint, now, {
+            sprint: false,
+            thinkDelay: 140,
+            stopDistance: 1.8,
+          });
+          return;
+        }
+        tacticsService.setCrouch?.(bot.id, true, { now, silent: true, reason: "order-hold" });
+        if (visibleEnemies.length) {
+          const primary = visibleEnemies[0];
+          const aimAngle = Math.atan2(
+            (Number(primary.transform.x) || 0) - transform.x,
+            -(Number(primary.transform.z) || 0) + transform.z,
+          );
+          movement.setInput(bot.id, { forward: 0, strafe: 0, targetAngle: aimAngle, sprint: false, fireHeld: true });
+          weapons.fire(bot.id, now);
+          return;
+        }
+        movement.setInput(bot.id, { forward: 0, strafe: 0, turn: 0, sprint: false, fireHeld: false });
+        return;
+      }
+
+      // Mirror player crouch/cover naturally when close by and not ordered to attack
+      if (!activeOrder && humanTransform && humanTransform.crouching && distance3(transform, humanTransform) <= 16) {
+        tacticsService.setCrouch?.(bot.id, true, { now, silent: true, reason: "mirror-leader" });
+      } else if (!activeOrder && transform.crouching && (!humanTransform?.crouching || distance3(transform, humanTransform) > 20)) {
+        tacticsService.setCrouch?.(bot.id, false, { now, silent: true, reason: "leader-stood" });
+      }
+    }
+
     const rallyInterest = !visibleEnemies.length ? squadRallyInterest(bot.id, transform, now) : null;
     const escortingAcrossStructure = Boolean(bot.humanSquad && rallyInterest?.separatedByStructure);
 
@@ -2924,17 +3152,6 @@ export async function setup(ctx) {
       }
     } else if (visibleEnemies.length && armorService?.isPlating(bot.id)) {
       armorService.cancelPlating(bot.id, "combat");
-    }
-
-    if (
-      !standingEnemies.length
-      && !escortingAcrossStructure
-      && needsStimHeal
-      && stimulants
-      && !stimulants.isUsing(bot.id)
-    ) {
-      if (stimulants.useAny) stimulants.useAny(bot.id, now);
-      else stimulants.start(bot.id, now);
     }
 
     let memory = rememberedTarget(state, entities, now);

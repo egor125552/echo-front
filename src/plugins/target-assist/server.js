@@ -60,6 +60,10 @@ export async function setup(ctx) {
     const facing = normalize3(direction);
     const bot = Boolean(shooter.bot);
     const muzzleVelocity = Number(options?.muzzleVelocity) || 0;
+    const losOptions = (options?.piercesVehicles || options?.weaponId === "electro-rifle")
+      ? { pierceVehicles: true }
+      : null;
+    const vehicles = ctx.services.has("vehicles") ? ctx.services.get("vehicles") : null;
     let best = null;
 
     for (const enemy of teams.enemiesOf(entityId)) {
@@ -68,24 +72,39 @@ export async function setup(ctx) {
       const target = ctx.components.get(enemy.id, "Transform");
       if (!target) continue;
 
-      const rawDx = target.x - origin.x;
-      const rawDy = (target.y ?? 0) + (physics.characterAimHeight?.(enemy.id) ?? 1)
-        - (origin.y ?? 0) - (physics.characterAimHeight?.(entityId) ?? 1);
-      const rawDz = target.z - origin.z;
+      const enemyVehicle = vehicles
+        ? (vehicles.vehicleForDriver?.(enemy.id) ?? vehicles.vehicleForPassenger?.(enemy.id) ?? null)
+        : null;
+      const baseTargetX = enemyVehicle && Number.isFinite(Number(enemyVehicle.x)) ? Number(enemyVehicle.x) : target.x;
+      const baseTargetZ = enemyVehicle && Number.isFinite(Number(enemyVehicle.z)) ? Number(enemyVehicle.z) : target.z;
+      const targetAimY = enemyVehicle && Number.isFinite(Number(enemyVehicle.y))
+        ? Number(enemyVehicle.y)
+        : (target.y ?? 0) + (physics.characterAimHeight?.(enemy.id) ?? 1);
+      const shooterAimY = (origin.y ?? 0) + (physics.characterAimHeight?.(entityId) ?? 1);
+
+      const rawDx = baseTargetX - origin.x;
+      const rawDy = targetAimY - shooterAimY;
+      const rawDz = baseTargetZ - origin.z;
       const rawDistance = Math.hypot(rawDx, rawDy, rawDz);
       if (rawDistance <= 0.001 || rawDistance > maxDistance) continue;
-      if (!physics.lineOfSight(origin, target, entityId, enemy.id)) continue;
+      const losTarget = enemyVehicle
+        ? { x: baseTargetX, y: targetAimY - 1, z: baseTargetZ }
+        : target;
+      const effectiveLosOptions = enemyVehicle
+        ? { ...(losOptions ?? {}), targetVehicleId: enemyVehicle.id ?? null }
+        : losOptions;
+      if (!physics.lineOfSight(origin, losTarget, entityId, enemy.id, effectiveLosOptions)) continue;
 
-      let aimX = target.x;
-      let aimZ = target.z;
+      let aimX = baseTargetX;
+      let aimZ = baseTargetZ;
       if (muzzleVelocity > 0) {
         const vel = targetVelocity(enemy.id, target);
         const speed = Math.hypot(vel.vx, vel.vz);
         if (speed > 0.4) {
           const leadSec = Math.min(0.28, (rawDistance / muzzleVelocity) * (bot ? 0.96 : 0.85));
-          const candX = target.x + vel.vx * leadSec;
-          const candZ = target.z + vel.vz * leadSec;
-          if (physics.lineOfSight(origin, { x: candX, y: target.y ?? 0, z: candZ }, entityId, enemy.id)) {
+          const candX = baseTargetX + vel.vx * leadSec;
+          const candZ = baseTargetZ + vel.vz * leadSec;
+          if (physics.lineOfSight(origin, { x: candX, y: losTarget.y ?? 0, z: candZ }, entityId, enemy.id, effectiveLosOptions)) {
             aimX = candX;
             aimZ = candZ;
           }

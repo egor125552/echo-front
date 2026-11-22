@@ -75,6 +75,7 @@ export async function setup(ctx) {
   })();
   let reconnectTimer = null;
   let reconnectAttempt = 0;
+  let roomRedirectCount = 0;
   let latestSnapshot = null;
   let latestSequence = 0;
   let frameStats = {
@@ -140,6 +141,38 @@ export async function setup(ctx) {
   function clearReconnectTimer() {
     if (reconnectTimer != null) clearTimeout(reconnectTimer);
     reconnectTimer = null;
+  }
+
+  function createFallbackBattleRoyaleRoom() {
+    const stamp = Date.now().toString(36);
+    const rand = Math.random().toString(36).slice(2, 6);
+    return `br-${stamp}-${rand}`;
+  }
+
+  function redirectToFreshRoom(ws, previousRoom, suggestedRoom, reason = "battle-royale-in-progress") {
+    const nextRoom = typeof suggestedRoom === "string" && suggestedRoom.trim()
+      ? suggestedRoom.trim()
+      : createFallbackBattleRoyaleRoom();
+    roomRedirectCount += 1;
+    desiredRoom = nextRoom;
+    reconnectAttempt = 0;
+    clearReconnectTimer();
+    if (socket === ws) socket = null;
+    latestSnapshot = null;
+    latestSequence = 0;
+    input.disable();
+    try { ws?.close?.(1000, "Switching to fresh room"); } catch {}
+    ctx.events.emit("network:room-redirected", {
+      fromRoom: previousRoom,
+      room: nextRoom,
+      mode: desiredMode,
+      reason,
+    });
+    if (roomRedirectCount <= 3) {
+      openSocket();
+    } else {
+      scheduleReconnect();
+    }
   }
 
   function scheduleReconnect() {
@@ -240,6 +273,7 @@ export async function setup(ctx) {
         playerId = data.playerId;
         desiredMode = normalizeMode(data.mode ?? mode);
         reconnectAttempt = 0;
+        roomRedirectCount = 0;
         ctx.events.emit("network:welcome", data);
         if (wasReconnect) {
           ctx.events.emit("network:reconnected", {
@@ -269,6 +303,9 @@ export async function setup(ctx) {
         emitGamePacket(data);
       } else if (data.type === "events") {
         for (const packet of data.events ?? []) emitGamePacket(packet);
+      } else if (data.type === "room-busy") {
+        redirectToFreshRoom(ws, room, data.suggestedRoom, data.reason ?? "battle-royale-in-progress");
+        return;
       } else if (data.type === "server-error") {
         ctx.events.emit("network:server-error", {
           room,
@@ -282,6 +319,10 @@ export async function setup(ctx) {
 
     ws.addEventListener("close", (event) => {
       if (socket !== ws) return;
+      if (Number(event.code) === 4009 && desiredRoom && desiredMode === "battle-royale") {
+        redirectToFreshRoom(ws, room, null, event.reason || "battle-royale-in-progress");
+        return;
+      }
       socket = null;
       latestSnapshot = null;
       latestSequence = 0;
@@ -316,6 +357,7 @@ export async function setup(ctx) {
     desiredRoom = room;
     desiredMode = normalizeMode(mode);
     desiredTutorial = Boolean(tutorial);
+    roomRedirectCount = 0;
     clearReconnectTimer();
     openSocket();
   }
@@ -324,6 +366,7 @@ export async function setup(ctx) {
     desiredRoom = null;
     desiredTutorial = false;
     reconnectAttempt = 0;
+    roomRedirectCount = 0;
     clearReconnectTimer();
     const ws = socket;
     socket = null;

@@ -162,18 +162,35 @@ export async function setup(ctx) {
     const chosen = candidates.slice(-3);
     const recruited = [];
     const stimService = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
+    const armorService = ctx.services.has("armor") ? ctx.services.get("armor") : null;
     chosen.forEach((bot, idx) => {
       bot.team = team;
       bot.squadId = squadId;
       bot.humanSquad = playerId;
       bot.squadSlot = idx;
       bot.name = `Напарник ${idx + 1}`;
+      const armorComp = ctx.components.get(bot.id, "Armor");
+      if (armorComp) {
+        armorComp.maximum = Math.max(Number(armorComp.maximum) || 150, 150);
+        armorComp.current = armorComp.maximum;
+        armorComp.reservePlates = Math.max(Number(armorComp.reservePlates) || 0, 6);
+      } else {
+        armorService?.grantPlates?.(bot.id, 6);
+      }
       stimService?.setCount?.(bot.id, 1);
+      stimService?.grantTransfer?.(bot.id, "fast", 2);
       const teamComp = ctx.components.get(bot.id, "Team");
       if (teamComp) teamComp.id = team;
-      if (idx === 0) weapons.grant(bot.id, "rifle");
-      else if (idx === 1) weapons.grant(bot.id, "marksman");
-      else if (idx === 2) weapons.grant(bot.id, "sniper");
+      if (idx === 0) {
+        weapons.grant(bot.id, "rifle");
+        weapons.grant(bot.id, "marksman");
+      } else if (idx === 1) {
+        weapons.grant(bot.id, "marksman");
+        weapons.grant(bot.id, "rifle");
+      } else if (idx === 2) {
+        weapons.grant(bot.id, "sniper");
+        weapons.grant(bot.id, "rifle");
+      }
       if (humanTransform) {
         const angle = (idx * Math.PI * 2) / Math.max(1, chosen.length);
         movement.teleport(bot.id, {
@@ -356,10 +373,47 @@ export async function setup(ctx) {
         z: result.z,
       });
     }
+    if (result.loot === "electro-lukashenko") {
+      quantity = 1;
+      applied = true;
+    }
+    if (result.loot === "drop-pack" && result.dropItem) {
+      const drop = result.dropItem;
+      const stimulantsService = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
+      const itemId = String(drop.itemId ?? "");
+      const amount = Math.max(1, Math.floor(Number(drop.quantity) || 1));
+      if (itemId === "armor-plate") {
+        quantity = armorService?.grantPlates?.(playerId, amount) ?? 0;
+        applied = quantity > 0;
+      } else if (itemId === "stim-standard") {
+        quantity = stimulantsService?.grantTransfer?.(playerId, "standard", amount) ?? 0;
+        applied = quantity > 0;
+      } else if (itemId === "stim-fast") {
+        quantity = stimulantsService?.grantTransfer?.(playerId, "fast", amount) ?? 0;
+        applied = quantity > 0;
+      } else if (itemId === "stim-turbo") {
+        quantity = stimulantsService?.grantTransfer?.(playerId, "turbo", amount) ?? 0;
+        applied = quantity > 0;
+      } else if (itemId.startsWith("ammo-")) {
+        const weaponId = itemId.slice(5);
+        quantity = weapons.grantAmmo?.(playerId, weaponId, amount) ?? 0;
+        applied = quantity > 0;
+      }
+      if (quantity < amount) {
+        const crateRef = Array.isArray(map.crates)
+          ? map.crates.find((crate) => crate.id === result.crateId)
+          : null;
+        if (crateRef && crateRef.dropItem) {
+          crateRef.dropItem.quantity = Math.max(1, amount - quantity);
+          crateRef.opened = false;
+        }
+      }
+    }
     ctx.events.emit("loot:picked", {
       entityId: playerId,
       crateId: result.crateId,
       loot: result.loot,
+      dropItem: result.dropItem ?? null,
       applied,
       quantity,
       restocked,
@@ -477,6 +531,8 @@ export async function setup(ctx) {
       armorReserveMax: armorDescription?.reserveCapacity ?? null,
       armorSatchel: armorDescription?.hasSatchel ?? false,
       juggernaut: Boolean(entity.juggernaut),
+      electroLukashenko: Boolean(entity.electroLukashenko),
+      official: Boolean(entity.official),
       plating: armorDescription?.plating ?? false,
       weapon: selected?.id ?? null,
       weapons: inventory?.items?.map((item) => item.id) ?? [],
@@ -488,22 +544,41 @@ export async function setup(ctx) {
   }
 
   function mapSnapshot(listener = null) {
+    const lx = Number(listener?.x) || 0;
+    const ly = Number(listener?.y) || 0;
+    const lz = Number(listener?.z) || 0;
     return {
       id: map.id,
       halfSize: map.halfSize,
       crates: Array.isArray(map.crates)
-        ? map.crates.map((crate) => ({
-          id: crate.id,
-          x: crate.x,
-          y: crate.y ?? 0,
-          z: crate.z,
-          loot: crate.loot ?? null,
-          airdrop: Boolean(crate.airdrop),
-          juggernaut: Boolean(crate.juggernaut || crate.loot === "juggernaut"),
-          airdropPhase: crate.airdropPhase ?? null,
-          opened: Boolean(crate.opened),
-          occlusion: listener ? (acousticOcclusion(listener, crate) ?? 0) : 0,
-        }))
+        ? map.crates.map((crate) => {
+          const isAirdrop = Boolean(crate.airdrop);
+          const opened = Boolean(crate.opened);
+          let occlusion = 0;
+          if (listener && !opened) {
+            const cy = Number(crate.y) || 0;
+            const dx = (Number(crate.x) || 0) - lx;
+            const dz = (Number(crate.z) || 0) - lz;
+            const maxHoriz = isAirdrop ? 90 : 35;
+            const maxVert = isAirdrop ? 18 : 12;
+            if (Math.abs(ly - cy) <= maxVert && (dx * dx + dz * dz) <= maxHoriz * maxHoriz) {
+              occlusion = acousticOcclusion(listener, crate) ?? 0;
+            }
+          }
+          return {
+            id: crate.id,
+            x: crate.x,
+            y: crate.y ?? 0,
+            z: crate.z,
+            loot: crate.loot ?? null,
+            airdrop: isAirdrop,
+            juggernaut: Boolean(crate.juggernaut || crate.loot === "juggernaut"),
+            electroLukashenko: Boolean(crate.electroLukashenko || crate.loot === "electro-lukashenko"),
+            airdropPhase: crate.airdropPhase ?? null,
+            opened,
+            occlusion,
+          };
+        })
         : [],
     };
   }

@@ -1,3 +1,8 @@
+export function shouldShowNewMatchButton({ isBr = false, tutorial = false, self = null, spectator = null, match = null } = {}) {
+  if (!isBr || tutorial || !self) return false;
+  return Boolean(!self.alive || spectator?.active || match?.ended);
+}
+
 export const manifest = {
   id: "game-hud",
   requires: ["cloudflare-session"],
@@ -20,9 +25,35 @@ export async function setup(ctx) {
   const armor = document.querySelector("#armor-value");
   const cash = document.querySelector("#cash-value");
   const shopButton = document.querySelector('[data-touch-action="shop"]');
+  const crouchButton = document.querySelector('[data-touch-action="crouch"]');
+  const mineButton = document.querySelector('[data-touch-action="mine"]');
+  const nukeButton = document.querySelector('[data-touch-action="nuke"]');
+  const electroModeButton = document.querySelector('[data-touch-action="electro-mode"]');
+  const electroJumpButton = document.querySelector('[data-touch-action="electro-jump"]');
+  const gestureCrouchButton = document.querySelector("#gesture-crouch");
+  const gestureMineButton = document.querySelector("#gesture-mine");
+  const gestureNukeButton = document.querySelector("#gesture-nuke");
+  const gestureElectroButton = document.querySelector("#gesture-electro");
+  const gestureElectroJumpButton = document.querySelector("#gesture-electro-jump");
+  const newMatchButton = document.querySelector("#new-match-button");
+  const gestureNewMatchButton = document.querySelector("#gesture-new-match");
+
+  function setNewMatchVisible(visible) {
+    const hidden = !visible;
+    if (newMatchButton) {
+      newMatchButton.hidden = hidden;
+      if (!hidden) newMatchButton.disabled = false;
+    }
+    if (gestureNewMatchButton) {
+      gestureNewMatchButton.hidden = hidden;
+      if (!hidden) gestureNewMatchButton.disabled = false;
+    }
+  }
 
   ctx.events.on("network:connected", () => { connection.textContent = "Соединение установлено"; });
+  ctx.events.on("network:welcome", () => { setNewMatchVisible(false); });
   ctx.events.on("network:disconnected", ({ willReconnect } = {}) => {
+    setNewMatchVisible(false);
     connection.textContent = willReconnect ? "Соединение потеряно. Переподключение" : "Соединение потеряно";
   });
   ctx.events.on("network:reconnecting", ({ attempt } = {}) => {
@@ -46,7 +77,9 @@ export async function setup(ctx) {
           ? "Королевская битва"
           : "Командный бой";
     }
-    team.textContent = isBr ? "каждый сам за себя" : String(self.team || "-");
+    team.textContent = isBr
+      ? (!network.tutorial && Number(self.team) >= 100_000 ? "Ваш отряд" : "каждый сам за себя")
+      : String(self.team || "-");
     const personalKills = Math.max(0, Number(self.kills) || 0);
     const squadKills = Math.max(personalKills, Number(self.squadKills) || 0);
     score.textContent = isBr
@@ -66,6 +99,7 @@ export async function setup(ctx) {
     const WEAPON_LABELS = {
       pistol: "Пистолет",
       rifle: "Автомат",
+      "electro-rifle": "Электрический автомат-шокер",
       marksman: "Винтовка",
       sniper: "Снайперка",
     };
@@ -87,5 +121,101 @@ export async function setup(ctx) {
       shopButton.disabled = !isBr || !self.alive || Boolean(self.downed) || !nearbyShop;
       shopButton.textContent = nearbyShop ? `Магазин (${nearbyShop.name})` : "Магазин";
     }
+    if (crouchButton) {
+      const crouched = Boolean(self.crouching);
+      crouchButton.setAttribute("aria-pressed", String(crouched));
+      crouchButton.textContent = crouched
+        ? (self.inCover && self.coverLabel ? `Встать (${self.coverLabel})` : "Встать (присел)")
+        : "Присесть / Укрытие";
+    }
+    if (gestureCrouchButton) {
+      const crouched = Boolean(self.crouching);
+      gestureCrouchButton.setAttribute("aria-pressed", String(crouched));
+      gestureCrouchButton.textContent = crouched ? "Встать" : "Укрытие";
+    }
+    const specialOps = snapshot?.specialOps ?? null;
+    if (mineButton || gestureMineButton) {
+      const mines = Number(specialOps?.mines) || 0;
+      const disabled = !isBr || !self.alive || Boolean(self.downed) || mines <= 0;
+      if (mineButton) {
+        mineButton.disabled = disabled;
+        mineButton.textContent = `Поставить мину (${mines})`;
+      }
+      if (gestureMineButton) {
+        gestureMineButton.hidden = !isBr;
+        gestureMineButton.disabled = disabled;
+        gestureMineButton.textContent = `Мина (${mines})`;
+      }
+    }
+    if (nukeButton || gestureNukeButton) {
+      const nukes = Number(specialOps?.miniNukes) || 0;
+      const aiming = Boolean(specialOps?.nukeAiming);
+      const disabled = !isBr || !self.alive || Boolean(self.downed) || (!aiming && nukes <= 0);
+      if (nukeButton) {
+        nukeButton.disabled = disabled;
+        nukeButton.textContent = aiming
+          ? `Запустить ядерку (${specialOps?.nukeDistance?.meters ?? 105} м)!`
+          : `Мини-ядерка (${nukes})`;
+      }
+      if (gestureNukeButton) {
+        gestureNukeButton.hidden = !isBr;
+        gestureNukeButton.disabled = disabled;
+        gestureNukeButton.textContent = aiming
+          ? `Запуск (${specialOps?.nukeDistance?.meters ?? 105} м)!`
+          : `Ядерка (${nukes})`;
+      }
+    }
+    if (electroModeButton || gestureElectroButton) {
+      const hasElectro = Boolean(specialOps?.hasElectroRifle);
+      const shortLabel = specialOps?.electroMode?.shortLabel || "Шок";
+      if (electroModeButton) {
+        electroModeButton.disabled = !isBr || !self.alive || !hasElectro;
+        electroModeButton.textContent = hasElectro
+          ? `Режим шокера: ${shortLabel}`
+          : "Режим шокера";
+      }
+      if (gestureElectroButton) {
+        gestureElectroButton.hidden = !isBr || !hasElectro;
+        gestureElectroButton.disabled = !isBr || !self.alive || !hasElectro;
+        gestureElectroButton.textContent = `Режим: ${shortLabel}`;
+      }
+    }
+    if (electroJumpButton || gestureElectroJumpButton) {
+      const isElectroSuit = Boolean(specialOps?.electroLukashenko);
+      const phase = specialOps?.electroJumpPhase || "ready";
+      const cdSec = Math.ceil((Number(specialOps?.electroJumpCooldownMs) || 0) / 1000);
+      const fuelSec = Math.ceil((Number(specialOps?.electroJumpFuelMs) || 0) / 1000);
+      const rising = phase === "rising";
+      const gliding = phase === "gliding";
+      const diving = phase === "diving";
+      const label = rising
+        ? `Взлёт (${fuelSec}с)`
+        : (gliding
+          ? (fuelSec > 0 ? `Удар / Вверх (${fuelSec}с)` : "УДАР ВНИЗ!")
+          : (diving ? "Удар..." : (phase === "cooldown" && cdSec > 0 ? `Прыжок (${cdSec}с)` : "Суперпрыжок")));
+      const fullLabel = rising
+        ? `Полёт вверх (${fuelSec} сек) — отпусти чтобы падать`
+        : (gliding
+          ? (fuelSec > 0 ? `Падение: Удар вниз / Вверх (${fuelSec}с) / Парашют` : "УДАР ВНИЗ! (или Парашют)")
+          : (diving ? "Падение с ударом..." : (phase === "cooldown" && cdSec > 0 ? `Суперпрыжок (${cdSec} сек)` : "Суперпрыжок Лукашенко (15с)")));
+      const disabled = !isBr || !self.alive || Boolean(self.downed) || !isElectroSuit || diving || (phase === "cooldown" && cdSec > 0);
+      if (electroJumpButton) {
+        electroJumpButton.hidden = !isBr || !isElectroSuit;
+        electroJumpButton.disabled = disabled;
+        electroJumpButton.textContent = fullLabel;
+      }
+      if (gestureElectroJumpButton) {
+        gestureElectroJumpButton.hidden = !isBr || !isElectroSuit;
+        gestureElectroJumpButton.disabled = disabled;
+        gestureElectroJumpButton.textContent = label;
+      }
+    }
+    setNewMatchVisible(shouldShowNewMatchButton({
+      isBr,
+      tutorial: network.tutorial,
+      self,
+      spectator: snapshot?.spectator ?? null,
+      match: snapshot?.match ?? null,
+    }));
   });
 }

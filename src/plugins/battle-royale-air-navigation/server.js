@@ -103,9 +103,18 @@ export async function setup(ctx) {
     if (!state || !isAirborne(playerId) || !state.active) return state;
     const transform = transformFor(playerId);
     const target = rawTargetFor(playerId, state);
-    const checkpoint = airCheckpointFor(playerId, state);
-    if (!transform || !target || !checkpoint) return state;
+    if (!transform || !target) return state;
     const distance = horizontalDistance(transform, target.position);
+    const checkpoint = {
+      x: finite(target.position?.x),
+      y: finite(transform.y),
+      z: finite(target.position?.z),
+      index: 1,
+      total: 1,
+      kind: "air-target",
+      mandatory: true,
+      distance,
+    };
     return {
       ...state,
       selected: state.selected ? { ...state.selected, distance } : state.selected,
@@ -262,23 +271,27 @@ export async function setup(ctx) {
   movement.setInput = (playerId, input = {}) => originalSetInput(playerId, guidedInput(playerId, input));
 
   matchApi.snapshotFor = (playerId, now = Date.now()) => {
-    const snapshot = originalSnapshotFor(playerId, now);
-    if (!snapshot?.navigation || !isAirborne(playerId)) return snapshot;
-    return {
-      ...snapshot,
-      navigation: decorateState(playerId, {
-        ...originalNavigationStateFor(playerId, now),
-        // Keep the menu catalog and other fields added by earlier plugins.
-        // Flight changes route geometry, not which destinations are available.
-        ...snapshot.navigation,
-      }),
-      airNavigation: stateFor(playerId),
+    const run = () => {
+      const snapshot = originalSnapshotFor(playerId, now);
+      if (!snapshot?.navigation || !isAirborne(playerId)) return snapshot;
+      const baseNavState = originalNavigationStateFor(playerId, now);
+      return {
+        ...snapshot,
+        navigation: decorateState(playerId, {
+          ...baseNavState,
+          // Keep the menu catalog and other fields added by earlier plugins.
+          // Flight changes route geometry, not which destinations are available.
+          ...snapshot.navigation,
+        }),
+        airNavigation: stateFor(playerId, baseNavState),
+      };
     };
+    return navigation.withTargetCache ? navigation.withTargetCache(run) : run();
   };
 
-  function stateFor(playerId) {
+  function stateFor(playerId, precomputedNavState = null) {
     const flight = flightFor(playerId);
-    const navState = originalNavigationStateFor(playerId);
+    const navState = precomputedNavState ?? originalNavigationStateFor(playerId);
     const target = rawTargetFor(playerId, navState);
     const transform = transformFor(playerId);
     const brakeDistance = target ? brakeDistanceFor(playerId, target) : null;

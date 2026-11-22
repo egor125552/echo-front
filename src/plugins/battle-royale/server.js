@@ -49,6 +49,41 @@ export function zoneDamageForElapsed(elapsedMs) {
   return ZONE_DAMAGE_PER_SECOND * (elapsed / 1000);
 }
 
+export function evaluateBattleRoyaleSurvivors(survivors, { teamOf, teamSizeOf } = {}) {
+  if (!Array.isArray(survivors) || survivors.length === 0) {
+    return {
+      ended: true,
+      winnerId: null,
+      winnerTeam: 0,
+      winnerIds: [],
+      squadVictory: false,
+      survivorCount: 0,
+    };
+  }
+  const getTeam = (entity) => Number(teamOf?.(entity.id) ?? entity.team) || 0;
+  if (survivors.length > 1) {
+    const firstTeam = getTeam(survivors[0]);
+    const sameHumanSquad = firstTeam >= 100_000
+      && survivors.every((entity) => getTeam(entity) === firstTeam);
+    if (!sameHumanSquad) return { ended: false };
+  }
+  const humanWinner = survivors.find((entity) => !entity.bot && entity.kind === "human");
+  const winner = humanWinner ?? survivors[0];
+  const winnerTeam = getTeam(winner);
+  const recordedTeamSize = Math.max(survivors.length, Number(teamSizeOf?.(winnerTeam)) || 0);
+  const squadVictory = winnerTeam >= 100_000
+    ? recordedTeamSize > 1
+    : survivors.length > 1;
+  return {
+    ended: true,
+    winnerId: winner?.id ?? null,
+    winnerTeam,
+    winnerIds: survivors.map((entity) => entity.id),
+    squadVictory,
+    survivorCount: survivors.length,
+  };
+}
+
 export async function setup(ctx) {
   const entities = ctx.services.get("entities");
   const health = ctx.services.get("health");
@@ -60,6 +95,9 @@ export async function setup(ctx) {
   let startedAt = 0;
   let endedAt = 0;
   let winnerId = null;
+  let winnerTeam = 0;
+  let winnerIds = [];
+  let squadVictory = false;
   let total = 0;
   let lastZoneDamageAt = 0;
   let zoneClosingAnnounced = false;
@@ -67,6 +105,36 @@ export async function setup(ctx) {
   const announced = new Set();
   const placements = new Map();
   const landedHumans = new Set();
+  const teamMembers = new Map();
+
+  function teamIdOf(entityId) {
+    const compTeam = Number(ctx.components.get(entityId, "Team")?.id) || 0;
+    if (compTeam > 0) return compTeam;
+    return Number(entities.get(entityId)?.team) || 0;
+  }
+
+  function recordTeamMembership(entityId) {
+    const teamId = teamIdOf(entityId);
+    if (!entityId || teamId <= 0) return;
+    let members = teamMembers.get(teamId);
+    if (!members) {
+      members = new Set();
+      teamMembers.set(teamId, members);
+    }
+    members.add(entityId);
+  }
+
+  function syncTeamMemberships() {
+    for (const entity of entities.all()) {
+      recordTeamMembership(entity.id);
+    }
+  }
+
+  function teamSizeOf(teamId) {
+    if (!teamId || teamId <= 0) return 0;
+    syncTeamMemberships();
+    return teamMembers.get(teamId)?.size ?? 0;
+  }
 
   function aliveEntities() {
     return entities.all().filter((entity) => entity.alive);
@@ -110,6 +178,9 @@ export async function setup(ctx) {
       ended: phase === "ended",
       endedAt: endedAt || null,
       winnerId,
+      winnerTeam,
+      winnerIds: [...winnerIds],
+      squadVictory,
       zone: {
         x: 0,
         z: 0,
@@ -137,6 +208,8 @@ export async function setup(ctx) {
     const teamA = ctx.components.get(survivors[0].id, "Team");
     const teamB = ctx.components.get(survivors[1].id, "Team");
     if (!teamA || !teamB || teamA.id !== teamB.id || teamA.id === 0) return;
+    // Never dissolve a human player's squad: surviving squadmates win for the squad.
+    if (teamA.id >= 100_000) return;
     teamA.id = 200_001;
     teamB.id = 200_002;
     survivors[0].team = 200_001;
@@ -145,24 +218,28 @@ export async function setup(ctx) {
 
   function finish(now = Date.now()) {
     if (phase === "ended") return;
+    syncTeamMemberships();
     const survivors = aliveEntities();
-    if (survivors.length > 1) {
-      const firstTeam = Number(ctx.components.get(survivors[0].id, "Team")?.id) || 0;
-      const sameHumanSquad = firstTeam >= 100_000
-        && survivors.some((entity) => !entity.bot && entity.kind === "human")
-        && survivors.every((entity) => (Number(ctx.components.get(entity.id, "Team")?.id) || 0) === firstTeam);
-      if (!sameHumanSquad) return;
-    }
+    const evaluation = evaluateBattleRoyaleSurvivors(survivors, {
+      teamOf: teamIdOf,
+      teamSizeOf,
+    });
+    if (!evaluation.ended) return;
     phase = "ended";
     endedAt = now;
     deploymentInProgress = false;
-    const humanWinner = survivors.find((entity) => !entity.bot && entity.kind === "human");
-    winnerId = humanWinner?.id ?? survivors[0]?.id ?? null;
+    winnerId = evaluation.winnerId;
+    winnerTeam = evaluation.winnerTeam;
+    winnerIds = evaluation.winnerIds;
+    squadVictory = evaluation.squadVictory;
     for (const survivor of survivors) {
       placements.set(survivor.id, 1);
     }
     ctx.events.emit("battle-royale:ended", {
       winnerId,
+      winnerTeam,
+      winnerIds: [...winnerIds],
+      squadVictory,
       alive: survivors.length,
       total,
       endedAt,

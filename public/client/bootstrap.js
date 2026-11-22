@@ -196,6 +196,8 @@ try {
 const tutorialButton = document.querySelector("#tutorial-button");
 const playButton = document.querySelector("#play-button");
 const battleRoyaleButton = document.querySelector("#battle-royale-button");
+const newMatchButton = document.querySelector("#new-match-button");
+const gestureNewMatchButton = document.querySelector("#gesture-new-match");
 const gamePanel = document.querySelector("#game-panel");
 const connection = document.querySelector("#connection-status");
 const modeValue = document.querySelector("#mode-value");
@@ -299,8 +301,16 @@ async function diagnoseServerFailure(mode, room, networkDetails = {}) {
   return diagnosisPromise;
 }
 
-async function start(mode, { tutorial = false } = {}) {
+async function start(mode, { tutorial = false, room: explicitRoom = null, loadingMessage = null } = {}) {
   setButtonsDisabled(true);
+  if (newMatchButton) {
+    newMatchButton.hidden = true;
+    newMatchButton.disabled = true;
+  }
+  if (gestureNewMatchButton) {
+    gestureNewMatchButton.hidden = true;
+    gestureNewMatchButton.disabled = true;
+  }
   document.documentElement.dataset.tutorial = tutorial ? "true" : "false";
   const modeLabel = tutorial
     ? "Обучение"
@@ -318,7 +328,7 @@ async function start(mode, { tutorial = false } = {}) {
     const speech = host.services.get("speech");
     // Safari grants speech playback only within a real user action. Speak before
     // the first await, or the original click can lose its WebKit activation.
-    const loadingText = "Загрузка звуков, пожалуйста подождите";
+    const loadingText = loadingMessage || "Загрузка звуков, пожалуйста подождите";
     if (startupStatus) startupStatus.textContent = loadingText;
     // Begin both WebAudio and speech under this same synchronous button click.
     const audioResume = host.services.get("audio").resume();
@@ -337,13 +347,31 @@ async function start(mode, { tutorial = false } = {}) {
     connection.textContent = connectingText;
 
     const network = host.services.get("network");
-    const room = tutorial ? `tutorial-${network.sessionId}` : "public";
+    const room = explicitRoom || (tutorial ? `tutorial-${network.sessionId}` : "public");
     host.events.emit("tutorial:requested", { enabled: tutorial });
     network.connect(room, { mode, tutorial });
   } catch (error) {
     reportError("Не удалось запустить игру", error, { mode, tutorial, phase: "game-start" });
     setButtonsDisabled(false);
   }
+}
+
+function createFreshBattleRoyaleRoom() {
+  const stamp = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 6);
+  return `br-${stamp}-${rand}`;
+}
+
+function startNewBattleRoyaleMatch() {
+  const menus = host.services.has("menus") ? host.services.get("menus") : null;
+  menus?.close?.({ announceClose: false });
+  host.services.get("network")?.disconnect?.();
+  const freshRoom = createFreshBattleRoyaleRoom();
+  void start("battle-royale", {
+    tutorial: false,
+    room: freshRoom,
+    loadingMessage: "Запускаю новый матч королевской битвы",
+  });
 }
 
 async function checkAudioFromClick() {
@@ -371,6 +399,24 @@ document.querySelector("#gesture-speech-test")?.addEventListener("click", () => 
 document.querySelector("#gesture-main-menu")?.addEventListener("click", () => {
   document.querySelector('[data-accessible-menu="main"]')?.click();
 });
+document.querySelector("#gesture-squad")?.addEventListener("click", () => {
+  document.querySelector('[data-accessible-menu="squad"]')?.click();
+});
+document.querySelector("#gesture-crouch")?.addEventListener("click", () => {
+  host.services.get("input")?.triggerVirtualAction?.("crouch");
+});
+document.querySelector("#gesture-mine")?.addEventListener("click", () => {
+  host.services.get("input")?.triggerVirtualAction?.("mine");
+});
+document.querySelector("#gesture-nuke")?.addEventListener("click", () => {
+  host.services.get("input")?.triggerVirtualAction?.("nuke");
+});
+document.querySelector("#gesture-electro")?.addEventListener("click", () => {
+  host.services.get("input")?.triggerVirtualAction?.("electro-mode");
+});
+document.querySelector("#gesture-electro-jump")?.addEventListener("click", () => {
+  host.services.get("input")?.triggerVirtualAction?.("electro-jump");
+});
 document.querySelector("#gesture-map")?.addEventListener("click", () => {
   document.querySelector('[data-accessible-menu="map"]')?.click();
 });
@@ -385,6 +431,11 @@ document.querySelector("#gesture-buttons-mode")?.addEventListener("click", () =>
 tutorialButton?.addEventListener("click", () => start("tdm", { tutorial: true }));
 playButton?.addEventListener("click", () => start("tdm"));
 battleRoyaleButton?.addEventListener("click", () => start("battle-royale"));
+newMatchButton?.addEventListener("click", () => startNewBattleRoyaleMatch());
+gestureNewMatchButton?.addEventListener("click", () => startNewBattleRoyaleMatch());
+host.events.on("match:restart-requested", ({ mode = "battle-royale" } = {}) => {
+  if (mode === "battle-royale") startNewBattleRoyaleMatch();
+});
 
 host.events.on("tutorial:team-section-complete", () => {
   host.services.get("network")?.disconnect?.();
@@ -430,11 +481,18 @@ host.events.on("network:error", (details = {}) => {
   );
 });
 
+host.events.on("network:room-redirected", () => {
+  lastNetworkFailure = null;
+  setButtonsDisabled(true);
+  if (connection) connection.textContent = "Матч уже идёт. Открываю новую комнату королевской битвы";
+});
+
 host.events.on("network:disconnected", (details = {}) => {
   lastNetworkFailure = { ...(lastNetworkFailure ?? {}), ...details, phase: "close" };
   setButtonsDisabled(Boolean(details.willReconnect));
   if (details.willReconnect && connection) connection.textContent = "Соединение прервано. Переподключение";
-  if (Number(details.code) !== 1000) {
+  const closeCode = Number(details.code);
+  if (closeCode !== 1000 && closeCode !== 4009) {
     reportError("Соединение закрыто с ошибкой", details.reason || `WebSocket закрыт с кодом ${details.code ?? "unknown"}`, {
       ...details,
       phase: "close",

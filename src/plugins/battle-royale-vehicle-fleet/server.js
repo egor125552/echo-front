@@ -286,6 +286,7 @@ export async function setup(ctx) {
       previousSpeed: 0,
       peakImpactDelta: 0,
       physicsFrames: 0,
+      idleSettleSubsteps: 0,
     };
     extras.set(entry.id, entry);
     return entry;
@@ -481,15 +482,50 @@ export async function setup(ctx) {
     if (withinInterest(primary)) result.push(primary);
 
     for (const entry of extras.values()) {
-      const body = bodyState(entry);
-      if (!body) continue;
       const alwaysInclude = entry.driverId === observedEntityId
         || entry.passengerIds.includes(observedEntityId);
-      if (!alwaysInclude && center && Number.isFinite(radius) && distance3(center, body) > radius) {
-        continue;
+      if (!alwaysInclude && center && Number.isFinite(radius)) {
+        const pos = entry.body?.translation?.();
+        if (!pos || distance3(center, pos) > radius) continue;
       }
+      const body = bodyState(entry);
+      if (!body) continue;
       const state = networkExtraState(entry, body);
       if (state) result.push(state);
+    }
+    return result;
+  }
+
+  // Lightweight position and occupancy snapshot for navigation target discovery.
+  // Reads only body translation and driver/occupancy flags without polling wheels.
+  function navigationSnapshot() {
+    const result = [];
+    const primaryBody = physics.dynamicBody(primaryId);
+    if (primaryBody) {
+      const pos = primaryBody.translation();
+      const dId = originalDriverId();
+      result.push({
+        id: primaryId,
+        kind: "offroad",
+        x: Number(pos.x) || 0,
+        y: Number(pos.y) || 0,
+        z: Number(pos.z) || 0,
+        driverId: dId,
+        occupied: Boolean(dId),
+      });
+    }
+    for (const entry of extras.values()) {
+      if (!physics.dynamicBody(entry.id)) continue;
+      const pos = entry.body.translation();
+      result.push({
+        id: entry.id,
+        kind: entry.tuning.kind,
+        x: Number(pos.x) || 0,
+        y: Number(pos.y) || 0,
+        z: Number(pos.z) || 0,
+        driverId: entry.driverId,
+        occupied: Boolean(entry.driverId),
+      });
     }
     return result;
   }
@@ -552,13 +588,18 @@ export async function setup(ctx) {
   function nearestAvailableVehicle(playerId, requestedVehicleId = null) {
     const transform = ctx.components.get(playerId, "Transform");
     if (!transform) return null;
-    const candidates = snapshot()
-      .filter((vehicle) => !vehicle.occupied)
-      .filter((vehicle) => !requestedVehicleId || vehicle.id === requestedVehicleId)
-      .map((vehicle) => ({ vehicle, distance: distance3(transform, vehicle) }))
-      .filter((entry) => entry.distance <= ENTER_DISTANCE)
-      .sort((a, b) => a.distance - b.distance);
-    return candidates[0]?.vehicle ?? null;
+    let bestId = null;
+    let bestDistance = ENTER_DISTANCE;
+    for (const vehicle of navigationSnapshot()) {
+      if (vehicle.occupied) continue;
+      if (requestedVehicleId && vehicle.id !== requestedVehicleId) continue;
+      const d = distance3(transform, vehicle);
+      if (d <= bestDistance) {
+        bestDistance = d;
+        bestId = vehicle.id;
+      }
+    }
+    return bestId ? stateFor(bestId) : null;
   }
 
   function syncExtraDriver(entry) {
@@ -831,6 +872,7 @@ export async function setup(ctx) {
     entry.driverId = playerId;
     entry.hasBeenDriven = true;
     entry.lastVacatedAt = null;
+    entry.idleSettleSubsteps = 0;
     entry.body?.wakeUp?.();
     extraDriverVehicle.set(playerId, entry.id);
     entry.input = { throttle: 0, steering: 0, handbrake: false, nitro: false };
@@ -952,7 +994,10 @@ export async function setup(ctx) {
     // reverse twice and remain at the exact same coordinates. Wake only on
     // real drive input, not on idle/braking (parked cars should stay asleep).
     if (Math.abs(entry.input.throttle) > .08 && !entry.input.handbrake
-      && entry.body?.isSleeping?.()) entry.body.wakeUp();
+      && entry.body?.isSleeping?.()) {
+      entry.idleSettleSubsteps = 0;
+      entry.body.wakeUp();
+    }
     return true;
   }
 
@@ -1003,12 +1048,48 @@ export async function setup(ctx) {
   }
 
   function finishExtraSubstep(entry) {
-    const speed = speedMetersPerSecond(entry);
+    const linvel = entry.body.linvel();
+    const speed = Math.hypot(Number(linvel.x) || 0, Number(linvel.y) || 0, Number(linvel.z) || 0);
     const delta = Math.max(0, entry.previousSpeed - speed);
     entry.tickPeakDelta = Math.max(Number(entry.tickPeakDelta) || 0, delta);
     entry.peakImpactDelta = Math.max(entry.peakImpactDelta * 0.985, delta);
     entry.previousSpeed = speed;
     entry.physicsFrames += 1;
+
+    // Stiff unoccupied parked vehicles (notably supercars) can micro-oscillate
+    // indefinitely on their suspension springs without reaching Rapier's sleep
+    // threshold. Once an unoccupied vehicle has rested upright on all 4 wheels
+    // at near-zero velocity for ~0.4s, settle it cleanly to sleep.
+    if (!entry.driverId && entry.passengerIds.length === 0) {
+      const horizSpeed = Math.hypot(Number(linvel.x) || 0, Number(linvel.z) || 0);
+      if (horizSpeed < 0.08 && Math.abs(Number(linvel.y) || 0) < 0.08) {
+        const angvel = entry.body.angvel();
+        const pitchRollSpeed = Math.hypot(Number(angvel.x) || 0, Number(angvel.z) || 0);
+        const yawSpeed = Math.abs(Number(angvel.y) || 0);
+        const rot = entry.body.rotation();
+        const upright = Math.abs(Number(rot.x) || 0) < 0.08 && Math.abs(Number(rot.z) || 0) < 0.08;
+        if (
+          pitchRollSpeed < 0.15
+          && yawSpeed < 0.75
+          && upright
+          && entry.controller.wheelIsInContact(0)
+          && entry.controller.wheelIsInContact(1)
+          && entry.controller.wheelIsInContact(2)
+          && entry.controller.wheelIsInContact(3)
+        ) {
+          entry.idleSettleSubsteps += 1;
+          if (entry.idleSettleSubsteps >= 24) {
+            entry.body.setLinvel({ x: 0, y: 0, z: 0 }, false);
+            entry.body.setAngvel({ x: 0, y: 0, z: 0 }, false);
+            entry.body.sleep();
+            entry.previousSpeed = 0;
+            entry.idleSettleSubsteps = 0;
+          }
+          return;
+        }
+      }
+    }
+    entry.idleSettleSubsteps = 0;
   }
 
   function emitExtraCrash(entry, speedBefore, speedAfter, contactCursor, now) {
@@ -1118,8 +1199,10 @@ export async function setup(ctx) {
     const contactCursor = Number(physics.contactForceCursor?.()) || 0;
     const speedBeforeTick = new Map();
     for (const entry of extras.values()) {
-      updateExtraNitro(entry, safeDt, now);
-      speedBeforeTick.set(entry.id, entry.previousSpeed);
+      if (entry.driverId || entry.nitroActive || entry.nitroCooldownRemaining > 0) {
+        updateExtraNitro(entry, safeDt, now);
+      }
+      if (entry.driverId) speedBeforeTick.set(entry.id, entry.previousSpeed);
       entry.tickPeakDelta = 0;
     }
 
@@ -1150,17 +1233,19 @@ export async function setup(ctx) {
     }
 
     for (const entry of extras.values()) {
-      emitExtraCrash(
-        entry,
-        Math.max(0, Number(speedBeforeTick.get(entry.id)) || 0),
-        speedMetersPerSecond(entry),
-        contactCursor,
-        now,
-      );
-      syncExtraDriver(entry);
-      syncExtraPassengers(entry);
+      if (entry.driverId) {
+        emitExtraCrash(
+          entry,
+          Math.max(0, Number(speedBeforeTick.get(entry.id)) || 0),
+          speedMetersPerSecond(entry),
+          contactCursor,
+          now,
+        );
+        syncExtraDriver(entry);
+      }
+      if (entry.passengerIds.length > 0) syncExtraPassengers(entry);
     }
-    syncPrimaryPassengers();
+    if (primaryPassengerIds.length > 0) syncPrimaryPassengers();
     cleanAbandonedVehicles(now);
   }
 
@@ -1323,6 +1408,7 @@ export async function setup(ctx) {
     stateFor,
     vehicleForDriver,
     snapshot,
+    navigationSnapshot,
     trafficSnapshot,
     fleetCount,
     networkSnapshot,

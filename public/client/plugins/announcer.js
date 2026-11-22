@@ -19,6 +19,20 @@ export function zoneDirectionLabel(self, zone) {
   return "впереди слева";
 }
 
+export function formatBattleRoyaleEndAnnouncement(payload = {}, playerId = null, playerTeam = 0) {
+  const winnerTeam = Number(payload?.winnerTeam) || 0;
+  const ownTeam = Number(playerTeam) || 0;
+  const winnerIds = Array.isArray(payload?.winnerIds) ? payload.winnerIds : [];
+  const playerWon = Boolean(
+    (playerId && payload?.winnerId === playerId)
+    || (playerId && winnerIds.includes(playerId))
+    || (winnerTeam > 0 && ownTeam > 0 && winnerTeam === ownTeam),
+  );
+  if (!playerWon) return "Королевская битва завершена";
+  if (payload?.squadVictory) return "Победа. Ваш отряд победил";
+  return "Победа. Вы последний выживший";
+}
+
 export const manifest = {
   id: "announcer",
   requires: ["cloudflare-session", "speech-settings"],
@@ -39,6 +53,7 @@ export async function setup(ctx) {
   let lastSelf = null;
   let lastZone = null;
   let lastZoneWarningAt = 0;
+  let lastBunkerPrompt = null;
 
   function updateLiveMode() {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
@@ -120,6 +135,13 @@ export async function setup(ctx) {
         }
       }
     }
+    const bunkerPrompt = snapshot?.specialOps?.nearbyBunkerPrompt ?? null;
+    if (bunkerPrompt && bunkerPrompt !== lastBunkerPrompt) {
+      lastBunkerPrompt = bunkerPrompt;
+      announce(bunkerPrompt, { interrupt: true, repeat: true });
+    } else if (!bunkerPrompt) {
+      lastBunkerPrompt = null;
+    }
   });
 
   ctx.events.on("game:event", (packet) => {
@@ -183,6 +205,7 @@ export async function setup(ctx) {
     if (packet.event === "weapon:selected" && payload.entityId === network.playerId) {
       const names = {
         rifle: "Автомат",
+        "electro-rifle": "Электрический автомат-шокер",
         marksman: "Винтовка",
         sniper: "Снайперка",
         pistol: "Пистолет",
@@ -193,10 +216,11 @@ export async function setup(ctx) {
     if (
       packet.event === "weapon:unlocked"
       && payload.entityId === network.playerId
-      && (payload.weaponId === "rifle" || payload.weaponId === "marksman" || payload.weaponId === "sniper")
+      && (payload.weaponId === "rifle" || payload.weaponId === "electro-rifle" || payload.weaponId === "marksman" || payload.weaponId === "sniper")
     ) {
       const unlockNames = {
         rifle: mode === "battle-royale" ? "Подобран автомат" : "Открыт автомат",
+        "electro-rifle": "Получен электрический автомат-шокер",
         marksman: mode === "battle-royale" ? "Получена винтовка" : "Открыта винтовка",
         sniper: mode === "battle-royale" ? "Получена снайперка" : "Открыта снайперка",
       };
@@ -209,7 +233,8 @@ export async function setup(ctx) {
       if (packet.event === "battle-royale:remaining") announce(`Осталось ${payload.alive} игроков`, { interrupt: false, repeat: true });
       if (packet.event === "battle-royale:eliminated" && payload.entityId === network.playerId) {
         const placement = Number(payload.placement);
-        announce(Number.isFinite(placement) ? `Вы выбыли. ${placement}-е место` : "Вы выбыли", { interrupt: true, repeat: true });
+        const placementText = Number.isFinite(placement) ? `Вы выбыли. ${placement}-е место` : "Вы выбыли";
+        announce(`${placementText}. Можно наблюдать за напарниками или нажать кнопку Начать новый матч`, { interrupt: true, repeat: true });
       }
       if (packet.event === "battle-royale:zone-damage" && payload.entityId === network.playerId) {
         const now = Date.now();
@@ -270,9 +295,126 @@ export async function setup(ctx) {
             announce(message, { interrupt: true, repeat: true });
           }
         }
+        if (payload.loot === "drop-pack" && payload.dropItem) {
+          const qty = Math.max(0, Number(payload.quantity) || Number(payload.dropItem.quantity) || 0);
+          const label = payload.dropItem.label || "Предмет";
+          announce(
+            payload.applied ? `Подобрано: ${label}, ${qty} шт.` : `Не удалось подобрать: ${label}`,
+            { interrupt: true, repeat: true },
+          );
+        }
+      }
+      if (packet.event === "tactics:stance-changed" && payload.entityId === network.playerId) {
+        if (payload.crouching) {
+          const text = payload.inCover && payload.coverLabel
+            ? `Присел ${payload.coverLabel}. Можно стрелять из укрытия`
+            : "Присел";
+          announce(text, { interrupt: true, repeat: true });
+        } else if (payload.reason !== "jump") {
+          announce("Встал", { interrupt: true, repeat: true });
+        }
+      }
+      if (packet.event === "tactics:cover-blocked" && payload.targetId === network.playerId && payload.inCover) {
+        const now = Date.now();
+        if (now - lastZoneWarningAt >= 1400) {
+          lastZoneWarningAt = now;
+          announce("Укрытие приняло выстрел", { interrupt: false, repeat: true });
+        }
+      }
+      if (packet.event === "tactics:squad-order" && payload.leaderId === network.playerId && payload.speech) {
+        announce(payload.speech, { interrupt: true, repeat: true });
+      }
+      if ((packet.event === "inventory:dropped" || packet.event === "inventory:transferred" || packet.event === "inventory:failed")
+        && payload.entityId === network.playerId && payload.speech) {
+        announce(payload.speech, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "special:electro-equipped") {
+        if (payload.entityId === network.playerId) {
+          announce(
+            "Костюм «Электрический Лукашенко» надет! 800 здоровья, 800 брони, встроенный стимулятор, электрический автомат-шокер и мини-ядерка!",
+            { interrupt: true, repeat: true },
+          );
+        } else {
+          announce(
+            `Внимание! ${payload.name || "Противник"} надел костюм «Электрический Лукашенко»!`,
+            { interrupt: true, repeat: true },
+          );
+        }
+      }
+      if (packet.event === "special:electro-mode-changed" && payload.entityId === network.playerId) {
+        announce(`Режим электро-автомата: ${payload.modeLabel || payload.shortLabel}`, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "special:electro-jump") {
+        const isSelf = payload.entityId === network.playerId;
+        if (isSelf) {
+          if (payload.phase === "launch") {
+            announce("Взлёт вверх и разгон вперёд! Держи квадрат до 15 секунд — наберёшь до 600 метров. Отпусти в любой момент, чтобы начать падать.", { interrupt: true, repeat: true });
+          } else if (payload.phase === "altitude") {
+            const alt = Math.round(Number(payload.altitude) || 0);
+            announce(payload.ceiling ? `Высота ${alt} метров, потолок!` : `Высота ${alt} метров.`, { interrupt: false, repeat: true });
+          } else if (payload.phase === "boost-resume") {
+            announce("Дополнительная тяга вверх!", { interrupt: true, repeat: true });
+          } else if (payload.phase === "glide") {
+            if (payload.fuelExhausted) {
+              announce("15 секунд полёта вышли, падение! Крестик — парашют, квадрат — удар вниз.", { interrupt: true, repeat: true });
+            } else {
+              announce("Падение! Крестик — парашют, держи квадрат — вверх, короткий квадрат — удар вниз.", { interrupt: true, repeat: true });
+            }
+          } else if (payload.phase === "parachute") {
+            announce("Парашют раскрыт прямо из полёта!", { interrupt: true, repeat: true });
+          } else if (payload.phase === "land") {
+            announce("Мягкое приземление после полёта.", { interrupt: true, repeat: true });
+          } else if (payload.phase === "dive") {
+            announce("Удар вниз!", { interrupt: true, repeat: true });
+          } else if (payload.phase === "slam") {
+            announce(`Электрический взрыв вокруг! Поражено целей: ${payload.hitCount ?? 0}.`, { interrupt: true, repeat: true });
+          }
+        } else if (payload.phase === "launch") {
+          announce(`Внимание! Вражеский ${payload.name || "Электрический Лукашенко"} взлетает на суперпрыжок!`, { interrupt: true, repeat: true });
+        } else if (payload.phase === "slam") {
+          announce(`Грохот! Вражеский ${payload.name || "Электрический Лукашенко"} ударил в землю!`, { interrupt: false, repeat: true });
+        }
+      }
+      if (packet.event === "special:rival-buyback") {
+        announce(`Внимание! Вражеский отряд выкупил напарника в магазине «${payload.shopName || "Магазин"}»!`, { interrupt: false, repeat: true });
+      }
+      if ((packet.event === "special:internal-stim" || packet.event === "special:info") && payload.entityId === network.playerId && payload.text) {
+        announce(payload.text, { interrupt: true, repeat: true });
+      }
+      if ((packet.event === "bunker:transition" || packet.event === "bunker:info") && payload.entityId === network.playerId && payload.text) {
+        announce(payload.text, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "mine:planted" && payload.entityId === network.playerId) {
+        announce(`Мина установлена. Активация меньше чем за секунду — взорвётся от врага или выстрела. Осталось мин: ${payload.remaining ?? 0}.`, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "mine:failed" && payload.entityId === network.playerId && payload.text) {
+        announce(payload.text, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "mine:detonated" && payload.ownerId === network.playerId) {
+        announce(`Сработала твоя мина! Задето целей: ${payload.hitCount ?? 0}.`, { interrupt: true, repeat: true });
+      }
+      if ((packet.event === "nuke:aiming" || packet.event === "nuke:failed" || packet.event === "nuke:cancelled") && payload.entityId === network.playerId && payload.text) {
+        announce(payload.text, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "nuke:launched") {
+        if (payload.entityId === network.playerId && payload.text) {
+          announce(payload.text, { interrupt: true, repeat: true });
+        } else {
+          announce(`Тревога! ${payload.ownerName || "Противник"} запустил мини-ядерку с радиусом 86 метров!`, { interrupt: true, repeat: true });
+        }
+      }
+      if (packet.event === "nuke:detonated" && payload.ownerId === network.playerId) {
+        announce(`Взрыв мини-ядерки на 86 метров! Поражено целей: ${payload.hitCount ?? 0}.`, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "crate:airdrop-incoming" && payload.electroLukashenko) {
+        announce("Сброшен особый груз «Электрический Лукашенко»! Враги уже стягиваются к нему!", { interrupt: true, repeat: true });
+      }
+      if (packet.event === "crate:airdrop-landed" && payload.electroLukashenko) {
+        announce("Груз «Электрический Лукашенко» приземлился!", { interrupt: true, repeat: true });
       }
       if (packet.event === "battle-royale:ended") {
-        announce(payload.winnerId === network.playerId ? "Победа. Вы последний выживший" : "Королевская битва завершена", { interrupt: true });
+        const effectiveTeam = Number(lastSelf?.team) || Number(team) || 0;
+        announce(formatBattleRoyaleEndAnnouncement(payload, network.playerId, effectiveTeam), { interrupt: true });
       }
       return;
     }
