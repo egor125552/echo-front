@@ -80,6 +80,7 @@ export async function setup(ctx) {
     manualInputs.set(playerId, {
       forward: clamp(input.forward, -1, 1),
       strafe: clamp(input.strafe, -1, 1),
+      turn: clamp(input.turn, -1, 1),
       sprint: Boolean(input.sprint),
       fireHeld: Boolean(input.fireHeld),
     });
@@ -89,6 +90,7 @@ export async function setup(ctx) {
     return manualInputs.get(playerId) ?? {
       forward: 0,
       strafe: 0,
+      turn: 0,
       sprint: false,
       fireHeld: false,
     };
@@ -135,6 +137,7 @@ export async function setup(ctx) {
 
   function modeFor(playerId) {
     if (ragdoll.isActive?.(playerId)) return "ragdoll";
+    if (entities.get(playerId)?.electroJumpActive) return "electro-jump";
     if (vehicles.isDriving?.(playerId)) return "vehicle";
     if (parachute.stateFor?.(playerId)?.airborne) return "parachute";
     return "foot";
@@ -145,12 +148,16 @@ export async function setup(ctx) {
     if (!available.ok) return null;
     const resolved = targetAndPointFor(playerId);
     if (!resolved.target || !resolved.facePoint) return null;
-    if (distance2(available.transform, resolved.facePoint) < MIN_FACE_DISTANCE) return null;
 
     const mode = modeFor(playerId);
+    const aimPoint = mode === "electro-jump"
+      ? (resolved.target.position ?? resolved.facePoint)
+      : resolved.facePoint;
+    if (distance2(available.transform, aimPoint) < MIN_FACE_DISTANCE) return null;
+
     const previousAngle = finite(available.transform.angle);
-    const angle = angleTo(available.transform, resolved.facePoint);
-    if (mode === "foot") available.transform.angle = angle;
+    const angle = angleTo(available.transform, aimPoint);
+    if (mode === "foot" || mode === "electro-jump") available.transform.angle = angle;
 
     return {
       targetId: resolved.target.id,
@@ -158,15 +165,15 @@ export async function setup(ctx) {
       targetKind: resolved.target.kind,
       source: resolved.source,
       mode,
-      x: finite(resolved.facePoint.x),
-      y: finite(resolved.facePoint.y),
-      z: finite(resolved.facePoint.z),
+      x: finite(aimPoint.x),
+      y: finite(aimPoint.y),
+      z: finite(aimPoint.z),
       angle,
       previousAngle,
-      turnedRadians: mode === "foot"
+      turnedRadians: (mode === "foot" || mode === "electro-jump")
         ? Math.abs(shortestAngleDelta(angle, previousAngle))
         : 0,
-      distance: distance2(available.transform, resolved.facePoint),
+      distance: distance2(available.transform, aimPoint),
       now,
     };
   }
@@ -351,6 +358,51 @@ export async function setup(ctx) {
     return { restore: false, mode: "foot" };
   }
 
+  function guideElectroJump(playerId, resolved, now, { record = true } = {}) {
+    const transform = ctx.components.get(playerId, "Transform");
+    if (!transform) return null;
+    const airTarget = resolved.target?.position ?? resolved.facePoint;
+    if (!airTarget) return null;
+    const dist = distance2(transform, airTarget);
+    const manual = manualInputFor(playerId);
+    const desiredAngle = angleTo(transform, airTarget);
+    const previousAngle = finite(transform.angle);
+    const manualTurning = Math.abs(manual.strafe) > MANUAL_STEER_THRESHOLD
+      || Math.abs(manual.turn) > MANUAL_STEER_THRESHOLD;
+
+    if (manualTurning || dist <= 10) {
+      if (record) {
+        recordAutoGuide(playerId, resolved, {
+          mode: "electro-jump",
+          angle: previousAngle,
+          desiredAngle,
+          correctionRadians: 0,
+          steering: manualTurning ? (manual.turn || manual.strafe) : 0,
+          manualOverride: manualTurning,
+          distance: dist,
+        }, now);
+      }
+      return { restore: false, mode: "electro-jump", manualOverride: manualTurning };
+    }
+
+    const error = shortestAngleDelta(desiredAngle, previousAngle);
+    const maxStep = 0.22;
+    const step = clamp(error, -maxStep, maxStep);
+    transform.angle = previousAngle + step;
+    if (record) {
+      recordAutoGuide(playerId, resolved, {
+        mode: "electro-jump",
+        angle: transform.angle,
+        desiredAngle,
+        correctionRadians: Math.abs(step),
+        steering: null,
+        manualOverride: false,
+        distance: dist,
+      }, now);
+    }
+    return { restore: false, mode: "electro-jump" };
+  }
+
   function autoGuide(playerId, now = Date.now(), { record = true } = {}) {
     if (!guidanceEnabled.has(playerId)) return null;
     const available = playerAvailable(playerId);
@@ -359,6 +411,9 @@ export async function setup(ctx) {
 
     const resolved = targetAndPointFor(playerId);
     if (!resolved.state?.active || !resolved.facePoint || !resolved.target) return null;
+
+    const mode = modeFor(playerId);
+    if (mode === "electro-jump") return guideElectroJump(playerId, resolved, now, { record });
     if (distance2(available.transform, resolved.facePoint) < MIN_FACE_DISTANCE) return null;
 
     if (vehicles.isDriving?.(playerId)) return guideVehicle(playerId, resolved, now);

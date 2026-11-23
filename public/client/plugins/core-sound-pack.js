@@ -69,7 +69,7 @@ export const SPATIAL_SOUND_PROFILES = {
   "weapon.rifle": { gain: 1.05, referenceDistance: 3, rolloffFactor: 0.28, airAbsorptionMinHz: 2800 },
   "weapon.marksman": { gain: 1.12, referenceDistance: 4, rolloffFactor: 0.24, airAbsorptionMinHz: 2600 },
   "weapon.sniper": { gain: 1.25, referenceDistance: 5.5, rolloffFactor: 0.19, airAbsorptionMinHz: 2200 },
-  "bomb.nuke": { gain: 1.35, referenceDistance: 14, rolloffFactor: 0.14, airAbsorptionMinHz: 1800 },
+  "bomb.nuke": { gain: 1.4, referenceDistance: 4.5, rolloffFactor: 0.16, airAbsorptionMinHz: 1800 },
   "bomb.mine": { gain: 1.25, referenceDistance: 8, rolloffFactor: 0.22, airAbsorptionMinHz: 2100 },
   default: { gain: 1, referenceDistance: 2, rolloffFactor: 0.5, airAbsorptionMinHz: 4200 },
 };
@@ -117,6 +117,64 @@ export async function setup(ctx) {
   let selfAcousticZone = "outdoor";
   let automaticTimer = null;
   let lastOwnShotAt = { marksman: -Infinity, sniper: -Infinity };
+  const activeTrajectories = new Set();
+  let trajectoryTimer = null;
+
+  function sampleTrajectoryPosition(traj, nowMs) {
+    const duration = Math.max(100, Number(traj.flightMs) || 2150);
+    const t = Math.max(0, Math.min(1, (nowMs - traj.startedAt) / duration));
+    const x = traj.startX + (traj.endX - traj.startX) * t;
+    const z = traj.startZ + (traj.endZ - traj.startZ) * t;
+    const baseY = traj.startY + (traj.endY - traj.startY) * t;
+    const arcY = 4 * traj.arcHeight * t * (1 - t);
+    return { x, y: baseY + arcY, z };
+  }
+
+  function tickActiveTrajectories() {
+    if (!activeTrajectories.size) {
+      if (trajectoryTimer) {
+        clearInterval(trajectoryTimer);
+        trajectoryTimer = null;
+      }
+      return;
+    }
+    const nowMs = typeof performance !== "undefined" ? performance.now() : Date.now();
+    for (const entry of [...activeTrajectories]) {
+      const pos = sampleTrajectoryPosition(entry, nowMs);
+      try {
+        entry.handle.update(pos);
+      } catch {
+        activeTrajectories.delete(entry);
+      }
+    }
+  }
+
+  function trackTrajectoryHandle(handle, traj) {
+    if (!handle || typeof handle.update !== "function") return;
+    const entry = {
+      handle,
+      startX: Number(traj.startX) || 0,
+      startY: Number(traj.startY) || 0,
+      startZ: Number(traj.startZ) || 0,
+      endX: Number(traj.endX) || 0,
+      endY: Number(traj.endY) || 0,
+      endZ: Number(traj.endZ) || 0,
+      arcHeight: Math.max(0, Number(traj.arcHeight) || 0),
+      flightMs: Math.max(100, Number(traj.flightMs) || 2150),
+      startedAt: typeof performance !== "undefined" ? performance.now() : Date.now(),
+    };
+    activeTrajectories.add(entry);
+    handle.source?.addEventListener?.("ended", () => {
+      activeTrajectories.delete(entry);
+      if (!activeTrajectories.size && trajectoryTimer) {
+        clearInterval(trajectoryTimer);
+        trajectoryTimer = null;
+      }
+    }, { once: true });
+    if (!trajectoryTimer) {
+      trajectoryTimer = setInterval(tickActiveTrajectories, 33);
+    }
+  }
 
   function stopAutomatic() {
     if (automaticTimer) clearInterval(automaticTimer);
@@ -233,8 +291,18 @@ export async function setup(ctx) {
         : (Number.isFinite(physicalOcclusion)
           ? Math.max(0, Math.min(1, physicalOcclusion))
           : fallbackOcclusion);
-      await audio.playSpatial(url, { x: payload.x, y: payload.y ?? 0, z: payload.z }, {
-        radius: payload.radius ?? 40,
+      const trajectory = payload.trajectory && typeof payload.trajectory === "object"
+        ? payload.trajectory
+        : null;
+      const initialPos = trajectory
+        ? {
+          x: Number(trajectory.startX) || 0,
+          y: Number(trajectory.startY) || 0,
+          z: Number(trajectory.startZ) || 0,
+        }
+        : { x: payload.x, y: payload.y ?? 0, z: payload.z };
+      const handle = await audio.playSpatial(url, initialPos, {
+        radius: trajectory ? Math.max(payload.radius ?? 650, 1200) : (payload.radius ?? 40),
         gain: profile.gain,
         referenceDistance: profile.referenceDistance,
         rolloffFactor: profile.rolloffFactor,
@@ -242,6 +310,9 @@ export async function setup(ctx) {
         occlusion,
         offset,
       });
+      if (handle && trajectory) {
+        trackTrajectoryHandle(handle, trajectory);
+      }
     } catch (error) {
       console.error("Echo Front audio error", error);
     }

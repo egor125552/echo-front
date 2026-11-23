@@ -717,6 +717,18 @@ export async function setup(ctx) {
 
   function buildRoute(from, target, options = {}) {
     const start = point(from);
+    if (options.mode === "air" && target?.position) {
+      const destination = copyPoint(target.position);
+      return {
+        checkpoints: [destination],
+        anchors: [destination],
+        detours: 0,
+        rapierBlockedSegments: 0,
+        semanticTransitions: 0,
+        mode: "air",
+        distance: distance2(start, destination),
+      };
+    }
     const built = buildAnchors(start, target, options);
     const checkpoints = subdivideRoute(start, built.anchors);
     return {
@@ -805,6 +817,7 @@ export async function setup(ctx) {
   }
 
   function routeModeFor(playerId) {
+    if (entities.get(playerId)?.electroJumpActive) return "air";
     return vehicles.isDriving?.(playerId) ? "vehicle" : "foot";
   }
 

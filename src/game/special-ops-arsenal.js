@@ -87,11 +87,13 @@ export const MINI_NUKE_CONFIG = Object.freeze({
   launchCooldownMs: 1200,
   impactDelayMs: 2150, // Synced to the boom peak at 2.15s in dropped-a-bomb-and-it-exploded_188d696e.mp3
   blastRadius: 86,
-  lethalCoreRadius: 42,
-  maxDamage: 1100,
-  minEdgeDamage: 240,
+  lethalCoreRadius: 28,
+  maxDamage: 620,
+  minEdgeDamage: 120,
+  electroDamageMultiplier: 0.3,
+  electroMaxDamage: 220,
   distances: Object.freeze([
-    Object.freeze({ id: "self", label: "Под себя (4 метра — смертельно!)", meters: 4 }),
+    Object.freeze({ id: "self", label: "Под себя (4 метра — опасно!)", meters: 4 }),
     Object.freeze({ id: "close", label: "Близко (60 метров — край взрыва)", meters: 60 }),
     Object.freeze({ id: "medium", label: "Средне (105 метров — безопасно)", meters: 105 }),
     Object.freeze({ id: "far", label: "Далеко (160 метров)", meters: 160 }),

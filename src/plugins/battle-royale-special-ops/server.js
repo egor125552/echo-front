@@ -487,20 +487,29 @@ export async function setup(ctx) {
       hitIds.add(target.id);
 
       // Shred armor first on heavy explosions
+      const isElectroTarget = Boolean(target.electroLukashenko);
+      const isNukeOnElectro = kind === "nuke" && isElectroTarget;
+      const finalDamage = isNukeOnElectro
+        ? Math.min(
+          MINI_NUKE_CONFIG.electroMaxDamage,
+          Math.max(15, Math.round(res.damage * MINI_NUKE_CONFIG.electroDamageMultiplier)),
+        )
+        : res.damage;
+
       const armorComp = ctx.components.get(target.id, "Armor");
-      if (armorComp && armorComp.current > 0) {
-        const shred = Math.min(armorComp.current, Math.round(res.damage * (kind === "electro-slam" ? 0.9 : 0.75)));
+      if (armorComp && armorComp.current > 0 && !isNukeOnElectro) {
+        const shred = Math.min(armorComp.current, Math.round(finalDamage * (kind === "electro-slam" ? 0.9 : 0.45)));
         armorComp.current = Math.max(0, armorComp.current - shred);
       }
-      combat.damage(target.id, res.damage, {
+      combat.damage(target.id, finalDamage, {
         attackerId: ownerId,
         weaponId,
         ignoreTeamCheck: target.id === ownerId,
         now,
       });
-      // Inside a Mini-Nuke's lethal fireball core (<= lethalCoreRadius), finish downed targets outright
-      if (kind === "nuke" && target.alive && res.distance <= lethalCoreRadius && injury?.isDowned?.(target.id)) {
-        combat.damage(target.id, 450, {
+      // Inside a Mini-Nuke's lethal fireball core (<= lethalCoreRadius), finish downed non-Electro targets outright
+      if (kind === "nuke" && !isElectroTarget && target.alive && res.distance <= lethalCoreRadius && injury?.isDowned?.(target.id)) {
+        combat.damage(target.id, 320, {
           attackerId: ownerId,
           weaponId,
           ignoreTeamCheck: target.id === ownerId,
@@ -523,7 +532,7 @@ export async function setup(ctx) {
           now,
         });
       }
-      affected.push({ entityId: target.id, distance: res.distance, damage: res.damage });
+      affected.push({ entityId: target.id, distance: res.distance, damage: finalDamage });
     };
 
     for (const target of [...entities.all()]) {
@@ -1200,14 +1209,28 @@ export async function setup(ctx) {
     };
     pendingNukes.push(nuke);
 
-    // Play uploaded falling-whistle + explosion MP3 immediately so boom at 2.15s syncs with detonation!
+    // Play uploaded falling-whistle + explosion MP3 along a real 3D ballistic arc from launch to impact!
+    const launchStartX = finite(transform.x);
+    const launchStartY = finite(transform.y) + 2;
+    const launchStartZ = finite(transform.z);
+    const arcHeight = Math.max(26, Math.min(95, nuke.distanceMeters * 0.55));
     ctx.events.emit("sound:spatial", {
       entityId,
       key: "bomb.nuke",
       x: nuke.x,
       y: nuke.y,
       z: nuke.z,
-      radius: 460,
+      trajectory: {
+        startX: launchStartX,
+        startY: launchStartY,
+        startZ: launchStartZ,
+        endX: nuke.x,
+        endY: nuke.y,
+        endZ: nuke.z,
+        arcHeight,
+        flightMs: MINI_NUKE_CONFIG.impactDelayMs,
+      },
+      radius: 650,
     });
     ctx.events.emit("nuke:launched", {
       entityId,
