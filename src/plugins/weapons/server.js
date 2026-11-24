@@ -284,8 +284,12 @@ export async function setup(ctx) {
       acousticZone,
       radius: definition.soundRadius,
     });
+    const shooterTeam = Number(ctx.components.get(entityId, "Team")?.id ?? entity?.team ?? 0) || 0;
     ctx.events.emit("weapon:fired", {
       entityId,
+      shooterIsHuman: Boolean(entity && !entity.bot && entity.kind === "human"),
+      shooterName: entity?.name ? String(entity.name) : null,
+      shooterTeam,
       weaponId: weapon.id,
       ammo: weapon.ammo,
       targetId: null,
@@ -294,6 +298,8 @@ export async function setup(ctx) {
       muzzleVelocity: definition.muzzleVelocity,
       projectileMass: definition.projectileMass,
       projectileRadius: definition.projectileRadius,
+      directionX: direction.x,
+      directionZ: direction.z,
       x: transform.x,
       y: Number(transform.y) || 0,
       z: transform.z,

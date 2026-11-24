@@ -251,8 +251,19 @@ export async function setup(ctx) {
     const alive = aliveEntities().length;
     const placement = alive + 1;
     placements.set(entityId, placement);
+    const victim = entities.get(entityId);
+    const killer = killerId ? entities.get(killerId) : null;
     ctx.events.emit("battle-royale:eliminated", {
-      entityId, killerId, alive, placement, total, ...(reason ? { reason } : {}),
+      entityId,
+      killerId,
+      killerName: killer?.name ? String(killer.name) : null,
+      killerIsHuman: Boolean(killer && !killer.bot && killer.kind === "human"),
+      victimName: victim?.name ? String(victim.name) : null,
+      victimIsHuman: Boolean(victim && !victim.bot && victim.kind === "human"),
+      alive,
+      placement,
+      total,
+      ...(reason ? { reason } : {}),
     });
     emitRemaining(alive);
     if (deploymentInProgress) completeDeployment(now);
@@ -335,7 +346,30 @@ export async function setup(ctx) {
         weaponId: "zone",
         now,
       });
-      if (result.killed) ctx.events.emit("feedback:sound", { recipientId: entity.id, key: "death.full" });
+      if (result.killed) {
+        const isHuman = Boolean(!entity.bot && entity.kind === "human");
+        ctx.events.emit("feedback:sound", {
+          recipientId: entity.id,
+          key: "death.full",
+          targetId: entity.id,
+          targetName: entity.name ?? null,
+          targetIsHuman: isHuman,
+          weaponId: "zone",
+        });
+        if (isHuman) {
+          ctx.events.emit("combat:killfeed", {
+            killerId: null,
+            killerName: null,
+            killerIsHuman: false,
+            victimId: entity.id,
+            victimName: entity.name ?? null,
+            victimIsHuman: true,
+            victimElectro: Boolean(entity.electroLukashenko),
+            weaponId: "zone",
+            now,
+          });
+        }
+      }
       if (!entity.bot) {
         ctx.events.emit("battle-royale:zone-damage", {
           entityId: entity.id,

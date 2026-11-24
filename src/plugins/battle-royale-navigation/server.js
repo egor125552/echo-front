@@ -35,6 +35,7 @@ export const manifest = {
     "battle-royale-parachute-integration",
     "battle-royale-ragdoll-integration",
   ],
+  optional: ["social", "teams"],
   capabilities: [
     "services.consume", "services.provide", "components.read", "events.emit",
   ],
@@ -136,6 +137,8 @@ export async function setup(ctx) {
   const vehicles = ctx.services.get("vehicles");
   const battleRoyale = ctx.services.get("battle-royale");
   const entities = ctx.services.get("entities");
+  const social = ctx.services.has("social") ? ctx.services.get("social") : null;
+  const teams = ctx.services.has("teams") ? ctx.services.get("teams") : null;
 
   const originalHandleInput = matchApi.handleInput.bind(matchApi);
   const originalStep = matchApi.step.bind(matchApi);
@@ -1206,6 +1209,38 @@ export async function setup(ctx) {
           },
         };
       });
+  });
+
+  registerProvider("humans", (playerId) => {
+    const ownTeam = Number(teams?.teamOf?.(playerId)) || 0;
+    const result = [];
+    for (const entity of entities.all()) {
+      if (!entity || entity.id === playerId || !entity.alive || entity.bot || entity.kind !== "human") continue;
+      const transform = ctx.components.get(entity.id, "Transform");
+      if (!transform) continue;
+      const sameTeam = ownTeam > 0 && (Number(teams?.teamOf?.(entity.id)) || 0) === ownTeam;
+      const isFriend = Boolean(sameTeam || social?.isFriend?.(playerId, entity.id));
+      const rawName = String(entity.name ?? "").trim();
+      const customName = rawName && rawName.toLowerCase() !== "игрок" ? rawName : null;
+      const label = isFriend
+        ? (customName ? `Друг ${customName}` : "Живой друг")
+        : (customName ? `Игрок ${customName}` : "Живой игрок");
+      result.push({
+        id: `human:${entity.id}`,
+        name: label,
+        kind: "player",
+        order: isFriend ? 1.5 : 2,
+        arriveDistance: 6.5,
+        position: { x: transform.x, y: transform.y ?? 0, z: transform.z },
+        metadata: {
+          human: true,
+          playerId: entity.id,
+          relation: isFriend ? "friend" : "rival",
+          verticalTolerance: 3.5,
+        },
+      });
+    }
+    return result;
   });
 
   matchApi.handleInput = (playerId, input = {}, now = Date.now()) => {

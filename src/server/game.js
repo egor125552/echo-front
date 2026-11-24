@@ -17,6 +17,7 @@ const FORWARDED_EVENTS = new Set([
   "weapon:selected",
   "weapon:unlocked",
   "combat:damage",
+  "combat:killfeed",
   "armor:changed",
   "armor:plating-started",
   "armor:plating-completed",

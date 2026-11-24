@@ -616,7 +616,8 @@ export async function setup(ctx) {
       const sameTeamAlive = ownTeam > 0
         && entity.alive
         && (Number(teams.teamOf(entity.id)) || 0) === ownTeam;
-      if (entity.id === playerId || entity.id === spectatorTarget?.id || sameTeamAlive) {
+      const otherAliveHuman = entity.alive && !entity.bot && entity.kind === "human";
+      if (entity.id === playerId || entity.id === spectatorTarget?.id || sameTeamAlive || otherAliveHuman) {
         visible.push(entitySnapshot(entity, now));
         continue;
       }
@@ -665,6 +666,7 @@ export async function setup(ctx) {
       "crate:juggernaut-incoming",
       "crate:juggernaut-landed",
       "juggernaut:equipped",
+      "combat:killfeed",
     ]);
     const selected = packets.filter((packet) => {
       const payload = packet.payload ?? {};
@@ -710,7 +712,12 @@ export async function setup(ctx) {
         if (payload.entityId === playerId) return true;
         return distance2(self, payload) <= Number(payload.radius ?? 40) + 4;
       }
-      if (packet.event === "weapon:fired") return payload.entityId === playerId || distance2(self, payload) <= 125;
+      if (packet.event === "weapon:fired") {
+        if (payload.entityId === playerId) return true;
+        if (payload.shooterIsHuman && payload.assistedTargetId === playerId) return true;
+        const firedRange = payload.shooterIsHuman ? 220 : 125;
+        return distance2(self, payload) <= firedRange;
+      }
       if (packet.event === "world:door") return payload.entityId === playerId || distance2(self, payload) <= 35;
       if (packet.event === "loot:opened") return payload.entityId === playerId || distance2(self, payload) <= 28;
       if (packet.event === "battle-royale:eliminated") {

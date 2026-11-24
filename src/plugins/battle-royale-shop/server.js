@@ -885,12 +885,18 @@ export async function setup(ctx) {
           killerName: killerEntity.name ?? "Напарник",
           teamId: killerTeam,
         });
+        const victimEntity = entities.get(entityId);
         ctx.events.emit("feedback:sound", {
           recipientId: mate.id,
           key: "enemy.killed",
           squadKill: true,
           killerId,
+          killerName: killerEntity.name ?? "Напарник",
           victimId: entityId,
+          targetId: entityId,
+          targetName: victimEntity?.name ?? null,
+          targetIsHuman: Boolean(victimEntity && !victimEntity.bot && victimEntity.kind === "human"),
+          targetElectro: Boolean(victimEntity?.electroLukashenko),
         });
       }
     }

@@ -105,6 +105,71 @@ export function resolveSoundUrl(payload = {}) {
   return SOUNDS[payload.key] ?? null;
 }
 
+function createHumanThreatPingBuffer(context) {
+  const sampleRate = Math.max(8000, Number(context?.sampleRate) || 44100);
+  const duration = 0.145;
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const buffer = context.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate;
+    let sample = 0;
+    // Pulse 1: crisp 640 Hz tactical lock tone (0.000s .. 0.046s)
+    if (t <= 0.046) {
+      const p = t / 0.046;
+      const env = Math.sin(Math.PI * p) * Math.exp(-t * 10);
+      sample += (Math.sin(2 * Math.PI * 640 * t) * 0.72 + Math.sin(2 * Math.PI * 1280 * t) * 0.18) * env;
+    }
+    // Pulse 2: descending 460 Hz confirmation pulse (0.082s .. 0.140s)
+    if (t >= 0.082 && t <= 0.140) {
+      const lt = t - 0.082;
+      const p = lt / 0.058;
+      const env = Math.sin(Math.PI * p) * Math.exp(-lt * 11);
+      sample += (Math.sin(2 * Math.PI * 460 * lt) * 0.76 + Math.sin(2 * Math.PI * 920 * lt) * 0.16) * env;
+    }
+    data[i] = Math.max(-0.92, Math.min(0.92, sample * 0.85));
+  }
+  return buffer;
+}
+
+function createHumanPresenceBlipBuffer(context) {
+  const sampleRate = Math.max(8000, Number(context?.sampleRate) || 44100);
+  const duration = 0.046;
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const buffer = context.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate;
+    const p = t / duration;
+    const env = Math.sin(Math.PI * p);
+    data[i] = (Math.sin(2 * Math.PI * 520 * t) * 0.75 + Math.sin(2 * Math.PI * 1040 * t) * 0.12) * env * 0.65;
+  }
+  return buffer;
+}
+
+function createHumanFriendPingBuffer(context) {
+  const sampleRate = Math.max(8000, Number(context?.sampleRate) || 44100);
+  const duration = 0.14;
+  const length = Math.max(1, Math.floor(sampleRate * duration));
+  const buffer = context.createBuffer(1, length, sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < length; i += 1) {
+    const t = i / sampleRate;
+    let sample = 0;
+    if (t <= 0.055) {
+      const env = Math.sin(Math.PI * (t / 0.055));
+      sample += Math.sin(2 * Math.PI * 523.25 * t) * env * 0.65;
+    }
+    if (t >= 0.07 && t <= 0.135) {
+      const lt = t - 0.07;
+      const env = Math.sin(Math.PI * (lt / 0.065));
+      sample += Math.sin(2 * Math.PI * 659.25 * lt) * env * 0.68;
+    }
+    data[i] = Math.max(-0.9, Math.min(0.9, sample));
+  }
+  return buffer;
+}
+
 export const manifest = {
   id: "core-sound-pack",
   requires: ["spatial-audio-web", "cloudflare-session", "keyboard-input"],
@@ -113,12 +178,53 @@ export const manifest = {
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
-  let selfState = { weapon: null, ammo: null, alive: false, canFire: true };
+  let selfState = { weapon: null, ammo: null, alive: false, canFire: true, team: 0, x: 0, y: 0, z: 0 };
   let selfAcousticZone = "outdoor";
   let automaticTimer = null;
   let lastOwnShotAt = { marksman: -Infinity, sniper: -Infinity };
   const activeTrajectories = new Set();
   let trajectoryTimer = null;
+  let humanThreatPingBuffer = null;
+  let humanPresenceBlipBuffer = null;
+  let humanFriendPingBuffer = null;
+  const lastHumanThreatPingAt = new Map();
+  const lastHumanPresenceAt = new Map();
+
+  function ensureHumanAudioBuffers() {
+    if (!audio?.context) return false;
+    humanThreatPingBuffer ??= createHumanThreatPingBuffer(audio.context);
+    humanPresenceBlipBuffer ??= createHumanPresenceBlipBuffer(audio.context);
+    humanFriendPingBuffer ??= createHumanFriendPingBuffer(audio.context);
+    return true;
+  }
+
+  function isFriendlyHuman(entityId, entityTeam = 0) {
+    if (!entityId || entityId === network.playerId) return true;
+    const ownTeam = Number(selfState.team) || 0;
+    const otherTeam = Number(entityTeam) || 0;
+    if (ownTeam > 0 && otherTeam > 0 && ownTeam === otherTeam) return true;
+    const socialProfile = ctx.services.has("social-profile") ? ctx.services.get("social-profile") : null;
+    if (socialProfile?.isFriend?.(entityId)) return true;
+    return false;
+  }
+
+  function playHuman3DPing(buffer, position, { radius = 160, gain = 0.62, referenceDistance = 12, rolloffFactor = 0.3 } = {}) {
+    if (!buffer || !position || typeof audio.playSpatialBuffer !== "function") return;
+    try {
+      audio.playSpatialBuffer(buffer, {
+        x: Number(position.x) || 0,
+        y: Number(position.y) || 0,
+        z: Number(position.z) || 0,
+      }, {
+        radius,
+        gain,
+        referenceDistance,
+        rolloffFactor,
+        airAbsorptionMinHz: 9500,
+        loop: false,
+      });
+    } catch {}
+  }
 
   function sampleTrajectoryPosition(traj, nowMs) {
     const duration = Math.max(100, Number(traj.flightMs) || 2150);
@@ -239,17 +345,106 @@ export async function setup(ctx) {
       ammo: self.ammo,
       alive: Boolean(self.alive),
       canFire: !battleRoyale || snapshot.match?.phase === "active",
+      team: Number(self.team) || 0,
+      x: Number(self.x) || 0,
+      y: Number(self.y) || 0,
+      z: Number(self.z) || 0,
     };
     selfAcousticZone = self.acousticZone ?? "outdoor";
     if (!selfState.alive) {
       stopAutomatic();
       audio.stopChannel("own-weapon");
+      return;
+    }
+    if (network.tutorial || !selfState.canFire || !ensureHumanAudioBuffers()) return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    for (const entity of snapshot.entities ?? []) {
+      if (!entity || entity.id === network.playerId || entity.bot || !entity.alive) continue;
+      const dx = selfState.x - (Number(entity.x) || 0);
+      const dz = selfState.z - (Number(entity.z) || 0);
+      const dist = Math.hypot(dx, dz);
+      if (dist < 2.5 || dist > 125) continue;
+      const pos = { x: entity.x, y: entity.y ?? 0, z: entity.z };
+      if (isFriendlyHuman(entity.id, entity.team)) {
+        const lastFriendAt = lastHumanPresenceAt.get(entity.id) ?? -Infinity;
+        if (now - lastFriendAt >= 4800) {
+          lastHumanPresenceAt.set(entity.id, now);
+          playHuman3DPing(humanFriendPingBuffer, pos, {
+            radius: 130,
+            gain: 0.34,
+            referenceDistance: 10,
+            rolloffFactor: 0.35,
+          });
+        }
+        continue;
+      }
+      // Enemy human player: check if they are aiming directly in our direction
+      const angle = Number(entity.angle) || 0;
+      const aimDot = (dx * Math.sin(angle) + dz * -Math.cos(angle)) / Math.max(0.001, dist);
+      const aimingAtUs = aimDot >= 0.945; // within ~19 degrees cone
+      if (aimingAtUs) {
+        const lastThreatAt = lastHumanThreatPingAt.get(entity.id) ?? -Infinity;
+        if (now - lastThreatAt >= 1900) {
+          lastHumanThreatPingAt.set(entity.id, now);
+          lastHumanPresenceAt.set(entity.id, now);
+          playHuman3DPing(humanThreatPingBuffer, pos, {
+            radius: 180,
+            gain: 0.64,
+            referenceDistance: 12,
+            rolloffFactor: 0.28,
+          });
+        }
+      } else if (dist <= 115) {
+        const lastBlipAt = lastHumanPresenceAt.get(entity.id) ?? -Infinity;
+        if (now - lastBlipAt >= 4200) {
+          lastHumanPresenceAt.set(entity.id, now);
+          playHuman3DPing(humanPresenceBlipBuffer, pos, {
+            radius: 125,
+            gain: 0.38,
+            referenceDistance: 10,
+            rolloffFactor: 0.36,
+          });
+        }
+      }
     }
   });
 
   ctx.events.on("game:event", (packet) => {
     const payload = packet.payload ?? {};
     if (packet.event === "weapon:selected" && payload.entityId === network.playerId) selfState.weapon = payload.weaponId;
+    if (
+      packet.event === "weapon:fired"
+      && payload.shooterIsHuman
+      && payload.entityId !== network.playerId
+      && selfState.alive
+      && !network.tutorial
+      && !isFriendlyHuman(payload.entityId, payload.shooterTeam)
+      && ensureHumanAudioBuffers()
+    ) {
+      const dx = selfState.x - (Number(payload.x) || 0);
+      const dz = selfState.z - (Number(payload.z) || 0);
+      const dist = Math.hypot(dx, dz);
+      let aimedTowardUs = payload.assistedTargetId === network.playerId || dist <= 32;
+      if (!aimedTowardUs && dist <= 220 && Number.isFinite(payload.directionX) && Number.isFinite(payload.directionZ)) {
+        const dirLen = Math.hypot(payload.directionX, payload.directionZ) || 1;
+        const dot = (dx * payload.directionX + dz * payload.directionZ) / (Math.max(0.001, dist) * dirLen);
+        aimedTowardUs = dot >= 0.78; // within ~38 degrees toward listener
+      }
+      if (aimedTowardUs) {
+        const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+        const lastAt = lastHumanThreatPingAt.get(payload.entityId) ?? -Infinity;
+        if (now - lastAt >= 750) {
+          lastHumanThreatPingAt.set(payload.entityId, now);
+          lastHumanPresenceAt.set(payload.entityId, now);
+          playHuman3DPing(humanThreatPingBuffer, payload, {
+            radius: 230,
+            gain: 0.74,
+            referenceDistance: 14,
+            rolloffFactor: 0.25,
+          });
+        }
+      }
+    }
   });
   ctx.events.on("input:fire-start", () => { void playOwnShot(); startAutomaticIfNeeded(); });
   ctx.events.on("input:fire-stop", () => stopAutomatic());

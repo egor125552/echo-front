@@ -33,6 +33,32 @@ export function formatBattleRoyaleEndAnnouncement(payload = {}, playerId = null,
   return "Победа. Вы последний выживший";
 }
 
+function customPlayerName(name) {
+  const clean = String(name ?? "").trim();
+  if (!clean || clean.toLowerCase() === "игрок") return null;
+  return clean;
+}
+
+function humanNominative(name) {
+  const custom = customPlayerName(name);
+  return custom ? `игрок ${custom}` : "живой игрок";
+}
+
+function humanAccusative(name) {
+  const custom = customPlayerName(name);
+  return custom ? `игрока ${custom}` : "живого игрока";
+}
+
+function humanGenitive(name) {
+  const custom = customPlayerName(name);
+  return custom ? `игрока ${custom}` : "живого игрока";
+}
+
+function capitalizeFirst(text) {
+  if (!text) return "";
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export const manifest = {
   id: "announcer",
   requires: ["cloudflare-session", "speech-settings"],
@@ -54,6 +80,7 @@ export async function setup(ctx) {
   let lastZone = null;
   let lastZoneWarningAt = 0;
   let lastBunkerPrompt = null;
+  const lastBotKillfeedByKiller = new Map();
 
   function updateLiveMode() {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
@@ -187,12 +214,76 @@ export async function setup(ctx) {
     }
 
     if (packet.event === "feedback:sound" && payload.recipientId === network.playerId) {
-      if (payload.key === "enemy.killed") announce("Противник уничтожен", { interrupt: true });
-      if (payload.key === "death.full" && mode !== "battle-royale") {
-        announce("Вы погибли. Возрождение через три секунды", { interrupt: true });
+      if (payload.key === "enemy.killed") {
+        if (payload.squadKill) {
+          if (payload.targetIsHuman) {
+            announce(`Напарник уничтожил ${humanAccusative(payload.targetName)}`, { interrupt: true, repeat: true });
+          } else if (payload.targetElectro) {
+            announce("Напарник уничтожил Электрического Лукашенко", { interrupt: true, repeat: true });
+          } else {
+            announce("Напарник уничтожил противника", { interrupt: false, repeat: true });
+          }
+        } else if (payload.targetIsHuman) {
+          announce(`Уничтожен ${humanNominative(payload.targetName)}`, { interrupt: true, repeat: true });
+        } else if (payload.targetElectro) {
+          announce("Электрический Лукашенко уничтожен", { interrupt: true, repeat: true });
+        } else {
+          announce("Противник уничтожен", { interrupt: true, repeat: true });
+        }
       }
-      if (payload.key === "armor.break") announce("Броня противника разбита", { interrupt: true });
-      if (payload.key === "armor.self-break") announce("Ваша броня разбита", { interrupt: true });
+      if (payload.key === "death.full" && mode !== "battle-royale") {
+        if (payload.attackerIsHuman && payload.attackerId !== network.playerId) {
+          announce(`Вас уничтожил ${humanNominative(payload.attackerName)}. Возрождение через три секунды`, { interrupt: true, repeat: true });
+        } else {
+          announce("Вы погибли. Возрождение через три секунды", { interrupt: true, repeat: true });
+        }
+      }
+      if (payload.key === "armor.break") {
+        if (payload.targetIsHuman) {
+          announce(`Броня ${humanGenitive(payload.targetName)} разбита`, { interrupt: true, repeat: true });
+        } else {
+          announce("Броня противника разбита", { interrupt: true, repeat: true });
+        }
+      }
+      if (payload.key === "armor.self-break") announce("Ваша броня разбита", { interrupt: true, repeat: true });
+    }
+
+    if (packet.event === "combat:killfeed") {
+      if (payload.killerId === network.playerId || payload.victimId === network.playerId) {
+        return;
+      }
+      if (payload.victimIsHuman) {
+        const victimLabel = capitalizeFirst(humanNominative(payload.victimName));
+        if (payload.weaponId === "zone") {
+          announce(`${victimLabel} погиб в зоне`, { interrupt: false, repeat: true });
+        } else if (payload.killerIsHuman) {
+          announce(
+            `${capitalizeFirst(humanNominative(payload.killerName))} уничтожил ${humanAccusative(payload.victimName)}`,
+            { interrupt: false, repeat: true },
+          );
+        } else {
+          announce(
+            mode === "battle-royale" ? `${victimLabel} выбыл` : `${victimLabel} уничтожен ботом`,
+            { interrupt: false, repeat: true },
+          );
+        }
+        return;
+      }
+      if (payload.killerIsHuman) {
+        const now = Date.now();
+        const key = String(payload.killerId || payload.killerName || "human");
+        const throttleMs = mode === "battle-royale" ? 6000 : 2500;
+        const lastAt = lastBotKillfeedByKiller.get(key) ?? 0;
+        if (now - lastAt >= throttleMs) {
+          lastBotKillfeedByKiller.set(key, now);
+          const victimText = payload.victimElectro ? "Электрического Лукашенко" : "противника";
+          announce(
+            `${capitalizeFirst(humanNominative(payload.killerName))} уничтожил ${victimText}`,
+            { interrupt: false, repeat: true },
+          );
+        }
+      }
+      return;
     }
 
     if (packet.event === "entity:respawned" && payload.entityId === network.playerId && mode !== "battle-royale") {
@@ -233,7 +324,10 @@ export async function setup(ctx) {
       if (packet.event === "battle-royale:remaining") announce(`Осталось ${payload.alive} игроков`, { interrupt: false, repeat: true });
       if (packet.event === "battle-royale:eliminated" && payload.entityId === network.playerId) {
         const placement = Number(payload.placement);
-        const placementText = Number.isFinite(placement) ? `Вы выбыли. ${placement}-е место` : "Вы выбыли";
+        const killerNote = payload.killerIsHuman && payload.killerId !== network.playerId
+          ? ` Вас уничтожил ${humanNominative(payload.killerName)}.`
+          : "";
+        const placementText = Number.isFinite(placement) ? `Вы выбыли.${killerNote} ${placement}-е место` : `Вы выбыли.${killerNote}`;
         announce(`${placementText}. Можно наблюдать за напарниками или нажать кнопку Начать новый матч`, { interrupt: true, repeat: true });
       }
       if (packet.event === "battle-royale:zone-damage" && payload.entityId === network.playerId) {
