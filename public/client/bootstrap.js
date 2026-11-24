@@ -301,7 +301,36 @@ async function diagnoseServerFailure(mode, room, networkDetails = {}) {
   return diagnosisPromise;
 }
 
-async function start(mode, { tutorial = false, room: explicitRoom = null, loadingMessage = null } = {}) {
+async function resolveBattleRoyaleRoom({ playerId = null, excludeRoom = null } = {}) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 2500) : null;
+  try {
+    const url = new URL("/api/br-lobby", location.origin);
+    if (playerId) url.searchParams.set("player", playerId);
+    if (excludeRoom) url.searchParams.set("exclude", excludeRoom);
+    const response = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: { Accept: "application/json" },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (response.ok) {
+      const data = await response.json();
+      if (typeof data?.room === "string" && data.room.trim()) {
+        return data.room.trim();
+      }
+    }
+  } catch {} finally {
+    if (timer != null) clearTimeout(timer);
+  }
+  return excludeRoom && excludeRoom === "public" ? createFreshBattleRoyaleRoom() : "public";
+}
+
+async function start(mode, {
+  tutorial = false,
+  room: explicitRoom = null,
+  excludeRoom = null,
+  loadingMessage = null,
+} = {}) {
   setButtonsDisabled(true);
   if (newMatchButton) {
     newMatchButton.hidden = true;
@@ -347,7 +376,19 @@ async function start(mode, { tutorial = false, room: explicitRoom = null, loadin
     connection.textContent = connectingText;
 
     const network = host.services.get("network");
-    const room = explicitRoom || (tutorial ? `tutorial-${network.sessionId}` : "public");
+    let room = explicitRoom;
+    if (!room) {
+      if (tutorial) {
+        room = `tutorial-${network.sessionId}`;
+      } else if (mode === "battle-royale") {
+        room = await resolveBattleRoyaleRoom({
+          playerId: network.sessionId,
+          excludeRoom,
+        });
+      } else {
+        room = "public";
+      }
+    }
     host.events.emit("tutorial:requested", { enabled: tutorial });
     network.connect(room, { mode, tutorial });
   } catch (error) {
@@ -365,11 +406,12 @@ function createFreshBattleRoyaleRoom() {
 function startNewBattleRoyaleMatch() {
   const menus = host.services.has("menus") ? host.services.get("menus") : null;
   menus?.close?.({ announceClose: false });
-  host.services.get("network")?.disconnect?.();
-  const freshRoom = createFreshBattleRoyaleRoom();
+  const network = host.services.get("network");
+  const previousRoom = network?.mode === "battle-royale" ? network.room : null;
+  network?.disconnect?.();
   void start("battle-royale", {
     tutorial: false,
-    room: freshRoom,
+    excludeRoom: previousRoom,
     loadingMessage: "Запускаю новый матч королевской битвы",
   });
 }

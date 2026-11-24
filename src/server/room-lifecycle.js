@@ -63,3 +63,53 @@ export function createSuggestedBattleRoyaleRoom(now = Date.now(), randomToken = 
   const token = (rawToken || "room").slice(0, 8);
   return `br-${stamp}-${token}`;
 }
+
+export function isPublicMatchRoom(room) {
+  const normalized = String(room ?? "").trim();
+  return normalized === "public" || /^public-\d+$/.test(normalized);
+}
+
+export function nextPublicBattleRoyaleRoom(sequence = 1) {
+  const step = Math.max(1, Math.floor(Number(sequence) || 1));
+  return step <= 1 ? "public" : `public-${step}`;
+}
+
+export function evaluateBattleRoyaleRoomJoinability({
+  gameExists = false,
+  mode = "battle-royale",
+  phase = "waiting",
+  ended = false,
+  deploymentActive = false,
+  startedAt = 0,
+  aliveCount = 0,
+  playerPresent = false,
+  playerAlive = false,
+  playerExpired = false,
+  allowEarlyDropIn = true,
+  earlyDropInWindowMs = 90_000,
+  minAliveForDropIn = 30,
+  now = Date.now(),
+} = {}) {
+  if (!gameExists) return { joinable: true, reason: "empty" };
+  if (mode !== "battle-royale") return { joinable: false, reason: "mode-mismatch" };
+  if (playerExpired) return { joinable: false, reason: "reconnect-expired" };
+  if (ended || phase === "ended") return { joinable: false, reason: "ended" };
+  if (playerPresent) {
+    return playerAlive
+      ? { joinable: true, reason: "resumed" }
+      : { joinable: false, reason: "eliminated" };
+  }
+  if (phase === "waiting") return { joinable: true, reason: "waiting" };
+  if (phase === "active" && deploymentActive) return { joinable: true, reason: "deployment" };
+  if (
+    allowEarlyDropIn
+    && phase === "active"
+    && Number(startedAt) > 0
+    && (Number(now) - Number(startedAt) <= Number(earlyDropInWindowMs))
+    && Number(aliveCount) >= Number(minAliveForDropIn)
+  ) {
+    return { joinable: true, reason: "early-drop-in" };
+  }
+  return { joinable: false, reason: "late-match" };
+}
+

@@ -145,3 +145,34 @@ test("suspending a connected driver stops the car without losing the reconnect s
     await game.host.stop();
   }
 });
+
+test("second human with allowEarlyDropIn can join within 90s after first human lands, dropping via parachute with ground-level squad bots", async () => {
+  const game = await createEchoFrontGame({ mode: "battle-royale" });
+  try {
+    const startedAt = 10_000_000;
+    const p1 = "early-drop-human-1";
+    const p2 = "early-drop-human-2";
+    game.api.connectHuman(p1, startedAt, { allowEarlyDropIn: true });
+    game.host.events.emit("parachute:landed", { entityId: p1, now: startedAt + 12_000 });
+    const br = game.host.services.get("battle-royale");
+    assert.equal(br.status(startedAt + 12_000).deployment.active, false);
+
+    // Without allowEarlyDropIn, unit contract still rejects late join
+    assert.throws(() => game.api.connectHuman("blocked-late", startedAt + 25_000), /late join is not available/);
+
+    // With allowEarlyDropIn inside 90s window, friend drops in via parachute and bots spawn on ground
+    const joined2 = game.api.connectHuman(p2, startedAt + 25_000, { allowEarlyDropIn: true });
+    assert.equal(joined2.resumed, false);
+    const p2Transform = game.host.components.get(p2, "Transform");
+    assert(p2Transform.y >= 400, `Expected late drop-in human to launch at parachute altitude, got y=${p2Transform.y}`);
+    for (const mateId of joined2.squadmates) {
+      const matePos = game.host.components.get(mateId, "Transform");
+      assert.equal(matePos.y, 0, `Expected late drop-in squad bot ${mateId} to spawn on ground, got y=${matePos.y}`);
+    }
+    assert.equal(game.api.joinStatusFor(p2, startedAt + 25_000, { allowEarlyDropIn: true }).joinable, true);
+    assert.equal(game.api.joinStatusFor("third-human", startedAt + 120_000, { allowEarlyDropIn: true }).joinable, false);
+  } finally {
+    await game.host.stop();
+  }
+});
+

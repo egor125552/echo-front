@@ -4,8 +4,11 @@ import {
   activeSocketCount,
   createSuggestedBattleRoyaleRoom,
   decideBattleRoyaleJoinRecovery,
+  evaluateBattleRoyaleRoomJoinability,
   isBattleRoyaleJoinRejectedError,
+  isPublicMatchRoom,
   isRedirectedSocket,
+  nextPublicBattleRoyaleRoom,
   otherActiveSocketCount,
 } from "../src/server/room-lifecycle.js";
 import { setup as setupNetworkPlugin } from "../public/client/plugins/network.js";
@@ -68,6 +71,72 @@ test("room-lifecycle ignores redirected and closed sockets when counting active 
 
   const suggested = createSuggestedBattleRoyaleRoom(1795357942203, "AB-12_cd");
   assert.match(suggested, /^br-[a-z0-9]+-ab12cd$/);
+});
+
+test("room-lifecycle evaluates shared public BR lobby joinability across stale, early-drop-in, ended, and eliminated states", () => {
+  assert.equal(isPublicMatchRoom("public"), true);
+  assert.equal(isPublicMatchRoom("public-2"), true);
+  assert.equal(isPublicMatchRoom("br-123-abc"), false);
+  assert.equal(nextPublicBattleRoyaleRoom(1), "public");
+  assert.equal(nextPublicBattleRoyaleRoom(2), "public-2");
+
+  const now = 1_000_000;
+  assert.deepEqual(
+    evaluateBattleRoyaleRoomJoinability({ gameExists: false, now }),
+    { joinable: true, reason: "empty" },
+  );
+  assert.deepEqual(
+    evaluateBattleRoyaleRoomJoinability({
+      gameExists: true,
+      phase: "active",
+      deploymentActive: false,
+      startedAt: now - 30_000,
+      aliveCount: 80,
+      now,
+    }),
+    { joinable: true, reason: "early-drop-in" },
+  );
+  assert.deepEqual(
+    evaluateBattleRoyaleRoomJoinability({
+      gameExists: true,
+      phase: "active",
+      deploymentActive: false,
+      startedAt: now - 150_000,
+      aliveCount: 80,
+      now,
+    }),
+    { joinable: false, reason: "late-match" },
+  );
+  assert.deepEqual(
+    evaluateBattleRoyaleRoomJoinability({
+      gameExists: true,
+      phase: "ended",
+      ended: true,
+      playerPresent: true,
+      playerAlive: false,
+      now,
+    }),
+    { joinable: false, reason: "ended" },
+  );
+  assert.deepEqual(
+    evaluateBattleRoyaleRoomJoinability({
+      gameExists: true,
+      phase: "active",
+      playerPresent: true,
+      playerAlive: false,
+      now,
+    }),
+    { joinable: false, reason: "eliminated" },
+  );
+  assert.deepEqual(
+    evaluateBattleRoyaleRoomJoinability({
+      gameExists: true,
+      phase: "active",
+      playerExpired: true,
+      now,
+    }),
+    { joinable: false, reason: "reconnect-expired" },
+  );
 });
 
 test("client network plugin transparently switches to suggested fresh room on room-busy without emitting errors", async () => {

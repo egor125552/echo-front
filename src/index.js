@@ -208,6 +208,16 @@ export default {
       return Response.json({ ok: false, error: "Method not allowed" }, { status: 405, headers });
     }
 
+    if (url.pathname === "/api/br-lobby") {
+      const lobbyRoom = env.MATCH_ROOM.getByName("__br-lobby__");
+      const internalUrl = new URL("https://internal/internal/br-lobby");
+      const player = url.searchParams.get("player");
+      const exclude = url.searchParams.get("exclude");
+      if (player) internalUrl.searchParams.set("player", player.slice(0, 80));
+      if (exclude) internalUrl.searchParams.set("exclude", exclude.slice(0, 64));
+      return lobbyRoom.fetch(new Request(internalUrl.toString()));
+    }
+
     if (url.pathname === "/api/play") {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return new Response("WebSocket required", { status: 426 });

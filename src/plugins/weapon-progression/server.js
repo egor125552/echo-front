@@ -10,21 +10,26 @@ export async function setup(ctx) {
   const weapons = ctx.services.get("weapons");
   let completedRounds = 0;
 
-  function unlockRifleFor(entityId) {
+  function unlockRoundTwoWeaponsFor(entityId) {
     const entity = entities.get(entityId);
-    if (!entity || entity.bot) return false;
-    return weapons.grant(entityId, "rifle");
+    if (!entity) return false;
+    if (entity.bot) {
+      return weapons.grant(entityId, "sniper");
+    }
+    const grantedRifle = weapons.grant(entityId, "rifle");
+    const grantedSniper = weapons.grant(entityId, "sniper");
+    return grantedRifle || grantedSniper;
   }
 
   ctx.events.on("match:ended", () => {
     completedRounds += 1;
     if (completedRounds !== 1) return;
-    for (const entity of entities.all()) unlockRifleFor(entity.id);
+    for (const entity of entities.all()) unlockRoundTwoWeaponsFor(entity.id);
   });
 
-  ctx.events.on("entity:spawned", ({ entityId, spec }) => {
-    if (spec?.bot || completedRounds < 1) return;
-    unlockRifleFor(entityId);
+  ctx.events.on("entity:spawned", ({ entityId }) => {
+    if (completedRounds < 1) return;
+    unlockRoundTwoWeaponsFor(entityId);
   });
 
   ctx.services.provide("weapon-progression", {
@@ -33,6 +38,9 @@ export async function setup(ctx) {
     },
     isRifleUnlocked(entityId) {
       return weapons.has(entityId, "rifle");
+    },
+    isSniperUnlocked(entityId) {
+      return weapons.has(entityId, "sniper");
     },
   });
 }

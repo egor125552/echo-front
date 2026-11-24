@@ -374,3 +374,71 @@ test("Battle Royale spawns marksman & sniper crates, sells/restocks them in shop
     await game.host.stop();
   }
 });
+
+test("TDM Round 2 grants sniper rifles to bots alongside human rifle unlock and bots equip sniper at long range", async () => {
+  const game = await createEchoFrontGame({ mode: "tdm" });
+  const playerId = "tdm-round2-sniper-human";
+  try {
+    game.api.connectHuman(playerId);
+    const entities = game.host.services.get("entities");
+    const weapons = game.host.services.get("weapons");
+    const tdm = game.host.services.get("tdm");
+    const progression = game.host.services.get("weapon-progression");
+
+    // Round 1: bots do not have sniper yet; human does not have rifle yet
+    const botsRound1 = entities.all().filter((e) => e.bot);
+    assert(botsRound1.length >= 2);
+    for (const bot of botsRound1) {
+      assert.equal(weapons.has(bot.id, "sniper"), false, `Bot ${bot.id} should not start Round 1 with sniper`);
+    }
+    assert.equal(progression.isRifleUnlocked(playerId), false);
+    assert.equal(progression.isSniperUnlocked(playerId), true);
+
+    // Finish Round 1 by reaching targetScore (10) -> triggers match:ended -> Round 2
+    const teams = game.host.services.get("teams");
+    const enemyBot = teams.enemiesOf(playerId).find((e) => e.bot);
+    assert(enemyBot);
+    const now = Date.now() + 2000;
+    for (let i = 0; i < 10; i += 1) {
+      game.host.events.emit("entity:died", { entityId: enemyBot.id, killerId: playerId, now: now + i * 10 });
+    }
+    assert.equal(tdm.status(now + 200).ended, true);
+    assert.equal(progression.completedRounds, 1);
+    assert.equal(progression.isRifleUnlocked(playerId), true);
+    for (const bot of botsRound1) {
+      assert.equal(weapons.has(bot.id, "sniper"), true, `TDM bot ${bot.id} must receive sniper rifle in Round 2`);
+    }
+
+    // Advance past 5000ms intermission to start Round 2
+    game.api.step(0.05, now + 5200);
+    assert.equal(tdm.status(now + 5200).roundNumber, 2);
+
+    // Late-joining Round 2 bot also gets sniper automatically
+    const enemyTeam = teams.teamOf(playerId) === 1 ? 2 : 1;
+    const extraBotId = entities.spawn({
+      id: "tdm-round2-late-bot",
+      kind: "bot",
+      name: "Поздний бот",
+      bot: true,
+      team: enemyTeam,
+      health: 150,
+      weapons: ["rifle", "pistol"],
+    });
+    assert.equal(weapons.has(extraBotId, "sniper"), true);
+
+    // Confirm TDM Round 2 bot selects sniper when engaging at >34m range
+    const movement = game.host.services.get("movement");
+    movement.teleport(playerId, { x: -28, y: 0, z: 0, angle: Math.PI / 2 });
+    movement.teleport(extraBotId, { x: 28, y: 0, z: 0, angle: -Math.PI / 2 });
+    game.api.step(0.05, now + 5250);
+    const botInv = game.host.components.get(extraBotId, "Weapons");
+    assert.equal(
+      botInv.items[botInv.selected].id,
+      "sniper",
+      "Expected Round 2 TDM bot to equip sniper rifle across the arena",
+    );
+  } finally {
+    await game.host.stop();
+  }
+});
+

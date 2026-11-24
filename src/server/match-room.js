@@ -8,7 +8,9 @@ import {
   cleanupDeadline,
   createSuggestedBattleRoyaleRoom,
   decideBattleRoyaleJoinRecovery,
+  isPublicMatchRoom,
   isRedirectedSocket,
+  nextPublicBattleRoyaleRoom,
   normalizePlayerSessionId,
   otherActiveSocketCount,
   reconnectExpired,
@@ -22,6 +24,7 @@ import { normalizeEnemyAiMode } from "../plugins/ai-enemy-decisions/server.js";
 const HOT_RECONNECT_KEEPALIVE_MS = 8000;
 const LAST_RUNTIME_ERROR_KEY = "last-runtime-error-v1";
 const AI_BUDGET_KEY = "ai-decisions-budget-v1";
+const BR_LOBBY_STATE_KEY = "br-lobby-state-v1";
 
 function monotonicNow() {
   return typeof performance !== "undefined" && typeof performance.now === "function"
@@ -74,6 +77,8 @@ export class MatchRoom extends DurableObject {
     this.snapshotStreams = new WeakMap();
     this.aiDecisionPending = null;
     this.aiBudgetLock = Promise.resolve();
+    this.brLobbyLock = Promise.resolve();
+    this.roomName = null;
 
     ctx.blockConcurrencyWhile(async () => {
       const sockets = this.ctx.getWebSockets();
@@ -96,7 +101,7 @@ export class MatchRoom extends DurableObject {
         if (ws.readyState === 3 || isRedirectedSocket(ws)) continue;
         const attachment = ws.deserializeAttachment();
         if (!attachment?.playerId) continue;
-        try { this.game.api.connectHuman(attachment.playerId); } catch (error) {
+        try { this.game.api.connectHuman(attachment.playerId, Date.now(), { allowEarlyDropIn: !tutorial }); } catch (error) {
           this.reportRuntimeError(error, {
             phase: "hibernation-reconnect",
             mode,
@@ -317,6 +322,97 @@ export class MatchRoom extends DurableObject {
     return task;
   }
 
+  async readBrLobbyState() {
+    try {
+      const stored = await this.ctx.storage.get(BR_LOBBY_STATE_KEY);
+      const sequence = Math.max(1, Math.floor(Number(stored?.sequence) || 1));
+      const currentRoom = isPublicMatchRoom(stored?.currentRoom)
+        ? String(stored.currentRoom).trim()
+        : nextPublicBattleRoyaleRoom(sequence);
+      return { sequence, currentRoom };
+    } catch {
+      return { sequence: 1, currentRoom: "public" };
+    }
+  }
+
+  async checkBattleRoyaleRoomJoinable(roomName, playerId = null) {
+    if (!this.env?.MATCH_ROOM?.getByName) {
+      return { joinable: true, reason: "no-namespace" };
+    }
+    try {
+      const target = this.env.MATCH_ROOM.getByName(`battle-royale:${roomName}`);
+      const url = new URL("https://internal/internal/br-join-status");
+      if (playerId) url.searchParams.set("player", playerId);
+      const res = await target.fetch(new Request(url.toString()));
+      if (!res.ok) return { joinable: false, reason: `http-${res.status}` };
+      return await res.json();
+    } catch {
+      return { joinable: false, reason: "status-error" };
+    }
+  }
+
+  resolveBattleRoyaleLobby({ playerId = null, excludeRoom = null } = {}) {
+    const task = this.brLobbyLock.then(async () => {
+      const state = await this.readBrLobbyState();
+      let dirty = false;
+      const cleanExclude = excludeRoom && isPublicMatchRoom(excludeRoom) ? String(excludeRoom).trim() : null;
+      if (cleanExclude && state.currentRoom === cleanExclude) {
+        state.sequence += 1;
+        state.currentRoom = nextPublicBattleRoyaleRoom(state.sequence);
+        dirty = true;
+      }
+
+      let lastReason = "empty";
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        const status = await this.checkBattleRoyaleRoomJoinable(state.currentRoom, playerId);
+        lastReason = status?.reason ?? "unknown";
+        if (status?.joinable) {
+          if (dirty) {
+            await this.ctx.storage.put(BR_LOBBY_STATE_KEY, state);
+          }
+          return {
+            ok: true,
+            room: state.currentRoom,
+            sequence: state.sequence,
+            reason: lastReason,
+          };
+        }
+        state.sequence += 1;
+        state.currentRoom = nextPublicBattleRoyaleRoom(state.sequence);
+        dirty = true;
+      }
+
+      if (dirty) {
+        await this.ctx.storage.put(BR_LOBBY_STATE_KEY, state);
+      }
+      return {
+        ok: true,
+        room: state.currentRoom,
+        sequence: state.sequence,
+        reason: lastReason,
+      };
+    });
+    this.brLobbyLock = task.catch(() => {});
+    return task;
+  }
+
+  async resolveSuggestedBattleRoyaleRoom(currentRoom, playerId = null) {
+    if (isPublicMatchRoom(currentRoom) && this.env?.MATCH_ROOM?.getByName) {
+      try {
+        const lobbyRoom = this.env.MATCH_ROOM.getByName("__br-lobby__");
+        const url = new URL("https://internal/internal/br-lobby/advance");
+        url.searchParams.set("exclude", String(currentRoom));
+        if (playerId) url.searchParams.set("player", playerId);
+        const res = await lobbyRoom.fetch(new Request(url.toString(), { method: "POST" }));
+        if (res.ok) {
+          const data = await res.json();
+          if (typeof data?.room === "string" && data.room.trim()) return data.room.trim();
+        }
+      } catch {}
+    }
+    return createSuggestedBattleRoyaleRoom(Date.now(), crypto.randomUUID().slice(0, 6));
+  }
+
   socketsForPlayer(playerId, excludedSocket = null) {
     return this.ctx.getWebSockets().filter((socket) => {
       if (!socket || socket === excludedSocket || socket.readyState === 3 || isRedirectedSocket(socket)) return false;
@@ -468,6 +564,34 @@ export class MatchRoom extends DurableObject {
     if (requestUrl.pathname === "/internal/ai-budget/consume" && request.method === "POST") {
       return Response.json(await this.consumeStoredBudget(), { headers: { "Cache-Control": "no-store" } });
     }
+    if (requestUrl.pathname === "/internal/br-join-status") {
+      const queryPlayerId = normalizePlayerSessionId(requestUrl.searchParams.get("player"));
+      if (!this.game) {
+        return Response.json({ ok: true, joinable: true, reason: "empty", roomActive: false }, {
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
+      if (this.mode !== "battle-royale") {
+        return Response.json({ ok: true, joinable: false, reason: "mode-mismatch", roomActive: true }, {
+          headers: { "Cache-Control": "no-store" },
+        });
+      }
+      const status = typeof this.game.api.joinStatusFor === "function"
+        ? this.game.api.joinStatusFor(queryPlayerId, Date.now(), { allowEarlyDropIn: !this.tutorial })
+        : { joinable: true, reason: "legacy" };
+      return Response.json({ ok: true, roomActive: true, ...status }, {
+        headers: { "Cache-Control": "no-store" },
+      });
+    }
+    if (requestUrl.pathname === "/internal/br-lobby" || requestUrl.pathname === "/internal/br-lobby/advance") {
+      const queryPlayerId = normalizePlayerSessionId(requestUrl.searchParams.get("player"));
+      const excludeRoom = requestUrl.searchParams.get("exclude");
+      const result = await this.resolveBattleRoyaleLobby({
+        playerId: queryPlayerId,
+        excludeRoom,
+      });
+      return Response.json(result, { headers: { "Cache-Control": "no-store" } });
+    }
     if (requestUrl.pathname === "/internal/ai-enemies") {
       const headers = { "Cache-Control": "no-store" };
       if (request.method === "POST") {
@@ -539,6 +663,8 @@ export class MatchRoom extends DurableObject {
     const tutorial = requestUrl.searchParams.get("tutorial") === "1";
     const enemyAi = normalizeEnemyAiMode(requestUrl.searchParams.get("enemyAi"));
     const snapshotProtocol = requestUrl.searchParams.get("snapshotProtocol") === "delta-v1" ? "delta-v1" : null;
+    const requestedRoomName = (requestUrl.searchParams.get("room") || this.roomName || "public").slice(0, 64);
+    this.roomName = requestedRoomName;
     let phase = "delete-alarm";
     let playerId = null;
     let server = null;
@@ -562,7 +688,7 @@ export class MatchRoom extends DurableObject {
       phase = "connect-human";
       let joined;
       try {
-        joined = this.game.api.connectHuman(playerId);
+        joined = this.game.api.connectHuman(playerId, Date.now(), { allowEarlyDropIn: !tutorial });
       } catch (joinError) {
         const recovery = decideBattleRoyaleJoinRecovery({
           mode,
@@ -577,15 +703,15 @@ export class MatchRoom extends DurableObject {
           this.hotReconnectUntil = 0;
           this.lastStepAt = Date.now();
           phase = "connect-human";
-          joined = this.game.api.connectHuman(playerId);
+          joined = this.game.api.connectHuman(playerId, Date.now(), { allowEarlyDropIn: !tutorial });
         } else if (recovery === "redirect-room") {
           phase = "redirect-busy-room";
+          const suggestedRoom = await this.resolveSuggestedBattleRoyaleRoom(this.roomName, playerId);
           const pair = Object.values(new WebSocketPair());
           const client = pair[0];
           server = pair[1];
           this.ctx.acceptWebSocket(server);
           server.serializeAttachment({ redirected: true, playerId, mode, tutorial });
-          const suggestedRoom = createSuggestedBattleRoyaleRoom(Date.now(), crypto.randomUUID().slice(0, 6));
           server.send(JSON.stringify({
             type: "room-busy",
             reason: "battle-royale-in-progress",

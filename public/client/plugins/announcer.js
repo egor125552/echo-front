@@ -524,7 +524,9 @@ export async function setup(ctx) {
 
     if (packet.event === "match:ended") {
       if (network.tutorial) return;
-      const unlock = Number(payload.roundNumber) === 1 ? " Автомат открыт." : "";
+      const unlock = Number(payload.roundNumber) === 1
+        ? " Автомат открыт. Во втором раунде у бойцов появляются снайперские винтовки."
+        : "";
       if (payload.winner === 0) announce(`Раунд завершён вничью.${unlock} Новый раунд через пять секунд`, { interrupt: true });
       else if (payload.winner === team) announce(`Победа.${unlock} Новый раунд через пять секунд`, { interrupt: true });
       else announce(`Поражение.${unlock} Новый раунд через пять секунд`, { interrupt: true });

@@ -1,6 +1,8 @@
 export const SNAPSHOT_INTERVAL_MS = 125;
 export const ENTITY_INTEREST_RADIUS = 125;
 export const JUGGERNAUT_HEALTH = 700;
+export const EARLY_DROP_IN_WINDOW_MS = 90_000;
+export const MIN_ALIVE_FOR_EARLY_DROP_IN = 30;
 
 export const manifest = {
   id: "match-api",
@@ -193,9 +195,10 @@ export async function setup(ctx) {
       }
       if (humanTransform) {
         const angle = (idx * Math.PI * 2) / Math.max(1, chosen.length);
+        const spawnY = (Number(humanTransform.y) || 0) > 10 ? 0 : (Number(humanTransform.y) || 0);
         movement.teleport(bot.id, {
           x: (Number(humanTransform.x) || 0) + Math.cos(angle) * 9,
-          y: Number(humanTransform.y) || 0,
+          y: spawnY,
           z: (Number(humanTransform.z) || 0) + Math.sin(angle) * 9,
           angle: Number(humanTransform.angle) || 0,
         });
@@ -213,7 +216,47 @@ export async function setup(ctx) {
       .map((e) => e.id);
   }
 
-  function connectHuman(playerId, now = Date.now()) {
+  function joinStatusFor(playerId, now = Date.now(), options = {}) {
+    const matchStatus = battleRoyale.status(now);
+    const allowEarly = options?.allowEarlyDropIn !== false;
+    if (playerId && expiredHumanSessions.has(playerId)) {
+      return { joinable: false, reason: "reconnect-expired" };
+    }
+    const existing = playerId ? entities.get(playerId) : null;
+    if (existing) {
+      if (existing.kind !== "human" || existing.bot) {
+        return { joinable: false, reason: "non-human-conflict" };
+      }
+      if (matchStatus.phase === "ended" || matchStatus.ended) {
+        return { joinable: false, reason: "ended" };
+      }
+      if (!existing.alive) {
+        return { joinable: false, reason: "eliminated" };
+      }
+      return { joinable: true, reason: "resumed" };
+    }
+    if (matchStatus.phase === "ended" || matchStatus.ended) {
+      return { joinable: false, reason: "ended" };
+    }
+    if (matchStatus.phase === "waiting") {
+      return { joinable: true, reason: "waiting" };
+    }
+    if (matchStatus.phase === "active" && matchStatus.deployment?.active) {
+      return { joinable: true, reason: "deployment" };
+    }
+    if (
+      allowEarly
+      && matchStatus.phase === "active"
+      && Number(matchStatus.startedAt) > 0
+      && (Number(now) - Number(matchStatus.startedAt) <= EARLY_DROP_IN_WINDOW_MS)
+      && Number(matchStatus.alive) >= MIN_ALIVE_FOR_EARLY_DROP_IN
+    ) {
+      return { joinable: true, reason: "early-drop-in" };
+    }
+    return { joinable: false, reason: "late-match" };
+  }
+
+  function connectHuman(playerId, now = Date.now(), options = {}) {
     const existing = entities.get(playerId);
     if (existing) {
       if (existing.kind !== "human" || existing.bot) {
@@ -231,11 +274,17 @@ export async function setup(ctx) {
       };
     }
 
-    const matchStatus = battleRoyale.status();
+    const matchStatus = battleRoyale.status(now);
     if (expiredHumanSessions.has(playerId)) {
       throw new Error(`Reconnect grace expired for this battle-royale session: ${playerId}`);
     }
-    if (matchStatus.phase === "ended" || (matchStatus.phase === "active" && !matchStatus.deployment?.active)) {
+    const allowEarlyDropIn = Boolean(options?.allowEarlyDropIn)
+      && matchStatus.phase === "active"
+      && !matchStatus.ended
+      && Number(matchStatus.startedAt) > 0
+      && (Number(now) - Number(matchStatus.startedAt) <= EARLY_DROP_IN_WINDOW_MS)
+      && Number(matchStatus.alive) >= MIN_ALIVE_FOR_EARLY_DROP_IN;
+    if (matchStatus.phase === "ended" || (matchStatus.phase === "active" && !matchStatus.deployment?.active && !allowEarlyDropIn)) {
       throw new Error(`Battle royale already in progress; late join is not available: ${playerId}`);
     }
 
@@ -751,6 +800,7 @@ export async function setup(ctx) {
     withSnapshotBatch,
     mode: "battle-royale",
     snapshotIntervalMs: SNAPSHOT_INTERVAL_MS,
+    joinStatusFor,
     connectHuman,
     suspendHuman,
     disconnectHuman,
