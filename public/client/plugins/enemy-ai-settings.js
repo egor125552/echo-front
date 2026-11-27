@@ -32,6 +32,12 @@ export async function setup(ctx) {
     return `Запросов: ${used} из ${max} (осталось ${left}).`;
   }
 
+  function setStatusText(nextText) {
+    if (statusEl && statusEl.textContent !== nextText) {
+      statusEl.textContent = nextText;
+    }
+  }
+
   function render() {
     if (select && select.value !== state.mode) {
       select.value = state.mode;
@@ -41,11 +47,11 @@ export async function setup(ctx) {
     if (state.mode === "ai") {
       if (state.lastError) {
         const errText = String(state.lastError.message || state.lastError.code || "сбой запроса").replace(/\.+$/, "");
-        statusEl.textContent = `Боты с ИИ (Gemini Decisions): ошибка — ${errText}. ${formatQuota()}`;
+        setStatusText(`Боты с ИИ (Gemini Decisions): ошибка — ${errText}. ${formatQuota()}`);
         return;
       }
       if (state.configured === false) {
-        statusEl.textContent = `Выбран режим «Боты с ИИ (Gemini Decisions: враги и напарники)». Серверный ключ Gemini API не настроен: при подключении к бою боты сообщат об ошибке. ${formatQuota()}`;
+        setStatusText(`Выбран режим «Боты с ИИ (Gemini Decisions: враги и напарники)». Серверный ключ Gemini API не настроен: при подключении к бою боты сообщат об ошибке. ${formatQuota()}`);
         return;
       }
       const alliesCount = Array.isArray(state.activeAllyIds) ? state.activeAllyIds.length : 0;
@@ -64,11 +70,11 @@ export async function setup(ctx) {
       const latency = Number.isFinite(Number(state.lastLatencyMs))
         ? ` Ответ: ${Math.round(Number(state.lastLatencyMs))} мс.`
         : "";
-      statusEl.textContent = `Боты с ИИ (враги и напарники) включены.${countsText}${tokenText}${latency} ${formatQuota()}`;
+      setStatusText(`Боты с ИИ (враги и напарники) включены.${countsText}${tokenText}${latency} ${formatQuota()}`);
       return;
     }
 
-    statusEl.textContent = `Выбраны обычные боты (без расхода лимита ИИ). ${formatQuota()}`;
+    setStatusText(`Выбраны обычные боты (без расхода лимита ИИ). ${formatQuota()}`);
   }
 
   function applyServerState(next = {}) {

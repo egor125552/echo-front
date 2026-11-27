@@ -102,6 +102,7 @@ export async function setup(ctx) {
       "electro-rifle": "Электрический автомат-шокер",
       marksman: "Винтовка",
       sniper: "Снайперка",
+      cannon: "Пушка Смертонос",
     };
     weapon.textContent = WEAPON_LABELS[self.weapon] ?? "-";
     ammo.textContent = self.ammo == null ? "-" : `${self.ammo} / ${self.reserve ?? 0}`;
@@ -167,17 +168,26 @@ export async function setup(ctx) {
     }
     if (electroModeButton || gestureElectroButton) {
       const hasElectro = Boolean(specialOps?.hasElectroRifle);
-      const shortLabel = specialOps?.electroMode?.shortLabel || "Шок";
+      const hasCannon = Boolean(specialOps?.hasCannon);
+      const cannonActive = Boolean(specialOps?.cannonSelected || (hasCannon && !hasElectro));
+      const hasAnyModeWeapon = hasElectro || hasCannon;
+      const chargePct = Math.round((Number(specialOps?.cannonChargeRatio) || 0) * 100);
+      const cannonLabel = specialOps?.cannonCharging
+        ? `Заряд ${chargePct}%`
+        : (specialOps?.cannonMode?.shortLabel || "Ударное ядро");
+      const shortLabel = cannonActive
+        ? cannonLabel
+        : (specialOps?.electroMode?.shortLabel || "Шок");
       if (electroModeButton) {
-        electroModeButton.disabled = !isBr || !self.alive || !hasElectro;
-        electroModeButton.textContent = hasElectro
-          ? `Режим шокера: ${shortLabel}`
-          : "Режим шокера";
+        electroModeButton.disabled = !isBr || !self.alive || !hasAnyModeWeapon;
+        electroModeButton.textContent = cannonActive
+          ? `Смертонос: ${shortLabel}`
+          : (hasElectro ? `Режим шокера: ${shortLabel}` : "Режим оружия");
       }
       if (gestureElectroButton) {
-        gestureElectroButton.hidden = !isBr || !hasElectro;
-        gestureElectroButton.disabled = !isBr || !self.alive || !hasElectro;
-        gestureElectroButton.textContent = `Режим: ${shortLabel}`;
+        gestureElectroButton.hidden = !isBr || !hasAnyModeWeapon;
+        gestureElectroButton.disabled = !isBr || !self.alive || !hasAnyModeWeapon;
+        gestureElectroButton.textContent = cannonActive ? `Пушка: ${shortLabel}` : `Режим: ${shortLabel}`;
       }
     }
     if (electroJumpButton || gestureElectroJumpButton) {

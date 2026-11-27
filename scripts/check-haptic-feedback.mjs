@@ -736,3 +736,97 @@ test("gamepad-input plugin supports Hold Triangle for armor plating with immedia
   }
 });
 
+test("PlayStation DualSense prefers dual-rumble over trigger-rumble, skips disconnected/invalid slots, and supports legacy hapticActuators", async () => {
+  const { selectRumbleEffectTypes, playGamepadRumble, activeGamepad } = hapticPlugin;
+
+  // DualSense reporting trigger-rumble first and undefined type MUST pick dual-rumble first
+  assert.deepEqual(
+    selectRumbleEffectTypes({ effects: ["trigger-rumble", "dual-rumble"] }),
+    ["dual-rumble", "trigger-rumble"],
+  );
+  assert.deepEqual(
+    selectRumbleEffectTypes({ type: "trigger-rumble", effects: ["trigger-rumble", "dual-rumble"] }),
+    ["dual-rumble", "trigger-rumble"],
+  );
+
+  const oldNavigator = globalThis.navigator;
+  try {
+    const dualSenseCalls = [];
+    const disconnectedGhost = {
+      connected: false,
+      mapping: "standard",
+      id: "Ghost Pad",
+      vibrationActuator: {
+        playEffect: async () => { throw new Error("should never call disconnected pad"); },
+      },
+    };
+    const dummyHid = {
+      connected: true,
+      mapping: "",
+      id: "DualSense Touchpad HID",
+      vibrationActuator: {
+        effects: ["dual-rumble"],
+        playEffect: async () => "invalid-state",
+      },
+    };
+    const dualSense = {
+      connected: true,
+      mapping: "standard",
+      id: "DualSense Wireless Controller",
+      vibrationActuator: {
+        effects: ["trigger-rumble", "dual-rumble"],
+        playEffect: async (type, params) => {
+          dualSenseCalls.push({ type, params });
+          return "complete";
+        },
+      },
+    };
+
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: {
+        getGamepads: () => [disconnectedGhost, dummyHid, dualSense],
+      },
+    });
+
+    assert.equal(activeGamepad()?.id, "DualSense Wireless Controller");
+    const rumbled = await playGamepadRumble({ duration: 46, weak: 0.66, strong: 0.9 }, 1);
+    assert.equal(rumbled, true);
+    assert.equal(dualSenseCalls.length, 1);
+    assert.equal(dualSenseCalls[0].type, "dual-rumble", "DualSense must receive dual-rumble, not trigger-rumble");
+    assert.equal("leftTrigger" in dualSenseCalls[0].params, false, "dual-rumble params must not include trigger keys");
+    assert(dualSenseCalls[0].params.duration >= 85);
+
+    // Legacy hapticActuators with playEffect fallback
+    const legacyCalls = [];
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: {
+        getGamepads: () => [{
+          connected: true,
+          mapping: "standard",
+          id: "Sony Interactive Entertainment Wireless Controller",
+          hapticActuators: [{
+            playEffect: async (type, params) => {
+              legacyCalls.push({ type, params });
+              return "complete";
+            },
+          }],
+        }],
+      },
+    });
+    const legacyOk = await playGamepadRumble({ duration: 90, weak: 0.7, strong: 0.9 }, 1);
+    assert.equal(legacyOk, true);
+    assert.equal(legacyCalls[0]?.type, "dual-rumble");
+  } finally {
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      writable: true,
+      value: oldNavigator,
+    });
+  }
+});
+
+

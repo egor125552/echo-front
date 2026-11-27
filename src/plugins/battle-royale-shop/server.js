@@ -10,6 +10,7 @@ export const JUGGERNAUT_DROP_COST = 2200;
 export const MINES_COST = 450;
 export const MINI_NUKE_COST = 2500;
 export const ELECTRO_DROP_COST = 3000;
+export const CANNON_COST = 1800;
 export const KILL_CASH_REWARD = 300;
 export const AIRDROP_CASH_REWARD = 1800;
 export const JUGGERNAUT_CASH_REWARD = 2500;
@@ -518,6 +519,41 @@ export async function setup(ctx) {
       return { ok: true, itemId, balance: balanceOf(buyerId) };
     }
 
+    if (itemId === "cannon") {
+      if (cash < CANNON_COST) {
+        ctx.events.emit("shop:purchase-failed", {
+          entityId: buyerId,
+          itemId,
+          reason: "insufficient-funds",
+          required: CANNON_COST,
+          balance: cash,
+          now,
+        });
+        return { ok: false, reason: "insufficient-funds", required: CANNON_COST, balance: cash };
+      }
+      spendCash(buyerId, CANNON_COST);
+      const alreadyOwned = Boolean(weapons.has?.(buyerId, "cannon"));
+      let itemName = "Эксклюзивная пушка «Смертонос» (700 м, 5 режимов)";
+      if (alreadyOwned) {
+        weapons.restock?.(buyerId, "cannon", 20);
+        itemName = "Ядра для пушки «Смертонос» (+20)";
+      } else {
+        weapons.grant(buyerId, "cannon");
+        weapons.selectById?.(buyerId, "cannon");
+      }
+      ctx.events.emit("shop:purchased", {
+        entityId: buyerId,
+        itemId,
+        itemName,
+        cost: CANNON_COST,
+        balance: balanceOf(buyerId),
+        shopId: shop.id,
+        shopName: shop.name,
+        now,
+      });
+      return { ok: true, itemId, balance: balanceOf(buyerId) };
+    }
+
     if (itemId === "bounty-contract") {
       const target = nearestEnemyTargetFor(buyerId);
       if (!target) {
@@ -729,6 +765,7 @@ export async function setup(ctx) {
       } : null,
       marksmanOwned: Boolean(weapons.has?.(playerId, "marksman")),
       sniperOwned: Boolean(weapons.has?.(playerId, "sniper")),
+      cannonOwned: Boolean(weapons.has?.(playerId, "cannon")),
       prices: {
         buyback: BUYBACK_COST,
         fastStimulant: FAST_STIM_COST,
@@ -736,6 +773,7 @@ export async function setup(ctx) {
         armorPlates: ARMOR_PLATES_COST,
         marksman: MARKSMAN_COST,
         sniper: SNIPER_COST,
+        cannon: CANNON_COST,
         juggernautDrop: JUGGERNAUT_DROP_COST,
         mines: MINES_COST,
         miniNuke: MINI_NUKE_COST,

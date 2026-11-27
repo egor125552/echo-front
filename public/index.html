@@ -122,7 +122,18 @@
           </select>
         </label>
         <p id="touch-mode-status" role="status" aria-live="polite"></p>
-        <label class="setting-row"><span>Игровая озвучка</span><input id="speech-enabled" type="checkbox" checked></label>
+        <label class="setting-row" for="control-profile-mode"><span>Способ управления и подсказки</span>
+          <select id="control-profile-mode">
+            <option value="auto">Автоопределение</option>
+            <option value="touch-buttons">Экранные кнопки (VoiceOver)</option>
+            <option value="touch-gestures">Жесты на весь экран</option>
+            <option value="keyboard">Клавиатура</option>
+            <option value="gamepad-playstation">Джойстик PlayStation</option>
+            <option value="gamepad-standard">Обычный геймпад</option>
+          </select>
+        </label>
+        <p id="control-profile-status" role="status" aria-live="polite"></p>
+        <label class="setting-row" for="speech-enabled"><span>Игровая озвучка</span><input id="speech-enabled" type="checkbox" checked></label>
         <label class="setting-row setting-range" for="speech-rate">
           <span>Скорость речи</span>
           <input id="speech-rate" type="range" min="0.7" max="2.5" step="0.1" value="1.7">
@@ -152,7 +163,7 @@
             <option value="ai">Боты с ИИ (Gemini Decisions: враги и напарники)</option>
           </select>
         </label>
-        <p id="enemy-ai-status" role="status" aria-live="polite" aria-atomic="true"></p>
+        <p id="enemy-ai-status"></p>
       </div>
     </details>
     <p id="speech-status" role="status" aria-live="assertive" aria-atomic="true"></p>
@@ -189,14 +200,14 @@
         <details id="journal-panel">
           <summary>Журнал игры</summary>
           <div class="settings-grid">
-            <label class="setting-row"><span>Записывать журнал игры</span><input id="journal-enabled" type="checkbox" checked></label>
+            <label class="setting-row" for="journal-enabled"><span>Записывать журнал игры</span><input id="journal-enabled" type="checkbox" checked></label>
             <label class="setting-row" for="journal-format"><span>Формат скачивания</span>
               <select id="journal-format">
                 <option value="text" selected>Текст на русском (.txt)</option>
                 <option value="compact">Компактные данные (.jsonl)</option>
               </select>
             </label>
-            <p id="journal-status" role="status" aria-live="polite">Журнал включён.</p>
+            <p id="journal-status">Журнал включён.</p>
             <label class="setting-row" for="journal-text-view">
               <span>Текст журнала</span>
               <textarea id="journal-text-view" rows="10" readonly spellcheck="false"></textarea>
@@ -219,6 +230,14 @@
 
     <p id="announcer" class="sr-only" aria-live="assertive" aria-atomic="true"></p>
   </main>
+
+  <dialog id="tutorial-setup-dialog" aria-labelledby="tutorial-setup-title" aria-describedby="tutorial-setup-prompt">
+    <section class="setup-dialog-body">
+      <h2 id="tutorial-setup-title" tabindex="-1">Настройка управления перед обучением</h2>
+      <p id="tutorial-setup-prompt" role="status" aria-live="assertive" aria-atomic="true"></p>
+      <div id="tutorial-setup-actions" class="setup-actions" role="group" aria-label="Выбор способа управления"></div>
+    </section>
+  </dialog>
 
   <dialog id="runtime-error-dialog" aria-labelledby="runtime-error-title" aria-describedby="runtime-error-summary">
     <section>

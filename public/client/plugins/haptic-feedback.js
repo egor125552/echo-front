@@ -22,6 +22,14 @@ export const HAPTIC_PATTERNS = Object.freeze({
     vibrate: Object.freeze([68, 22, 42]),
     gamepad: Object.freeze({ duration: 155, weak: 0.95, strong: 1.0 }),
   }),
+  shotCannon: Object.freeze({
+    vibrate: Object.freeze([130, 30, 180, 35, 95]),
+    gamepad: Object.freeze({ duration: 360, weak: 1.0, strong: 1.0 }),
+  }),
+  cannonChargePulse: Object.freeze({
+    vibrate: Object.freeze([35, 25, 45]),
+    gamepad: Object.freeze({ duration: 110, weak: 0.72, strong: 0.85 }),
+  }),
   shotBurstEntry: Object.freeze({
     vibrate: Object.freeze([10, 18, 10, 18, 10]),
     gamepad: Object.freeze({ duration: 48, weak: 0.78, strong: 0.68 }),
@@ -127,20 +135,34 @@ export function patternDurationMs(pattern) {
   return Math.max(0, Number(pattern) || 0);
 }
 
-export function activeGamepad() {
-  if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") return null;
-  const pads = Array.from(navigator.getGamepads() ?? []).filter(Boolean);
-  return (
-    pads.find((pad) => pad.mapping === "standard" && (pad.vibrationActuator || pad.hapticActuators?.length))
-    ?? pads.find((pad) => pad.vibrationActuator || pad.hapticActuators?.length)
-    ?? pads.find((pad) => pad.mapping === "standard")
-    ?? pads[0]
-    ?? null
+export function connectedGamepads() {
+  if (typeof navigator === "undefined" || typeof navigator.getGamepads !== "function") return [];
+  try {
+    return Array.from(navigator.getGamepads() ?? []).filter((pad) => Boolean(pad) && pad.connected !== false);
+  } catch {
+    return [];
+  }
+}
+
+export function hapticGamepads() {
+  const pads = connectedGamepads().filter(
+    (pad) => Boolean(pad.vibrationActuator || (pad.hapticActuators && pad.hapticActuators.length)),
   );
+  return pads.sort((a, b) => Number(b.mapping === "standard") - Number(a.mapping === "standard"));
+}
+
+export function activeGamepad() {
+  const withHaptics = hapticGamepads();
+  if (withHaptics.length) return withHaptics[0];
+  const pads = connectedGamepads();
+  return pads.find((pad) => pad.mapping === "standard") ?? pads[0] ?? null;
 }
 
 export function gamepadHasHaptics(pad = activeGamepad()) {
-  return Boolean(pad?.vibrationActuator || pad?.hapticActuators?.length);
+  if (pad) {
+    return Boolean(pad.connected !== false && (pad.vibrationActuator || pad.hapticActuators?.length));
+  }
+  return hapticGamepads().length > 0;
 }
 
 export function vibrationApiSupported() {
@@ -155,9 +177,89 @@ function shapeMotorMagnitude(raw, level) {
   return clamp01(boosted * level);
 }
 
+export function selectRumbleEffectTypes(actuator) {
+  const rawEffects = actuator?.effects ? Array.from(actuator.effects) : [];
+  const effects = rawEffects.filter((effect) => typeof effect === "string" && effect.length > 0);
+  const declaredType = typeof actuator?.type === "string" && actuator.type.length > 0
+    ? actuator.type
+    : null;
+
+  const candidates = [];
+  const pushUnique = (effectType) => {
+    if (effectType && !candidates.includes(effectType)) candidates.push(effectType);
+  };
+
+  // PlayStation DualSense / DualShock grip motors require "dual-rumble";
+  // "trigger-rumble" resolves silently with zero grip vibration on PlayStation controllers.
+  if (effects.includes("dual-rumble") || declaredType === "dual-rumble" || effects.length === 0) {
+    pushUnique("dual-rumble");
+  }
+  if (declaredType && declaredType !== "trigger-rumble") {
+    pushUnique(declaredType);
+  }
+  for (const effect of effects) {
+    if (effect !== "trigger-rumble") pushUnique(effect);
+  }
+  pushUnique("dual-rumble");
+  if (declaredType === "trigger-rumble" || effects.includes("trigger-rumble")) {
+    pushUnique("trigger-rumble");
+  }
+  return candidates;
+}
+
+async function rumbleActuator(actuator, { duration, weakMagnitude, strongMagnitude }) {
+  if (!actuator) return false;
+  if (typeof actuator.playEffect === "function") {
+    const effectTypes = selectRumbleEffectTypes(actuator);
+    for (const effectType of effectTypes) {
+      const effectParams = effectType === "trigger-rumble"
+        ? {
+            startDelay: 0,
+            duration,
+            weakMagnitude,
+            strongMagnitude,
+            leftTrigger: clamp01(strongMagnitude * 0.65),
+            rightTrigger: clamp01(Math.max(weakMagnitude, strongMagnitude) * 0.75),
+          }
+        : {
+            startDelay: 0,
+            duration,
+            weakMagnitude,
+            strongMagnitude,
+          };
+      try {
+        const outcome = await actuator.playEffect(effectType, effectParams);
+        if (outcome !== "invalid-state") return true;
+      } catch {}
+    }
+  }
+  if (typeof actuator.pulse === "function") {
+    try {
+      const pulsed = await actuator.pulse(Math.max(weakMagnitude, strongMagnitude), duration);
+      if (pulsed !== false) return true;
+    } catch {}
+  }
+  return false;
+}
+
+async function rumbleSingleGamepad(gamepad, params) {
+  if (!gamepad || gamepad.connected === false) return false;
+  if (await rumbleActuator(gamepad.vibrationActuator, params)) return true;
+
+  const haptics = gamepad.hapticActuators ? Array.from(gamepad.hapticActuators) : [];
+  if (haptics.length) {
+    let pulsed = false;
+    for (const haptic of haptics) {
+      if (await rumbleActuator(haptic, params)) pulsed = true;
+    }
+    if (pulsed) return true;
+  }
+  return false;
+}
+
 export async function playGamepadRumble({ duration = 90, weak = 0.55, strong = 0.8 } = {}, intensity = 1) {
-  const gamepad = activeGamepad();
-  if (!gamepad) return false;
+  const pads = hapticGamepads();
+  if (!pads.length) return false;
   const level = clampIntensity(intensity);
   const rawDuration = Math.max(10, Number(duration) || 90);
   // Short logical cues (28-48ms) must drive physical controller motors for at least 85ms
@@ -165,58 +267,14 @@ export async function playGamepadRumble({ duration = 90, weak = 0.55, strong = 0
   const safeDuration = Math.max(85, Math.min(480, rawDuration < 95 ? Math.round(rawDuration * 2.15) : Math.round(rawDuration)));
   const weakMagnitude = shapeMotorMagnitude(weak, level);
   const strongMagnitude = shapeMotorMagnitude(strong, level);
+  const params = { duration: safeDuration, weakMagnitude, strongMagnitude };
 
   try {
-    const actuator = gamepad.vibrationActuator;
-    if (actuator?.playEffect) {
-      const preferredType = (typeof actuator.type === "string" && actuator.type)
-        || (Array.isArray(actuator.effects) && typeof actuator.effects[0] === "string" && actuator.effects[0])
-        || "dual-rumble";
-      const effectParams = {
-        startDelay: 0,
-        duration: safeDuration,
-        weakMagnitude,
-        strongMagnitude,
-        ...(preferredType === "trigger-rumble"
-          ? {
-              leftTrigger: clamp01(strongMagnitude * 0.65),
-              rightTrigger: clamp01(Math.max(weakMagnitude, strongMagnitude) * 0.75),
-            }
-          : {}),
-      };
-      try {
-        await actuator.playEffect(preferredType, effectParams);
-        return true;
-      } catch {
-        if (preferredType !== "dual-rumble") {
-          await actuator.playEffect("dual-rumble", {
-            startDelay: 0,
-            duration: safeDuration,
-            weakMagnitude,
-            strongMagnitude,
-          });
-          return true;
-        }
-      }
-    }
-    if (actuator?.pulse) {
-      await actuator.pulse(Math.max(weakMagnitude, strongMagnitude), safeDuration);
-      return true;
-    }
-
-    const haptics = Array.isArray(gamepad.hapticActuators) ? gamepad.hapticActuators : [];
-    if (haptics.length) {
-      let pulsed = false;
-      for (const haptic of haptics) {
-        if (haptic?.pulse) {
-          await haptic.pulse(Math.max(weakMagnitude, strongMagnitude), safeDuration);
-          pulsed = true;
-        }
-      }
-      if (pulsed) return true;
-    }
-  } catch {}
-  return false;
+    const outcomes = await Promise.all(pads.map((pad) => rumbleSingleGamepad(pad, params)));
+    return outcomes.some(Boolean);
+  } catch {
+    return false;
+  }
 }
 
 export function impactStrength(payload = {}) {
@@ -307,6 +365,21 @@ export function hapticCueForGameEvent(packet, playerId, context = {}) {
 
   if (packet.event === "weapon:fired" && payload.entityId === playerId) {
     const weaponId = payload.weaponId ?? "pistol";
+    if (weaponId === "cannon") {
+      const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
+      return {
+        kind: "weapon:cannon",
+        pattern: "critical",
+        priority: HAPTIC_PRIORITY.CRITICAL,
+        cooldownMs: 90,
+        vibrate: [...HAPTIC_PATTERNS.shotCannon.vibrate],
+        gamepad: {
+          duration: Math.round(370 + charge * 150),
+          weak: Math.min(1, 0.95 + charge * 0.05),
+          strong: 1.0,
+        },
+      };
+    }
     if (weaponId === "sniper") {
       return {
         kind: "weapon:sniper",
@@ -571,6 +644,134 @@ export function hapticCueForGameEvent(packet, playerId, context = {}) {
     };
   }
 
+  if (packet.event === "cannon:charge-milestone" && payload.entityId === playerId) {
+    const ratio = Math.max(0.5, Math.min(1, Number(payload.chargeRatio) || 0.5));
+    return {
+      kind: "cannon:charge",
+      pattern: "utility",
+      priority: HAPTIC_PRIORITY.HIGH,
+      cooldownMs: 140,
+      vibrate: [...HAPTIC_PATTERNS.cannonChargePulse.vibrate],
+      gamepad: {
+        duration: Math.round(90 + ratio * 110),
+        weak: 0.62 + ratio * 0.35,
+        strong: 0.70 + ratio * 0.30,
+      },
+    };
+  }
+
+  if (packet.event === "cannon:recoil-unbraced" && payload.entityId === playerId) {
+    return {
+      kind: "cannon:recoil",
+      pattern: "impact",
+      priority: HAPTIC_PRIORITY.HIGH,
+      cooldownMs: 120,
+      vibrate: [85, 25, 110],
+      gamepad: {
+        duration: payload.heavy ? 340 : 220,
+        weak: 0.88,
+        strong: 1.0,
+      },
+    };
+  }
+
+  if (packet.event === "nuke:detonated") {
+    const isOwner = payload.ownerId === playerId;
+    const blastRadius = Math.max(86, Number(payload.blastRadius) || 185);
+    const maxFeelDist = Math.max(520, blastRadius * 2.8);
+    const dist = Number(context.distanceToListener);
+    const withinRange = Number.isFinite(dist) && dist <= maxFeelDist;
+    if (isOwner || withinRange) {
+      const proximity = Number.isFinite(dist)
+        ? (dist <= blastRadius ? 1 : Math.max(0.32, 1 - ((dist - blastRadius) / Math.max(1, maxFeelDist - blastRadius)) * 0.68))
+        : 0.78;
+      const strong = Math.min(1, 0.56 + proximity * 0.44);
+      const weak = Math.min(1, 0.42 + proximity * 0.52);
+      const duration = Math.round(480 + proximity * 420);
+      return {
+        kind: "nuke:detonated",
+        pattern: "critical",
+        priority: HAPTIC_PRIORITY.CRITICAL,
+        cooldownMs: 180,
+        vibrate: [140, 35, Math.round(180 + proximity * 140), 40, Math.round(110 + proximity * 90)],
+        gamepad: {
+          duration,
+          weak,
+          strong,
+        },
+      };
+    }
+  }
+
+  if (packet.event === "mine:detonated") {
+    const isOwner = payload.ownerId === playerId;
+    const dist = Number(context.distanceToListener);
+    const nearby = Number.isFinite(dist) && dist <= 55;
+    if (isOwner || nearby) {
+      const proximity = Number.isFinite(dist) ? Math.max(0.35, 1 - dist / 55) : 0.65;
+      return {
+        kind: "mine:detonated",
+        pattern: "impact",
+        priority: HAPTIC_PRIORITY.HIGH,
+        cooldownMs: 120,
+        vibrate: [70, 25, Math.round(95 * proximity)],
+        gamepad: {
+          duration: Math.round(180 + proximity * 140),
+          weak: Math.min(1, 0.48 + proximity * 0.38),
+          strong: Math.min(1, 0.58 + proximity * 0.36),
+        },
+      };
+    }
+  }
+
+  if (packet.event === "cannon:impact") {
+    const isOwner = payload.ownerId === playerId;
+    const blastRadius = Math.max(20, Number(payload.blastRadius) || 50);
+    const maxFeelDist = Math.max(320, blastRadius * 4.2);
+    const dist = Number(context.distanceToListener);
+    const nearbyEnemyImpact = !isOwner && Number.isFinite(dist) && dist <= maxFeelDist;
+    if (isOwner || nearbyEnemyImpact) {
+      const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
+      const pierced = Boolean(payload.pierced);
+      const hits = Math.max(0, Number(payload.hitCount) || 0);
+      const cars = Math.max(0, Number(payload.launchedVehicles) || 0);
+      const impactBonus = Math.min(0.25, (hits > 0 ? 0.12 : 0) + (cars > 0 ? 0.14 : 0));
+      const proximity = isOwner
+        ? Math.max(0.68, 1 - (Math.max(0, Number(payload.traveled) || 0) / 1600))
+        : Math.max(0.28, 1 - (dist / maxFeelDist));
+      const strong = Math.min(1, (pierced ? 0.68 : 0.72 + charge * 0.22 + impactBonus) * proximity);
+      const weak = Math.min(1, (pierced ? 0.78 : 0.62 + charge * 0.26 + impactBonus) * proximity);
+      const duration = Math.round((pierced ? 190 : 250 + charge * 180 + (cars > 0 ? 60 : 0)) * Math.max(0.75, proximity));
+      return {
+        kind: pierced ? "cannon:pierce" : "cannon:impact",
+        pattern: "impact",
+        priority: HAPTIC_PRIORITY.HIGH,
+        cooldownMs: 110,
+        vibrate: pierced ? [55, 25, 85] : [80, 30, Math.round(115 + charge * 70)],
+        gamepad: {
+          duration,
+          weak,
+          strong,
+        },
+      };
+    }
+  }
+
+  if (packet.event === "vehicle:launched" && payload.driverId === playerId) {
+    return {
+      kind: "vehicle:launched",
+      pattern: "critical",
+      priority: HAPTIC_PRIORITY.CRITICAL,
+      cooldownMs: 120,
+      vibrate: [120, 30, 160, 30, 110],
+      gamepad: {
+        duration: 420,
+        weak: 0.95,
+        strong: 1.0,
+      },
+    };
+  }
+
   if (packet.event === "vehicle:impact" && (payload.driverId === playerId || payload.entityId === playerId)) {
     const impact = impactStrength(payload);
     const forceBacked = payload.impactSource === "rapier-contact-force";
@@ -682,6 +883,7 @@ export async function setup(ctx) {
   let selfAlive = true;
   let selfHealth = null;
   let selfHealthMax = null;
+  let selfPos = { x: 0, y: 0, z: 0 };
   const arbitrator = createHapticArbitrator();
   const shotTracker = createShotTracker();
 
@@ -739,6 +941,13 @@ export async function setup(ctx) {
     shotTracker.reset();
     if (vibrationApiSupported()) {
       try { navigator.vibrate(0); } catch {}
+    }
+    for (const pad of hapticGamepads()) {
+      try {
+        if (typeof pad.vibrationActuator?.reset === "function") {
+          Promise.resolve(pad.vibrationActuator.reset()).catch(() => {});
+        }
+      } catch {}
     }
   }
 
@@ -862,6 +1071,7 @@ export async function setup(ctx) {
     const self = snapshot?.entities?.find((entity) => entity.id === network.playerId);
     if (!self) return;
     selfAlive = Boolean(self.alive);
+    selfPos = { x: Number(self.x) || 0, y: Number(self.y) || 0, z: Number(self.z) || 0 };
     if (Number.isFinite(Number(self.health))) selfHealth = Number(self.health);
     if (Number.isFinite(Number(self.healthMax)) && Number(self.healthMax) > 0) {
       selfHealthMax = Number(self.healthMax);
@@ -900,6 +1110,18 @@ export async function setup(ctx) {
         selfHealth = Math.max(0, selfHealth - applied);
         eventContext = { remainingHealthRatio: selfHealth / selfHealthMax };
       }
+    } else if (
+      packet?.event === "cannon:impact"
+      || packet?.event === "nuke:detonated"
+      || packet?.event === "mine:detonated"
+    ) {
+      const ix = Number(payload.x);
+      const iz = Number(payload.z);
+      if (Number.isFinite(ix) && Number.isFinite(iz)) {
+        eventContext = {
+          distanceToListener: Math.hypot(ix - selfPos.x, iz - selfPos.z),
+        };
+      }
     }
 
     const cue = hapticCueForGameEvent(packet, self, eventContext);
@@ -933,6 +1155,7 @@ export async function setup(ctx) {
     });
   }
 
+  ctx.events.on("gamepad:connected", () => syncUi());
   window.addEventListener("gamepadconnected", () => syncUi());
   window.addEventListener("gamepaddisconnected", () => syncUi());
 

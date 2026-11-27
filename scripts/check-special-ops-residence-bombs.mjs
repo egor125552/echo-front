@@ -17,6 +17,8 @@ import {
   nextElectroMode,
   submitPuzzleStep,
 } from "../src/game/special-ops-arsenal.js";
+import { SPATIAL_SOUND_PROFILES } from "../public/client/plugins/core-sound-pack.js";
+import { hapticCueForGameEvent } from "../public/client/plugins/haptic-feedback.js";
 
 function runPureUnitTests() {
   // 1. Guidance allowed outside Residence, blocked inside labyrinth & bunker
@@ -56,26 +58,45 @@ function runPureUnitTests() {
   }
   assert.equal(solved, true, "Puzzle solves cleanly");
 
-  // 3. Mini-Nuke 86m 360° target & blast damage (including self-hit at 4m and all 4 compass directions at 78m!)
-  assert.equal(MINI_NUKE_CONFIG.blastRadius, 86, "Mini-Nuke blast radius is full 86m");
+  // 3. Mini-Nuke 185m 360° target & blast damage (including self-hit at 4m, ground-snapping from air, and all 4 compass directions at 165m!)
+  assert.equal(MINI_NUKE_CONFIG.blastRadius, 185, "Mini-Nuke blast radius is massive 185m");
   const targetClose = computeMiniNukeTarget({ x: 10, y: 0, z: 20, angle: 0 }, 4, 1000);
   const selfHit = evaluateBlastDamage(targetClose, { x: 10, y: 0, z: 20 }, MINI_NUKE_CONFIG);
   assert.equal(selfHit.hit, true, "Mini-nuke fired at 4m hits launcher");
   assert.equal(selfHit.damage, MINI_NUKE_CONFIG.maxDamage, "4m self-shot deals full lethal core damage");
 
+  // Launching from altitude outdoors must ground-snap to y=0 (never explode in empty sky!)
+  const airborneTarget = computeMiniNukeTarget({ x: 0, y: 187, z: 0, angle: 0 }, 215, 1000, 0);
+  assert.equal(airborneTarget.y, 0, "Outdoor Mini-Nuke launched from sky snaps ground zero to surface y=0");
+  const bunkerTarget = computeMiniNukeTarget({ x: RESIDENCE_SITE.x, y: -14, z: RESIDENCE_SITE.z, angle: 0 }, 4, 1000, 0);
+  assert.equal(bunkerTarget.y, -14, "Bunker Mini-Nuke preserves underground elevation");
+
   for (const [label, pt] of [
-    ["North 78m", { x: 0, y: 0, z: -78 }],
-    ["South 78m", { x: 0, y: 0, z: 78 }],
-    ["East 78m", { x: 78, y: 0, z: 0 }],
-    ["West 78m", { x: -78, y: 0, z: 0 }],
+    ["North 165m", { x: 0, y: 0, z: -165 }],
+    ["South 165m", { x: 0, y: 0, z: 165 }],
+    ["East 165m", { x: 165, y: 0, z: 0 }],
+    ["West 165m", { x: -165, y: 0, z: 0 }],
   ]) {
     const res = evaluateBlastDamage({ x: 0, y: 0, z: 0 }, pt, MINI_NUKE_CONFIG);
-    assert.equal(res.hit, true, `86m 360° Mini-Nuke hits ${label}`);
+    assert.equal(res.hit, true, `185m 360° Mini-Nuke hits ${label}`);
     assert.ok(res.damage >= MINI_NUKE_CONFIG.minEdgeDamage, `${label} takes >= edge damage (${res.damage})`);
   }
 
-  const farMiss = evaluateBlastDamage({ x: 0, y: 0, z: 0 }, { x: 92, y: 0, z: 0 }, MINI_NUKE_CONFIG);
-  assert.equal(farMiss.hit, false, "Outside 86m blast radius takes no damage");
+  const farMiss = evaluateBlastDamage({ x: 0, y: 0, z: 0 }, { x: 195, y: 0, z: 0 }, MINI_NUKE_CONFIG);
+  assert.equal(farMiss.hit, false, "Outside 185m blast radius takes no damage");
+
+  // Mini-Nuke audio profile & DualSense seismic haptics
+  const nukeProfile = SPATIAL_SOUND_PROFILES["bomb.nuke"];
+  assert.ok(nukeProfile.referenceDistance >= 75, `bomb.nuke has map-wide referenceDistance (${nukeProfile.referenceDistance})`);
+  assert.ok(nukeProfile.rolloffFactor <= 0.035, `bomb.nuke has shallow rolloffFactor (${nukeProfile.rolloffFactor})`);
+  const nukeHaptic = hapticCueForGameEvent(
+    { event: "nuke:detonated", payload: { ownerId: "enemy-1", blastRadius: 185, hitCount: 3, launchedVehicles: 2 } },
+    "human-1",
+    { distanceToListener: 160 },
+  );
+  assert.equal(nukeHaptic?.kind, "nuke:detonated", "Nearby nuke detonation triggers DualSense seismic haptics");
+  assert.ok(nukeHaptic.gamepad.duration >= 700, "Nuke detonation produces long seismic DualSense rumble");
+  assert.ok(nukeHaptic.gamepad.strong >= 0.9, "Nuke detonation hits near-max heavy motor intensity");
 
   // 4. Electro modes cycle cleanly & all 3 modes have strong knockback
   const m1 = nextElectroMode("shock");
@@ -291,22 +312,28 @@ async function runLiveIntegrationTests() {
     "Enemy stepping on mine took heavy explosion damage",
   );
 
-  // 7. Test Mini-Nuke 2-step launch -> exact 2.15s detonation sync, 360° 86m blast radius & self-damage when launched at 4m!
+  // 7. Test Mini-Nuke 2-step launch -> exact 2.15s detonation sync, 360° 185m blast radius, vehicle sky-launch & self-damage at 4m!
   const nukeVictims = entities.all()
     .filter((e) => e.alive && e.bot && !e.humanSquad && e.id !== mineVictim.id && e.id !== enemyA.id && e.id !== enemyB.id)
     .slice(0, 4);
-  assert.equal(nukeVictims.length, 4, "4 enemy bots available for 360° 86m Mini-Nuke check");
+  assert.equal(nukeVictims.length, 4, "4 enemy bots available for 360° 185m Mini-Nuke check");
   for (const v of nukeVictims) {
     const vp = host.components.get(v.id, "Parachute");
     if (vp) { vp.phase = "landed"; vp.airborne = false; }
   }
-  movement.teleport("human-1", { x: 200, y: 0, z: 200, angle: 0 }); // angle=0 faces -Z; default medium distance is 105m -> ground zero (200, 0, 95)
-  const gz = { x: 200, z: 95 };
-  // Place 4 targets around ground zero: center, +72m East, -72m West, -72m North (all within 86m 360° radius!)
+  const vehiclesForNuke = host.services.get("vehicles");
+  const primaryJeepBeforeNuke = vehiclesForNuke?.stateFor?.(vehiclesForNuke.vehicleId);
+  // Stand 215m south of the primary jeep so default medium distance (215m) puts ground zero RIGHT ON the jeep!
+  const gz = {
+    x: Math.round(primaryJeepBeforeNuke?.x ?? 94),
+    z: Math.round(primaryJeepBeforeNuke?.z ?? 24),
+  };
+  movement.teleport("human-1", { x: gz.x, y: 0, z: gz.z + 215, angle: 0 }); // angle=0 faces -Z -> ground zero at (gz.x, 0, gz.z)
+  // Place 4 targets around ground zero: center, +160m East, -160m West, -160m North (all within 185m 360° radius!)
   movement.teleport(nukeVictims[0].id, { x: gz.x, y: 0, z: gz.z, angle: 0 });
-  movement.teleport(nukeVictims[1].id, { x: gz.x + 72, y: 0, z: gz.z, angle: 0 });
-  movement.teleport(nukeVictims[2].id, { x: gz.x - 72, y: 0, z: gz.z, angle: 0 });
-  movement.teleport(nukeVictims[3].id, { x: gz.x, y: 0, z: gz.z - 72, angle: 0 });
+  movement.teleport(nukeVictims[1].id, { x: gz.x + 160, y: 0, z: gz.z, angle: 0 });
+  movement.teleport(nukeVictims[2].id, { x: gz.x - 160, y: 0, z: gz.z, angle: 0 });
+  movement.teleport(nukeVictims[3].id, { x: gz.x, y: 0, z: gz.z - 160, angle: 0 });
 
   matchApi.handleInput("human-1", { nukePressed: true }, now); // Step 1: aim
   assert.ok(capturedEvents.some((e) => e.event === "nuke:aiming"), "Step 1 emits nuke:aiming");
@@ -314,8 +341,8 @@ async function runLiveIntegrationTests() {
   matchApi.handleInput("human-1", { firePressed: true }, now); // Step 2: confirm launch with fire!
   assert.equal(specialOps.nukeCountOf("human-1"), nukesBeforeLaunch - 1, "Mini-nuke consumed on launch");
   assert.ok(
-    capturedEvents.some((e) => e.event === "sound:spatial" && e.payload.key === "bomb.nuke"),
-    "Mini-nuke plays bomb.nuke immediately on launch",
+    capturedEvents.some((e) => e.event === "sound:spatial" && e.payload.key === "bomb.nuke" && (e.payload.radius ?? 0) >= 1400),
+    "Mini-nuke plays map-wide bomb.nuke immediately on launch",
   );
 
   // Before 2.15s -> must NOT detonate yet
@@ -323,17 +350,32 @@ async function runLiveIntegrationTests() {
   matchApi.step(0.05, now);
   assert.equal(capturedEvents.filter((e) => e.event === "nuke:detonated").length, 0, "Nuke waits for 2.15s boom");
 
-  // At >= 2.15s -> detonates in full 86m 360° sphere!
+  // At >= 2.15s -> detonates in full 185m 360° sphere AND physically launches vehicles into the sky!
   now += 750;
   matchApi.step(0.05, now);
   const nukeDetEvent = capturedEvents.find((e) => e.event === "nuke:detonated");
   assert.ok(nukeDetEvent, "Nuke detonates at 2.15s sync");
-  assert.equal(nukeDetEvent.payload.blastRadius, 86, "Nuke blastRadius reported as 86m");
+  assert.equal(nukeDetEvent.payload.blastRadius, 185, "Nuke blastRadius reported as 185m");
+  assert.ok((nukeDetEvent.payload.launchedVehicles ?? 0) >= 1, "Mini-Nuke physically launches vehicles inside its shockwave!");
   assert.equal(nukeVictims[0].alive, false, "Enemy at nuke ground zero obliterated");
   for (let i = 1; i < 4; i += 1) {
     const v = nukeVictims[i];
     const hitInEvent = (nukeDetEvent.payload.affected ?? []).some((a) => a.entityId === v.id);
-    assert.equal(hitInEvent, true, `Enemy #${i} at 72m in different compass direction was blasted by 86m 360° nuke!`);
+    assert.equal(hitInEvent, true, `Enemy #${i} at 160m in different compass direction was blasted by 185m 360° nuke!`);
+  }
+  // Verify jeep physically flew upward/away over next few physics steps
+  for (let i = 0; i < 8; i += 1) {
+    now += 50;
+    matchApi.step(0.05, now);
+  }
+  const primaryJeepAfterNuke = vehiclesForNuke?.stateFor?.(vehiclesForNuke.vehicleId);
+  if (primaryJeepBeforeNuke && primaryJeepAfterNuke) {
+    const jeepLift = primaryJeepAfterNuke.y - primaryJeepBeforeNuke.y;
+    const jeepShift = Math.hypot(primaryJeepAfterNuke.x - primaryJeepBeforeNuke.x, primaryJeepAfterNuke.z - primaryJeepBeforeNuke.z);
+    assert.ok(
+      jeepLift > 4 || jeepShift > 8,
+      `Mini-Nuke physically catapulted primary jeep (dy=${jeepLift.toFixed(2)}m, horiz=${jeepShift.toFixed(2)}m)`,
+    );
   }
 
   // Self-damage check: fire mini-nuke at 4m ("Под себя")
@@ -653,11 +695,11 @@ async function runLiveIntegrationTests() {
   const landedPos = host.components.get("human-1", "Transform");
   assert.ok(landedPos.y <= 0.5, `Electro-Lukashenko landed cleanly after slam (y=${landedPos.y.toFixed(1)})`);
   assert.equal(humanHp.current, 800, "Electro Super-Jump Meteor Slam deals ZERO self-damage and triggers ZERO fall damage!");
-  assert.equal(specialOps.electroJumpPhaseOf("human-1", now), "cooldown", "Super-Jump enters 15s cooldown after slam");
+  assert.equal(specialOps.electroJumpPhaseOf("human-1", now), "cooldown", "Super-Jump enters cooldown after slam");
   const cdSnap = matchApi.snapshotFor("human-1", now);
   assert.ok(
-    (cdSnap.specialOps?.electroJumpCooldownMs ?? 0) > 10_000,
-    `Super-Jump cooldown is 15s (remaining=${cdSnap.specialOps?.electroJumpCooldownMs}ms)`,
+    (cdSnap.specialOps?.electroJumpCooldownMs ?? 0) > ELECTRO_SUPER_JUMP_CONFIG.cooldownMs * 0.4,
+    `Super-Jump cooldown active (remaining=${cdSnap.specialOps?.electroJumpCooldownMs}ms, config=${ELECTRO_SUPER_JUMP_CONFIG.cooldownMs}ms)`,
   );
   assert.ok(
     !slamVictim.alive || injury.isDowned(slamVictim.id) || slamVictimHp.current < 100,
@@ -696,8 +738,9 @@ async function runLiveIntegrationTests() {
     now += 50;
     matchApi.step(0.05, now);
   }
-  // Auto-entered gliding at 1.5s apex; now ride ballistic flight all the way to natural landing
-  for (let i = 0; i < 120; i += 1) {
+  // Release boost at 1.5s to enter gliding, then ride ballistic flight all the way to natural landing
+  matchApi.handleInput("human-1", { electroJumpReleased: true }, now);
+  for (let i = 0; i < 160; i += 1) {
     now += 50;
     matchApi.step(0.05, now);
     if (specialOps.electroJumpPhaseOf("human-1", now) === "cooldown") break;
@@ -741,18 +784,18 @@ async function runLiveIntegrationTests() {
     );
   }
 
-  // Test Rival Mini-Nuke launch at safe 115m distance
+  // Test Rival Mini-Nuke launch at safe 235m distance (outside 185m blast radius!)
   const nukeBeforeRival = capturedEvents.filter((e) => e.event === "nuke:launched" && e.payload.bot).length;
   const nukeShooter = entities.all().find((e) => isStandingBot(e) && e.id !== rivalBoss.id);
   if (nukeShooter) {
     const nsPara = host.components.get(nukeShooter.id, "Parachute");
     if (nsPara) { nsPara.phase = "landed"; nsPara.airborne = false; }
     specialOps.grantNuke(nukeShooter.id, 10);
-    movement.teleport(nukeShooter.id, { x: glideLandPos.x, y: 0, z: glideLandPos.z - 115, angle: 0 }); // 115m from human-1!
+    movement.teleport(nukeShooter.id, { x: glideLandPos.x, y: 0, z: glideLandPos.z - 235, angle: 0 }); // 235m from human-1!
     now += 35_000;
     specialOps.runRivalLateGameStep(now, { forceDirector: true });
     const nukeAfterRival = capturedEvents.filter((e) => e.event === "nuke:launched" && e.payload.bot).length;
-    assert.ok(nukeAfterRival > nukeBeforeRival, "Rival bot autonomously launched a Mini-Nuke at safe 115m distance!");
+    assert.ok(nukeAfterRival > nukeBeforeRival, "Rival bot autonomously launched a Mini-Nuke at safe 235m distance!");
   }
 
   // Ensure snapshotFor includes complete specialOps block including electroJumpPhase
@@ -763,7 +806,7 @@ async function runLiveIntegrationTests() {
   assert.equal(typeof snap.specialOps.electroJumpPhase, "string");
 
   await game.close?.();
-  console.log("[PASS] Live Battle Royale Special-Ops, Residence Bunker, Mines, 86m Mini-Nuke, Electro Super-Jump & Rival Boss AI tests!");
+  console.log("[PASS] Live Battle Royale Special-Ops, Residence Bunker, Mines, 185m Mini-Nuke, Electro Super-Jump & Rival Boss AI tests!");
 }
 
 runPureUnitTests();

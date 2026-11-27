@@ -1,16 +1,22 @@
 import {
+  CANNON_CONFIG,
+  CANNON_MODES,
   ELECTRO_LUKASHENKO_STATS,
   ELECTRO_RIFLE_MODES,
   ELECTRO_SUPER_JUMP_CONFIG,
   LANDMINE_CONFIG,
   MINI_NUKE_CONFIG,
   RESIDENCE_SITE,
+  cannonModeById,
   chooseBotShopAction,
+  computeCannonChargeProfile,
   computeMiniNukeTarget,
   createAdaptiveBunkerPuzzle,
   electroModeById,
   evaluateBlastDamage,
+  evaluateCannonImpact,
   isInsideResidenceNoGuidanceZone,
+  nextCannonMode,
   nextElectroMode,
   submitPuzzleStep,
 } from "../../game/special-ops-arsenal.js";
@@ -40,6 +46,7 @@ export const manifest = {
     "battle-royale-crate-generator",
     "battle-royale-crate-physics",
     "battle-royale-tutorial",
+    "target-assist",
   ],
   capabilities: [
     "services.consume",
@@ -82,6 +89,7 @@ export async function setup(ctx) {
   const armor = ctx.services.has("armor") ? ctx.services.get("armor") : null;
   const stimulants = ctx.services.has("stimulants") ? ctx.services.get("stimulants") : null;
   const injury = ctx.services.has("injury") ? ctx.services.get("injury") : null;
+  const targeting = ctx.services.has("targeting") ? ctx.services.get("targeting") : null;
   const ragdoll = ctx.services.has("ragdoll") ? ctx.services.get("ragdoll") : null;
   const parachute = ctx.services.has("parachute") ? ctx.services.get("parachute") : null;
   const shop = ctx.services.has("shop")
@@ -94,6 +102,8 @@ export async function setup(ctx) {
   const mineCounts = new Map();
   const nukeCounts = new Map();
   const electroModes = new Map();
+  const cannonModes = new Map();
+  const cannonCharges = new Map(); // entityId -> { startedAt, lastMilestone, active: true }
   const electroJumpStates = new Map(); // entityId -> { phase, startY, currentY, apexY, vx, vy, vz, startedAt, glideStartedAt, targetX, targetZ }
   const electroJumpCooldowns = new Map();
   const nukeAimStates = new Map(); // entityId -> { active, distanceIndex, startedAt }
@@ -118,6 +128,7 @@ export async function setup(ctx) {
       || weaponId === "zone"
       || weaponId === "landmine"
       || weaponId === "mini-nuke"
+      || weaponId === "cannon"
     ) {
       return originalCombatDamage(targetId, amount, source);
     }
@@ -142,8 +153,11 @@ export async function setup(ctx) {
 
   const plantedMines = [];
   const pendingNukes = [];
+  const activeCannonballs = [];
+  const pendingCannonSalvos = [];
   let mineSerial = 0;
   let nukeSerial = 0;
+  let cannonballSerial = 0;
   let directorCrateSerial = 0;
   let vaultUnlocked = false;
   let vaultLooted = false;
@@ -230,6 +244,7 @@ export async function setup(ctx) {
     if (!mineCounts.has(entityId)) mineCounts.set(entityId, LANDMINE_CONFIG.startingCount);
     if (!nukeCounts.has(entityId)) nukeCounts.set(entityId, 0);
     if (!electroModes.has(entityId)) electroModes.set(entityId, ELECTRO_RIFLE_MODES[0].id);
+    if (!cannonModes.has(entityId)) cannonModes.set(entityId, CANNON_MODES[0].id);
   }
 
   for (const entity of entities.all()) {
@@ -241,12 +256,16 @@ export async function setup(ctx) {
     mineCounts.set(entityId, LANDMINE_CONFIG.startingCount);
     nukeCounts.set(entityId, 0);
     electroModes.set(entityId, ELECTRO_RIFLE_MODES[0].id);
+    cannonModes.set(entityId, CANNON_MODES[0].id);
+    cannonCharges.delete(entityId);
   });
 
   ctx.events.on("entity:removed", ({ entityId }) => {
     mineCounts.delete(entityId);
     nukeCounts.delete(entityId);
     electroModes.delete(entityId);
+    cannonModes.delete(entityId);
+    cannonCharges.delete(entityId);
     electroJumpStates.delete(entityId);
     electroJumpCooldowns.delete(entityId);
     nukeAimStates.delete(entityId);
@@ -255,10 +274,24 @@ export async function setup(ctx) {
     bunkerPuzzles.delete(entityId);
   });
 
+  ctx.events.on("entity:died", ({ entityId }) => {
+    if (!entityId) return;
+    cannonCharges.delete(entityId);
+  });
+
+  ctx.events.on("weapon:selected", ({ entityId, weaponId }) => {
+    if (!entityId || weaponId === "cannon") return;
+    if (cannonCharges.has(entityId)) {
+      cannonCharges.delete(entityId);
+      ctx.events.emit("cannon:charge-cancelled", { entityId, reason: "weapon-switched", now: Date.now() });
+    }
+  });
+
   ctx.events.on("entity:respawned", ({ entityId }) => {
     if (!entityId) return;
     mineCounts.set(entityId, Math.max(mineCounts.get(entityId) ?? 0, LANDMINE_CONFIG.startingCount));
     electroJumpStates.delete(entityId);
+    cannonCharges.delete(entityId);
     const ent = entities.get(entityId);
     if (ent) ent.electroJumpActive = false;
     nukeAimStates.delete(entityId);
@@ -320,6 +353,978 @@ export async function setup(ctx) {
     return next;
   }
 
+  function cannonModeOf(entityId) {
+    ensureStock(entityId);
+    return cannonModeById(cannonModes.get(entityId));
+  }
+
+  function setCannonMode(entityId, modeId, now = Date.now()) {
+    const entity = entities.get(entityId);
+    if (!entity?.alive) return null;
+    if (!weapons.has?.(entityId, "cannon")) {
+      ctx.events.emit("special:info", {
+        entityId,
+        text: "У тебя нет эксклюзивной пушки «Смертонос». Её можно купить в магазине или получить с Джаггернаутом / Электрическим Лукашенко.",
+        now,
+      });
+      return null;
+    }
+    const mode = cannonModeById(modeId);
+    cannonModes.set(entityId, mode.id);
+    if (cannonCharges.has(entityId)) {
+      cannonCharges.delete(entityId);
+      ctx.events.emit("cannon:charge-cancelled", { entityId, reason: "mode-changed", now });
+    }
+    ctx.events.emit("special:cannon-mode-changed", {
+      entityId,
+      modeId: mode.id,
+      modeLabel: mode.label,
+      shortLabel: mode.shortLabel,
+      now,
+    });
+    return mode;
+  }
+
+  function cycleCannonMode(entityId, now = Date.now()) {
+    const entity = entities.get(entityId);
+    if (!entity?.alive) return null;
+    if (!weapons.has?.(entityId, "cannon")) {
+      ctx.events.emit("special:info", {
+        entityId,
+        text: "У тебя нет эксклюзивной пушки «Смертонос». Её можно купить в магазине или получить с Джаггернаутом / Электрическим Лукашенко.",
+        now,
+      });
+      return null;
+    }
+    const next = nextCannonMode(cannonModes.get(entityId));
+    return setCannonMode(entityId, next.id, now);
+  }
+
+  function grantExclusiveCannon(entityId, { select = false } = {}) {
+    if (!weapons.grant(entityId, "cannon")) {
+      weapons.restock?.(entityId, "cannon", 20);
+    }
+    if (select) weapons.selectById?.(entityId, "cannon");
+  }
+
+  function isBlockedBySolidWall(origin, targetPos, excludeA = null, excludeB = null) {
+    if (typeof physics?.raycast !== "function") return false;
+    const dx = finite(targetPos?.x) - finite(origin?.x);
+    const dy = (finite(targetPos?.y) + 1.0) - (finite(origin?.y) + 0.65);
+    const dz = finite(targetPos?.z) - finite(origin?.z);
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist < 1.0) return false;
+    const hit = physics.raycast(
+      { x: finite(origin?.x), y: finite(origin?.y) + 0.65, z: finite(origin?.z) },
+      { x: dx / dist, y: dy / dist, z: dz / dist },
+      dist - 0.55,
+      excludeA,
+    );
+    if (!hit) return false;
+    if (hit.entityId && (hit.entityId === excludeA || hit.entityId === excludeB)) return false;
+    const worldObj = hit.worldObject ?? hit.metadata ?? null;
+    const kind = String(worldObj?.kind ?? hit.kind ?? "");
+    if (worldObj?.vehicleId || kind === "vehicle-chassis" || kind === "vehicle-ballast") return false;
+    return !hit.entityId;
+  }
+
+  function detonateCannonball(ball, impactPos, now = Date.now(), {
+    directEntityId = null,
+    directVehicleId = null,
+  } = {}) {
+    const ix = finite(impactPos?.x, ball.x);
+    const iy = Math.max(0, finite(impactPos?.y, ball.y));
+    const iz = finite(impactPos?.z, ball.z);
+    const owner = entities.get(ball.ownerId);
+    const ownerTeam = Number(teams.teamOf(ball.ownerId)) || 0;
+    const launchedVehicles = vehicles?.applyBlastImpulse?.(
+      { x: ix, y: iy, z: iz },
+      {
+        radius: ball.blastRadius + 14,
+        maxUpVelocity: ball.vehicleUp,
+        maxOutVelocity: ball.vehicleOut,
+        maxSpin: ball.vehicleSpin,
+        direction: { x: ball.vx, z: ball.vz },
+        directVehicleId,
+        now,
+      },
+    ) ?? [];
+
+    let hitCount = 0;
+    let mitigatedCount = 0;
+    for (const target of entities.all()) {
+      if (!target?.alive || target.id === ball.ownerId) continue;
+      if (ball.piercing && ball.piercedEntities.has(target.id) && directEntityId !== target.id) continue;
+      const targetTeam = Number(teams.teamOf(target.id)) || 0;
+      if (ownerTeam > 0 && targetTeam === ownerTeam) continue;
+      const pos = ctx.components.get(target.id, "Transform");
+      if (!pos) continue;
+      const dx = finite(pos.x) - ix;
+      const dy = (finite(pos.y) - iy) * 0.55;
+      const dz = finite(pos.z) - iz;
+      const dist = Math.hypot(dx, dy, dz);
+      const isDirect = directEntityId === target.id;
+      if (!isDirect && dist > ball.blastRadius) continue;
+
+      const blockedByCover = !isDirect && !ball.piercing && (
+        Boolean(pos.inCover) || isBlockedBySolidWall({ x: ix, y: iy, z: iz }, pos, ball.ownerId, target.id)
+      );
+      const impact = evaluateCannonImpact({
+        distance: dist,
+        blastRadius: ball.blastRadius,
+        lethalCoreRadius: ball.lethalCoreRadius,
+        maxDamage: ball.maxDamage,
+        minEdgeDamage: ball.minEdgeDamage,
+        ragdollUp: ball.ragdollUp,
+        ragdollOut: ball.ragdollOut,
+        piercing: ball.piercing,
+        targetBlockedByCover: blockedByCover,
+        targetCrouching: Boolean(pos.crouching),
+        targetElectro: Boolean(target.electroLukashenko),
+        targetJuggernaut: Boolean(target.juggernaut),
+        directHit: isDirect,
+      });
+      if (!impact.hit) continue;
+      hitCount += 1;
+      if (impact.mitigatedByCover) mitigatedCount += 1;
+
+      combat.damage(target.id, impact.damage, {
+        attackerId: ball.ownerId,
+        weaponId: "cannon",
+        distance: Math.round(ball.traveled),
+      });
+
+      if (ragdoll?.trigger && impact.ragdollOut > 0.5) {
+        const horiz = Math.hypot(dx, dz);
+        const dirX = horiz > 0.2 ? dx / horiz : (ball.dirX || 0.7);
+        const dirZ = horiz > 0.2 ? dz / horiz : (ball.dirZ || -0.7);
+        ragdoll.trigger(target.id, {
+          reason: "cannon-blast",
+          vx: dirX * impact.ragdollOut,
+          vy: Math.max(4.5, impact.ragdollUp),
+          vz: dirZ * impact.ragdollOut,
+          dead: !target.alive,
+          allowDowned: true,
+          now,
+        });
+      }
+    }
+
+    // Chain-detonate any planted landmines caught in the cannonball's blast wave
+    for (const mine of plantedMines) {
+      if (mine.detonated) continue;
+      if (distance3({ x: ix, y: iy, z: iz }, mine) <= ball.blastRadius) {
+        detonatePlantedMine(mine, now, ball.ownerId);
+      }
+    }
+
+    ctx.events.emit("sound:spatial", {
+      entityId: ball.ownerId,
+      key: "cannon.impact",
+      x: ix,
+      y: iy,
+      z: iz,
+      radius: 1200,
+      offset: LANDMINE_CONFIG.soundOffsetSec,
+    });
+    ctx.events.emit("cannon:impact", {
+      ballId: ball.id,
+      ownerId: ball.ownerId,
+      ownerName: owner?.name ?? "Боец",
+      modeId: ball.modeId,
+      chargeRatio: ball.chargeRatio,
+      blastRadius: ball.blastRadius,
+      x: Number(ix.toFixed(2)),
+      y: Number(iy.toFixed(2)),
+      z: Number(iz.toFixed(2)),
+      traveled: Math.round(ball.traveled),
+      hitCount,
+      mitigatedCount,
+      launchedVehicles: launchedVehicles.length,
+      now,
+    });
+  }
+
+  function applyStandingCannonRecoil(entityId, transform, { heavy = false, now = Date.now() } = {}) {
+    if (!transform || transform.crouching) return false;
+    const backX = -Math.sin(finite(transform.angle));
+    const backZ = Math.cos(finite(transform.angle));
+    if (heavy && ragdoll?.trigger) {
+      ragdoll.trigger(entityId, {
+        reason: "cannon-recoil",
+        vx: backX * CANNON_CONFIG.standingHeavyRecoilPush,
+        vy: CANNON_CONFIG.standingHeavyRecoilVy,
+        vz: backZ * CANNON_CONFIG.standingHeavyRecoilPush,
+        dead: false,
+        allowDowned: false,
+        now,
+      });
+    } else if (typeof physics?.moveCharacter === "function") {
+      const moved = physics.moveCharacter(entityId, {
+        x: backX * CANNON_CONFIG.standingRecoilPush,
+        y: 0,
+        z: backZ * CANNON_CONFIG.standingRecoilPush,
+      });
+      if (moved) {
+        transform.x = moved.x;
+        transform.y = moved.y;
+        transform.z = moved.z;
+      }
+    } else {
+      const limit = Math.max(40, finite(map.halfSize, 1000) - 4);
+      transform.x = Math.max(-limit, Math.min(limit, finite(transform.x) + backX * CANNON_CONFIG.standingRecoilPush));
+      transform.z = Math.max(-limit, Math.min(limit, finite(transform.z) + backZ * CANNON_CONFIG.standingRecoilPush));
+    }
+    ctx.events.emit("cannon:recoil-unbraced", {
+      entityId,
+      heavy,
+      x: finite(transform.x),
+      y: finite(transform.y),
+      z: finite(transform.z),
+      now,
+    });
+    return true;
+  }
+
+  function resolveCannonAim(entityId, transform, mode, startY, speed, gravity) {
+    const baseYaw = finite(transform.angle);
+    const baseDirX = Math.sin(baseYaw);
+    const baseDirZ = -Math.cos(baseYaw);
+    const baseDir = { x: baseDirX, y: 0, z: baseDirZ };
+    const sx = finite(transform.x);
+    const sz = finite(transform.z);
+    const maxAssistRange = Math.min(700, finite(mode?.range, CANNON_CONFIG.range));
+
+    // Candidate 1: enemy target assist (works across full cannon range)
+    let bestCandidate = null;
+    const resolved = targeting?.resolveShot
+      ? targeting.resolveShot(entityId, baseDir, maxAssistRange, {
+        weaponId: "cannon",
+        piercesVehicles: true,
+      })
+      : null;
+    if (resolved?.targetId) {
+      const targetPos = ctx.components.get(resolved.targetId, "Transform");
+      if (targetPos && Math.abs(finite(targetPos.y) - finite(transform.y)) <= 12) {
+        const dx = finite(targetPos.x) - sx;
+        const dz = finite(targetPos.z) - sz;
+        const dist = Math.hypot(dx, dz);
+        if (dist >= 2.5 && dist <= maxAssistRange) {
+          const dot = (dx * baseDirX + dz * baseDirZ) / dist;
+          bestCandidate = {
+            kind: "enemy",
+            x: finite(targetPos.x),
+            y: finite(targetPos.y) + 1.02,
+            z: finite(targetPos.z),
+            dist,
+            dot,
+          };
+        }
+      }
+    }
+
+    // For piercing mode, also assist locking enemies behind walls inside a tight 6.5 deg forward cone
+    if (!bestCandidate && mode?.piercing) {
+      const ownerTeam = Number(teams.teamOf(entityId)) || 0;
+      const minEnemyDot = Math.cos((6.5 * Math.PI) / 180);
+      for (const target of entities.all()) {
+        if (!target?.alive || target.id === entityId) continue;
+        const tTeam = Number(teams.teamOf(target.id)) || 0;
+        if (ownerTeam > 0 && tTeam === ownerTeam) continue;
+        const tPos = ctx.components.get(target.id, "Transform");
+        if (!tPos) continue;
+        const dx = finite(tPos.x) - sx;
+        const dz = finite(tPos.z) - sz;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 2.5 || dist > maxAssistRange) continue;
+        if (Math.abs(finite(tPos.y) - finite(transform.y)) > 16) continue;
+        const dot = (dx * baseDirX + dz * baseDirZ) / dist;
+        if (dot < minEnemyDot) continue;
+        if (!bestCandidate || dot > bestCandidate.dot + 0.004 || (Math.abs(dot - bestCandidate.dot) <= 0.004 && dist < bestCandidate.dist)) {
+          bestCandidate = {
+            kind: "enemy",
+            x: finite(tPos.x),
+            y: finite(tPos.y) + 1.02,
+            z: finite(tPos.z),
+            dist,
+            dot,
+          };
+        }
+      }
+    }
+
+    // Candidate 2: vehicle aim-assist within 9.5 deg cone so blind players aiming by 3D sound hit cars cleanly at 50..450m!
+    const activeVehicles = typeof vehicles?.snapshot === "function" ? vehicles.snapshot() : [];
+    const minVehDot = Math.cos((9.5 * Math.PI) / 180);
+    for (const veh of activeVehicles) {
+      if (!veh) continue;
+      const vx = finite(veh.x);
+      const vy = finite(veh.y, 1.1);
+      const vz = finite(veh.z);
+      const dx = vx - sx;
+      const dz = vz - sz;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 3.0 || dist > maxAssistRange) continue;
+      if (Math.abs(vy - finite(transform.y)) > 14) continue;
+      const dot = (dx * baseDirX + dz * baseDirZ) / dist;
+      if (dot < minVehDot) continue;
+      if (
+        !bestCandidate
+        || dot > bestCandidate.dot + 0.005
+        || (Math.abs(dot - bestCandidate.dot) <= 0.005 && dist < bestCandidate.dist)
+      ) {
+        bestCandidate = {
+          kind: "vehicle",
+          x: vx,
+          y: Math.max(0.85, vy),
+          z: vz,
+          dist,
+          dot,
+        };
+      }
+    }
+
+    if (!bestCandidate) {
+      return {
+        yaw: baseYaw,
+        pitchRad: CANNON_CONFIG.pitchUpRad,
+      };
+    }
+
+    const dx = bestCandidate.x - sx;
+    const dz = bestCandidate.z - sz;
+    const aimYaw = Math.atan2(dx, -dz);
+    const flightTime = bestCandidate.dist / Math.max(40, speed);
+    const compensatedDy = (bestCandidate.y - startY) + 0.5 * gravity * flightTime * flightTime;
+    const rawPitch = Math.atan2(compensatedDy, Math.max(1, bestCandidate.dist));
+    const pitchRad = Math.max(-0.18, Math.min(0.085, rawPitch));
+    return {
+      yaw: aimYaw,
+      pitchRad,
+    };
+  }
+
+  function spawnCannonball(entityId, mode, {
+    yawOffsetRad = 0,
+    chargeRatio = 0,
+    emitShotAudio = true,
+    now = Date.now(),
+  } = {}) {
+    const entity = entities.get(entityId);
+    const transform = ctx.components.get(entityId, "Transform");
+    if (!entity?.alive || !transform) return null;
+
+    const chargeProfile = mode.id === "charged" ? computeCannonChargeProfile(chargeRatio) : null;
+    const speed = chargeProfile ? chargeProfile.speed : mode.speed;
+    const gravity = chargeProfile ? chargeProfile.gravity : mode.gravity;
+    const wakeRadius = chargeProfile ? chargeProfile.wakeRadius : (mode.wakeRadius ?? CANNON_CONFIG.wakeRadius);
+    const blastRadius = chargeProfile ? chargeProfile.blastRadius : mode.blastRadius;
+    const lethalCoreRadius = chargeProfile ? chargeProfile.lethalCoreRadius : mode.lethalCoreRadius;
+    const maxDamage = chargeProfile ? chargeProfile.maxDamage : mode.maxDamage;
+    const minEdgeDamage = chargeProfile ? chargeProfile.minEdgeDamage : mode.minEdgeDamage;
+    const ragdollUp = chargeProfile ? chargeProfile.ragdollUp : mode.ragdollUp;
+    const ragdollOut = chargeProfile ? chargeProfile.ragdollOut : mode.ragdollOut;
+    const vehicleUp = chargeProfile ? chargeProfile.vehicleUp : mode.vehicleUp;
+    const vehicleOut = chargeProfile ? chargeProfile.vehicleOut : mode.vehicleOut;
+    const vehicleSpin = chargeProfile ? chargeProfile.vehicleSpin : mode.vehicleSpin;
+
+    const startY = finite(transform.y) + (transform.crouching ? 0.98 : 1.18);
+    const aim = resolveCannonAim(entityId, transform, mode, startY, speed, gravity);
+    const yaw = aim.yaw + yawOffsetRad;
+    const dirX = Math.sin(yaw);
+    const dirZ = -Math.cos(yaw);
+    // Flat heavy cannonball trajectory (with slope/gravity compensation when locked onto a car or enemy)
+    const pitchUp = aim.pitchRad;
+    const cosPitch = Math.cos(pitchUp);
+    const vx = dirX * cosPitch * speed;
+    const vy = Math.sin(pitchUp) * speed;
+    const vz = dirZ * cosPitch * speed;
+
+    const startX = finite(transform.x) + dirX * 1.15;
+    const startZ = finite(transform.z) + dirZ * 1.15;
+
+    cannonballSerial += 1;
+    const ball = {
+      id: `cannonball-${cannonballSerial}`,
+      ownerId: entityId,
+      team: Number(teams.teamOf(entityId)) || 0,
+      modeId: mode.id,
+      chargeRatio: Number((chargeProfile?.chargeRatio ?? 0).toFixed(3)),
+      x: startX,
+      y: startY,
+      z: startZ,
+      vx,
+      vy,
+      vz,
+      dirX,
+      dirZ,
+      speed,
+      gravity,
+      wakeRadius,
+      traveled: 0,
+      maxRange: mode.range,
+      blastRadius,
+      lethalCoreRadius,
+      maxDamage,
+      minEdgeDamage,
+      ragdollUp,
+      ragdollOut,
+      vehicleUp,
+      vehicleOut,
+      vehicleSpin,
+      piercing: Boolean(mode.piercing),
+      piercedEntities: new Set(),
+      piercedVehicles: new Set(),
+      wakeHitEntities: new Set(),
+      wakeRockedVehicles: new Set(),
+      lastWallPierceTraveled: -10,
+      createdAt: now,
+    };
+    activeCannonballs.push(ball);
+
+    if (emitShotAudio) {
+      ctx.events.emit("weapon:fired", {
+        entityId,
+        weaponId: "cannon",
+        modeId: mode.id,
+        chargeRatio: ball.chargeRatio,
+        shooterIsHuman: !entity.bot,
+        shooterTeam: ball.team,
+        x: startX,
+        y: startY,
+        z: startZ,
+        directionX: dirX,
+        directionZ: dirZ,
+        now,
+      });
+      ctx.events.emit("sound:spatial", {
+        entityId,
+        key: "weapon.cannon",
+        modeId: mode.id,
+        chargeRatio: ball.chargeRatio,
+        x: startX,
+        y: startY,
+        z: startZ,
+        radius: 900,
+      });
+    }
+    ctx.events.emit("cannon:launched", {
+      ballId: ball.id,
+      ownerId: entityId,
+      modeId: mode.id,
+      chargeRatio: ball.chargeRatio,
+      x: startX,
+      y: startY,
+      z: startZ,
+      vx,
+      vy,
+      vz,
+      maxRange: mode.range,
+      now,
+    });
+    return ball;
+  }
+
+  function fireCannon(entityId, now = Date.now(), { chargeRatio = 0 } = {}) {
+    const entity = entities.get(entityId);
+    const transform = ctx.components.get(entityId, "Transform");
+    if (!entity?.alive || !transform || injury?.isDowned?.(entityId)) return false;
+    if (vehicles?.isDriving?.(entityId) || vehicles?.isPassenger?.(entityId)) return false;
+    const selected = weapons.selected?.(entityId);
+    if (selected?.id !== "cannon") return false;
+
+    const mode = cannonModeOf(entityId);
+    const reloadMs = mode.id === "salvo" || (mode.id === "charged" && chargeRatio >= 0.7)
+      ? CANNON_CONFIG.heavyReloadMs
+      : CANNON_CONFIG.reloadMs;
+    const ammoRequested = mode.id === "salvo" ? CANNON_CONFIG.salvoCount : 1;
+    const spent = weapons.consumeAmmo?.(entityId, ammoRequested, now, {
+      reloadMs,
+      minIntervalMs: CANNON_CONFIG.minFireIntervalMs,
+    });
+    if (!spent?.ok) return false;
+
+    const unbracedSpread = transform.crouching ? 0 : 0.032;
+    if (mode.id === "shrapnel") {
+      CANNON_CONFIG.shrapnelSpreadDeg.forEach((deg, idx) => {
+        const rad = (deg * Math.PI) / 180 + (idx === 3 ? 0 : unbracedSpread * (idx % 2 === 0 ? 1 : -1));
+        spawnCannonball(entityId, mode, {
+          yawOffsetRad: rad,
+          chargeRatio: 0,
+          emitShotAudio: idx === 0,
+          now,
+        });
+      });
+      applyStandingCannonRecoil(entityId, transform, { heavy: false, now });
+      return true;
+    }
+
+    if (mode.id === "salvo") {
+      const count = Math.max(1, Math.min(CANNON_CONFIG.salvoCount, spent.spent));
+      for (let i = 0; i < count; i += 1) {
+        const deg = CANNON_CONFIG.salvoSpreadDeg[i % CANNON_CONFIG.salvoSpreadDeg.length] ?? 0;
+        const rad = (deg * Math.PI) / 180;
+        if (i === 0) {
+          spawnCannonball(entityId, mode, { yawOffsetRad: rad, chargeRatio: 0, emitShotAudio: true, now });
+        } else {
+          pendingCannonSalvos.push({
+            entityId,
+            mode,
+            yawOffsetRad: rad,
+            fireAt: now + i * CANNON_CONFIG.salvoIntervalMs,
+          });
+        }
+      }
+      applyStandingCannonRecoil(entityId, transform, { heavy: true, now });
+      return true;
+    }
+
+    const effectiveRatio = mode.id === "charged"
+      ? Math.max(CANNON_CONFIG.chargeMinRatio, Math.min(1, finite(chargeRatio, CANNON_CONFIG.chargeMinRatio)))
+      : 0;
+    spawnCannonball(entityId, mode, {
+      yawOffsetRad: 0,
+      chargeRatio: effectiveRatio,
+      emitShotAudio: true,
+      now,
+    });
+    applyStandingCannonRecoil(entityId, transform, {
+      heavy: mode.id === "charged" && effectiveRatio >= 0.65,
+      now,
+    });
+    return true;
+  }
+
+  function startCannonCharge(entityId, now = Date.now()) {
+    const entity = entities.get(entityId);
+    if (!entity?.alive || injury?.isDowned?.(entityId)) return false;
+    if (vehicles?.isDriving?.(entityId) || vehicles?.isPassenger?.(entityId)) return false;
+    if (weapons.selected?.(entityId)?.id !== "cannon") return false;
+    if (cannonModeOf(entityId).id !== "charged") return false;
+    if (cannonCharges.has(entityId)) return true;
+    const inv = ctx.components.get(entityId, "Weapons");
+    const cannonItem = inv?.items?.[inv.selected];
+    if (!cannonItem || cannonItem.ammo <= 0 || cannonItem.reloadUntil > now) return false;
+
+    cannonCharges.set(entityId, {
+      startedAt: now,
+      lastMilestone: 0,
+      active: true,
+    });
+    ctx.events.emit("cannon:charge-started", { entityId, now });
+    return true;
+  }
+
+  function releaseCannonCharge(entityId, now = Date.now()) {
+    const state = cannonCharges.get(entityId);
+    if (!state) return false;
+    cannonCharges.delete(entityId);
+    const elapsed = Math.max(0, now - finite(state.startedAt, now));
+    const ratio = Math.max(
+      CANNON_CONFIG.chargeMinRatio,
+      Math.min(1, elapsed / CANNON_CONFIG.chargeMaxMs),
+    );
+    return fireCannon(entityId, now, { chargeRatio: ratio });
+  }
+
+  function tickCannonballs(now = Date.now(), dt = 0.05) {
+    const safeDt = Math.max(0.001, Math.min(0.1, finite(dt, 0.05)));
+
+    // 1. Update charging players (auto-cancel if invalid, emit 50%/100% milestones)
+    for (const [entityId, charge] of [...cannonCharges.entries()]) {
+      const entity = entities.get(entityId);
+      const selectedId = weapons.selected?.(entityId)?.id ?? null;
+      if (
+        !entity?.alive
+        || injury?.isDowned?.(entityId)
+        || selectedId !== "cannon"
+        || cannonModeOf(entityId).id !== "charged"
+        || vehicles?.isDriving?.(entityId)
+        || vehicles?.isPassenger?.(entityId)
+      ) {
+        cannonCharges.delete(entityId);
+        ctx.events.emit("cannon:charge-cancelled", { entityId, reason: "interrupted", now });
+        continue;
+      }
+      const ratio = Math.max(0, Math.min(1, (now - charge.startedAt) / CANNON_CONFIG.chargeMaxMs));
+      const milestone = ratio >= 1 ? 100 : (ratio >= 0.5 ? 50 : 0);
+      if (milestone > charge.lastMilestone) {
+        charge.lastMilestone = milestone;
+        ctx.events.emit("cannon:charge-milestone", {
+          entityId,
+          percent: milestone,
+          chargeRatio: Number(ratio.toFixed(2)),
+          now,
+        });
+      }
+    }
+
+    // 2. Fire queued salvo cannonballs
+    for (let i = pendingCannonSalvos.length - 1; i >= 0; i -= 1) {
+      const item = pendingCannonSalvos[i];
+      if (now < item.fireAt) continue;
+      pendingCannonSalvos.splice(i, 1);
+      const ent = entities.get(item.entityId);
+      if (!ent?.alive || injury?.isDowned?.(item.entityId)) continue;
+      spawnCannonball(item.entityId, item.mode, {
+        yawOffsetRad: item.yawOffsetRad,
+        chargeRatio: 0,
+        emitShotAudio: true,
+        now,
+      });
+    }
+
+    // 3. Integrate flying physical cannonballs step-by-step (no tunneling!)
+    if (!activeCannonballs.length) return;
+    const activeVehicles = typeof vehicles?.snapshot === "function" ? vehicles.snapshot() : [];
+    const aliveList = entities.all().filter((e) => e?.alive);
+    const mapLimit = Math.max(80, finite(map.halfSize, 1000) - 2);
+
+    for (let idx = activeCannonballs.length - 1; idx >= 0; idx -= 1) {
+      const ball = activeCannonballs[idx];
+      const totalSpeed = Math.hypot(ball.vx, ball.vy, ball.vz);
+      const totalStepDist = totalSpeed * safeDt;
+      const substeps = Math.max(1, Math.min(12, Math.ceil(totalStepDist / 3.5)));
+      const subDt = safeDt / substeps;
+      let removed = false;
+
+      for (let s = 0; s < substeps; s += 1) {
+        const prevX = ball.x;
+        const prevY = ball.y;
+        const prevZ = ball.z;
+        ball.vy -= ball.gravity * subDt;
+        const nextX = prevX + ball.vx * subDt;
+        const nextY = prevY + ball.vy * subDt;
+        const nextZ = prevZ + ball.vz * subDt;
+        const segDx = nextX - prevX;
+        const segDy = nextY - prevY;
+        const segDz = nextZ - prevZ;
+        const segLen = Math.hypot(segDx, segDy, segDz);
+        if (segLen <= 0.0001) continue;
+
+        const applyPiercingVehicleHit = (vehId, hitPos) => {
+          if (!vehId || ball.piercedVehicles.has(vehId)) return;
+          ball.piercedVehicles.add(vehId);
+          ball.wakeRockedVehicles.add(vehId);
+          const hx = finite(hitPos?.x, ball.x);
+          const hy = Math.max(0, finite(hitPos?.y, ball.y));
+          const hz = finite(hitPos?.z, ball.z);
+          const launched = vehicles?.applyBlastImpulse?.(
+            { x: hx, y: hy, z: hz },
+            {
+              radius: 28,
+              maxUpVelocity: ball.vehicleUp,
+              maxOutVelocity: ball.vehicleOut,
+              maxSpin: ball.vehicleSpin,
+              direction: { x: ball.vx, z: ball.vz },
+              directVehicleId: vehId,
+              now,
+            },
+          ) ?? [];
+          let splashHits = 0;
+          for (const target of aliveList) {
+            if (!target?.alive || target.id === ball.ownerId || ball.piercedEntities.has(target.id)) continue;
+            const tTeam = Number(teams.teamOf(target.id)) || 0;
+            if (ball.team > 0 && tTeam === ball.team) continue;
+            const tPos = ctx.components.get(target.id, "Transform");
+            if (!tPos) continue;
+            const d = Math.hypot(finite(tPos.x) - hx, finite(tPos.z) - hz);
+            if (d > 24) continue;
+            ball.piercedEntities.add(target.id);
+            splashHits += 1;
+            const scale = 1 - (d / 24) * 0.45;
+            combat.damage(target.id, Math.round(ball.maxDamage * 0.78 * scale), {
+              attackerId: ball.ownerId,
+              weaponId: "cannon",
+              distance: Math.round(ball.traveled),
+            });
+            if (ragdoll?.trigger) {
+              const outDirX = d > 0.2 ? (finite(tPos.x) - hx) / d : ball.dirX;
+              const outDirZ = d > 0.2 ? (finite(tPos.z) - hz) / d : ball.dirZ;
+              ragdoll.trigger(target.id, {
+                reason: "cannon-pierce",
+                vx: outDirX * ball.ragdollOut * scale,
+                vy: Math.max(9.5, ball.ragdollUp * scale),
+                vz: outDirZ * ball.ragdollOut * scale,
+                dead: !target.alive,
+                allowDowned: true,
+                now,
+              });
+            }
+          }
+          const owner = entities.get(ball.ownerId);
+          ctx.events.emit("sound:spatial", {
+            entityId: ball.ownerId,
+            key: "cannon.pierce",
+            x: hx,
+            y: hy,
+            z: hz,
+            radius: 1100,
+            offset: LANDMINE_CONFIG.soundOffsetSec,
+          });
+          ctx.events.emit("cannon:impact", {
+            ballId: ball.id,
+            ownerId: ball.ownerId,
+            ownerName: owner?.name ?? "Боец",
+            modeId: ball.modeId,
+            chargeRatio: ball.chargeRatio,
+            blastRadius: 28,
+            pierced: true,
+            x: Number(hx.toFixed(2)),
+            y: Number(hy.toFixed(2)),
+            z: Number(hz.toFixed(2)),
+            traveled: Math.round(ball.traveled),
+            hitCount: splashHits,
+            mitigatedCount: 0,
+            launchedVehicles: Math.max(1, launched.length),
+            now,
+          });
+        };
+
+        const applyPiercingEntityHit = (target, hitPos) => {
+          if (!target || ball.piercedEntities.has(target.id)) return;
+          ball.piercedEntities.add(target.id);
+          ball.wakeHitEntities.add(target.id);
+          const hx = finite(hitPos?.x, ball.x);
+          const hy = Math.max(0, finite(hitPos?.y, ball.y));
+          const hz = finite(hitPos?.z, ball.z);
+          combat.damage(target.id, ball.maxDamage, {
+            attackerId: ball.ownerId,
+            weaponId: "cannon",
+            distance: Math.round(ball.traveled),
+          });
+          if (ragdoll?.trigger) {
+            ragdoll.trigger(target.id, {
+              reason: "cannon-pierce",
+              vx: ball.dirX * ball.ragdollOut,
+              vy: ball.ragdollUp,
+              vz: ball.dirZ * ball.ragdollOut,
+              dead: !target.alive,
+              allowDowned: true,
+              now,
+            });
+          }
+          const owner = entities.get(ball.ownerId);
+          ctx.events.emit("sound:spatial", {
+            entityId: ball.ownerId,
+            key: "cannon.pierce",
+            x: hx,
+            y: hy,
+            z: hz,
+            radius: 860,
+            offset: LANDMINE_CONFIG.soundOffsetSec,
+          });
+          ctx.events.emit("cannon:impact", {
+            ballId: ball.id,
+            ownerId: ball.ownerId,
+            ownerName: owner?.name ?? "Боец",
+            modeId: ball.modeId,
+            chargeRatio: ball.chargeRatio,
+            blastRadius: 12,
+            pierced: true,
+            x: Number(hx.toFixed(2)),
+            y: Number(hy.toFixed(2)),
+            z: Number(hz.toFixed(2)),
+            traveled: Math.round(ball.traveled),
+            hitCount: 1,
+            mitigatedCount: 0,
+            launchedVehicles: 0,
+            now,
+          });
+        };
+
+        // 3a. Wall / vehicle / static geometry check via Rapier raycast
+        if (typeof physics?.raycast === "function") {
+          const hit = physics.raycast(
+            { x: prevX, y: prevY, z: prevZ },
+            { x: segDx / segLen, y: segDy / segLen, z: segDz / segLen },
+            segLen,
+            ball.ownerId,
+          );
+          if (hit) {
+            const worldObj = hit.worldObject ?? hit.metadata ?? null;
+            const hitKind = String(worldObj?.kind ?? hit.kind ?? "");
+            const hitVehId = worldObj?.vehicleId ?? null;
+            const hitDist = Math.max(0, Math.min(segLen, finite(hit.distance ?? hit.toi, segLen)));
+            const hitX = hit.point?.x ?? (prevX + (segDx / segLen) * hitDist);
+            const hitY = hit.point?.y ?? (prevY + (segDy / segLen) * hitDist);
+            const hitZ = hit.point?.z ?? (prevZ + (segDz / segLen) * hitDist);
+
+            if (hitVehId) {
+              if (ball.piercing) {
+                ball.traveled += hitDist;
+                applyPiercingVehicleHit(hitVehId, { x: hitX, y: hitY, z: hitZ });
+                ball.traveled -= hitDist;
+              } else {
+                ball.x = hitX;
+                ball.y = hitY;
+                ball.z = hitZ;
+                ball.traveled += hitDist;
+                detonateCannonball(ball, { x: ball.x, y: ball.y, z: ball.z }, now, { directVehicleId: hitVehId });
+                activeCannonballs.splice(idx, 1);
+                removed = true;
+                break;
+              }
+            } else if (!hit.entityId && hitKind !== "ground" && hitKind !== "floor") {
+              if (ball.piercing) {
+                // Piercing cannonball punches straight through building walls & cover with heavy concrete shatter!
+                if (ball.traveled - ball.lastWallPierceTraveled >= 2.5) {
+                  ball.lastWallPierceTraveled = ball.traveled;
+                  ball.vx *= 0.985;
+                  ball.vz *= 0.985;
+                  ctx.events.emit("sound:spatial", {
+                    entityId: ball.ownerId,
+                    key: "cannon.pierce",
+                    x: hitX,
+                    y: hitY,
+                    z: hitZ,
+                    radius: 860,
+                    offset: LANDMINE_CONFIG.soundOffsetSec,
+                  });
+                }
+              } else {
+                ball.x = hitX;
+                ball.y = hitY;
+                ball.z = hitZ;
+                ball.traveled += hitDist;
+                detonateCannonball(ball, { x: ball.x, y: ball.y, z: ball.z }, now);
+                activeCannonballs.splice(idx, 1);
+                removed = true;
+                break;
+              }
+            }
+          }
+        }
+
+        ball.x = nextX;
+        ball.y = nextY;
+        ball.z = nextZ;
+        ball.traveled += segLen;
+
+        // 3b. Direct vehicle proximity hit (dense massive cannonball body)
+        let directVehicleHit = null;
+        for (const veh of activeVehicles) {
+          if (!veh || ball.piercedVehicles.has(veh.id)) continue;
+          const horizDist = Math.hypot(ball.x - finite(veh.x), ball.z - finite(veh.z));
+          const vertDist = Math.abs(ball.y - finite(veh.y, 1.1));
+          if (horizDist <= 5.0 && vertDist <= 3.4) {
+            directVehicleHit = veh;
+            break;
+          }
+        }
+        if (directVehicleHit) {
+          if (ball.piercing) {
+            applyPiercingVehicleHit(directVehicleHit.id, { x: ball.x, y: ball.y, z: ball.z });
+          } else {
+            detonateCannonball(ball, { x: ball.x, y: ball.y, z: ball.z }, now, { directVehicleId: directVehicleHit.id });
+            activeCannonballs.splice(idx, 1);
+            removed = true;
+            break;
+          }
+        }
+
+        // 3c. Direct enemy hit (wider dense iron core)
+        let directTarget = null;
+        for (const target of aliveList) {
+          if (!target.alive || target.id === ball.ownerId || ball.piercedEntities.has(target.id)) continue;
+          const tTeam = Number(teams.teamOf(target.id)) || 0;
+          if (ball.team > 0 && tTeam === ball.team) continue;
+          const tPos = ctx.components.get(target.id, "Transform");
+          if (!tPos) continue;
+          const hd = Math.hypot(ball.x - finite(tPos.x), ball.z - finite(tPos.z));
+          const vd = Math.abs(ball.y - (finite(tPos.y) + 1.0));
+          if (hd <= 2.4 && vd <= 2.4) {
+            directTarget = target;
+            break;
+          }
+        }
+        if (directTarget) {
+          if (ball.piercing) {
+            applyPiercingEntityHit(directTarget, { x: ball.x, y: ball.y, z: ball.z });
+          } else {
+            detonateCannonball(ball, { x: ball.x, y: ball.y, z: ball.z }, now, { directEntityId: directTarget.id });
+            activeCannonballs.splice(idx, 1);
+            removed = true;
+            break;
+          }
+        }
+
+        // 3c-2. Dense aerodynamic shockwave wake along the flying cannonball's corridor
+        if (ball.traveled >= 4.5 && ball.wakeRadius > 0) {
+          const wakeR = ball.wakeRadius;
+          for (const target of aliveList) {
+            if (!target.alive || target.id === ball.ownerId) continue;
+            if (ball.wakeHitEntities.has(target.id) || ball.piercedEntities.has(target.id)) continue;
+            const tTeam = Number(teams.teamOf(target.id)) || 0;
+            if (ball.team > 0 && tTeam === ball.team) continue;
+            const tPos = ctx.components.get(target.id, "Transform");
+            if (!tPos) continue;
+            const dx = finite(tPos.x) - ball.x;
+            const dz = finite(tPos.z) - ball.z;
+            const hd = Math.hypot(dx, dz);
+            const vd = Math.abs(ball.y - (finite(tPos.y) + 1.0));
+            if (hd > wakeR || vd > 3.6) continue;
+            ball.wakeHitEntities.add(target.id);
+            const proximity = 1 - Math.min(1, hd / wakeR) * 0.5;
+            const wakeDmg = Math.round((CANNON_CONFIG.wakeDamage + ball.chargeRatio * 75) * proximity);
+            combat.damage(target.id, wakeDmg, {
+              attackerId: ball.ownerId,
+              weaponId: "cannon",
+              distance: Math.round(ball.traveled),
+            });
+            if (ragdoll?.trigger) {
+              const outX = hd > 0.2 ? dx / hd : -ball.dirZ;
+              const outZ = hd > 0.2 ? dz / hd : ball.dirX;
+              ragdoll.trigger(target.id, {
+                reason: "cannon-wake",
+                vx: (outX * 0.7 + ball.dirX * 0.5) * CANNON_CONFIG.wakeRagdollOut * proximity,
+                vy: Math.max(7, CANNON_CONFIG.wakeRagdollUp * proximity),
+                vz: (outZ * 0.7 + ball.dirZ * 0.5) * CANNON_CONFIG.wakeRagdollOut * proximity,
+                dead: !target.alive,
+                allowDowned: true,
+                now,
+              });
+            }
+          }
+          for (const veh of activeVehicles) {
+            if (!veh || ball.piercedVehicles.has(veh.id) || ball.wakeRockedVehicles.has(veh.id)) continue;
+            const hd = Math.hypot(ball.x - finite(veh.x), ball.z - finite(veh.z));
+            const vd = Math.abs(ball.y - finite(veh.y, 1.1));
+            if (hd <= wakeR + 2.4 && vd <= 4.2) {
+              ball.wakeRockedVehicles.add(veh.id);
+              vehicles?.applyBlastImpulse?.(
+                { x: ball.x, y: ball.y, z: ball.z },
+                {
+                  radius: wakeR + 4,
+                  maxUpVelocity: ball.vehicleUp * 0.48,
+                  maxOutVelocity: ball.vehicleOut * 0.52,
+                  maxSpin: ball.vehicleSpin * 0.65,
+                  direction: { x: ball.vx, z: ball.vz },
+                  directVehicleId: veh.id,
+                  now,
+                },
+              );
+            }
+          }
+        }
+
+        // 3d. Ground, maxRange (700m), or map boundary impact
+        if (
+          ball.y <= 0.12
+          || ball.traveled >= ball.maxRange
+          || Math.abs(ball.x) >= mapLimit
+          || Math.abs(ball.z) >= mapLimit
+        ) {
+          detonateCannonball(ball, { x: ball.x, y: Math.max(0, ball.y), z: ball.z }, now);
+          activeCannonballs.splice(idx, 1);
+          removed = true;
+          break;
+        }
+      }
+      if (removed) continue;
+    }
+  }
+
   function equipElectroLukashenko(entityId, now = Date.now(), source = "crate") {
     const entity = entities.get(entityId);
     if (!entity?.alive) return false;
@@ -342,6 +1347,8 @@ export async function setup(ctx) {
     } else {
       weapons.restock?.(entityId, "electro-rifle", 240);
     }
+    // Also grant exclusive Smertonos cannon to Electro-Lukashenko!
+    grantExclusiveCannon(entityId, { select: false });
     // Select electro-rifle immediately
     weapons.selectById?.(entityId, "electro-rifle");
 
@@ -497,8 +1504,11 @@ export async function setup(ctx) {
         : res.damage;
 
       const armorComp = ctx.components.get(target.id, "Armor");
-      if (armorComp && armorComp.current > 0 && !isNukeOnElectro) {
-        const shred = Math.min(armorComp.current, Math.round(finalDamage * (kind === "electro-slam" ? 0.9 : 0.45)));
+      if (armorComp && armorComp.current > 0) {
+        const shredRatio = isNukeOnElectro
+          ? 0.42
+          : (kind === "electro-slam" ? 0.9 : (kind === "nuke" ? 0.8 : 0.5));
+        const shred = Math.min(armorComp.current, Math.round(finalDamage * shredRatio));
         armorComp.current = Math.max(0, armorComp.current - shred);
       }
       combat.damage(target.id, finalDamage, {
@@ -509,7 +1519,7 @@ export async function setup(ctx) {
       });
       // Inside a Mini-Nuke's lethal fireball core (<= lethalCoreRadius), finish downed non-Electro targets outright
       if (kind === "nuke" && !isElectroTarget && target.alive && res.distance <= lethalCoreRadius && injury?.isDowned?.(target.id)) {
-        combat.damage(target.id, 320, {
+        combat.damage(target.id, 480, {
           attackerId: ownerId,
           weaponId,
           ignoreTeamCheck: target.id === ownerId,
@@ -519,14 +1529,20 @@ export async function setup(ctx) {
       if (ragdoll?.trigger) {
         const dx = finite(tPos.x) - x;
         const dz = finite(tPos.z) - z;
-        const len = Math.max(0.1, Math.hypot(dx, dz));
-        const pushScale = kind === "electro-slam" ? ELECTRO_SUPER_JUMP_CONFIG.knockbackPush : (kind === "nuke" ? 15 : 10);
-        const upScale = kind === "electro-slam" ? ELECTRO_SUPER_JUMP_CONFIG.knockbackUp : (kind === "nuke" ? 9.5 : 5.5);
+        const horiz = Math.hypot(dx, dz);
+        const dirX = horiz > 0.2 ? dx / horiz : 0.7;
+        const dirZ = horiz > 0.2 ? dz / horiz : -0.7;
+        const pushScale = kind === "electro-slam"
+          ? ELECTRO_SUPER_JUMP_CONFIG.knockbackPush
+          : (kind === "nuke" ? MINI_NUKE_CONFIG.ragdollOut : 14);
+        const upScale = kind === "electro-slam"
+          ? ELECTRO_SUPER_JUMP_CONFIG.knockbackUp
+          : (kind === "nuke" ? MINI_NUKE_CONFIG.ragdollUp : 8.5);
         ragdoll.trigger(target.id, {
           reason: weaponId,
-          vx: (dx / len) * pushScale * res.knockback,
-          vy: upScale * res.knockback,
-          vz: (dz / len) * pushScale * res.knockback,
+          vx: dirX * pushScale * res.knockback,
+          vy: Math.max(kind === "nuke" ? 11.5 : 4.5, upScale * res.knockback),
+          vz: dirZ * pushScale * res.knockback,
           dead: !target.alive,
           allowDowned: true,
           now,
@@ -534,6 +1550,32 @@ export async function setup(ctx) {
       }
       affected.push({ entityId: target.id, distance: res.distance, damage: finalDamage });
     };
+
+    // Physically launch every vehicle caught in the blast shockwave!
+    const vehicleBlastOptions = kind === "nuke"
+      ? {
+        radius: Math.max(blastRadius + 30, MINI_NUKE_CONFIG.vehicleBlastRadius),
+        maxUpVelocity: MINI_NUKE_CONFIG.vehicleUp,
+        maxOutVelocity: MINI_NUKE_CONFIG.vehicleOut,
+        maxSpin: MINI_NUKE_CONFIG.vehicleSpin,
+        now,
+      }
+      : kind === "electro-slam"
+        ? {
+          radius: blastRadius + 8,
+          maxUpVelocity: 30,
+          maxOutVelocity: 38,
+          maxSpin: 7.0,
+          now,
+        }
+        : {
+          radius: blastRadius + 4,
+          maxUpVelocity: 16,
+          maxOutVelocity: 22,
+          maxSpin: 4.5,
+          now,
+        };
+    const launchedVehicles = vehicles?.applyBlastImpulse?.({ x, y, z }, vehicleBlastOptions) ?? [];
 
     for (const target of [...entities.all()]) {
       if (!target?.alive) continue;
@@ -574,7 +1616,7 @@ export async function setup(ctx) {
         x,
         y,
         z,
-        radius: 140,
+        radius: 160,
       });
       ctx.events.emit("mine:detonated", {
         ownerId,
@@ -582,6 +1624,7 @@ export async function setup(ctx) {
         y,
         z,
         hitCount: affected.length,
+        launchedVehicles: launchedVehicles.length,
         affected,
         now,
       });
@@ -594,7 +1637,7 @@ export async function setup(ctx) {
         x,
         y,
         z,
-        radius: 195,
+        radius: 220,
       });
       ctx.events.emit("special:electro-jump", {
         entityId: ownerId,
@@ -606,6 +1649,7 @@ export async function setup(ctx) {
         z,
         blastRadius,
         hitCount: affected.length,
+        launchedVehicles: launchedVehicles.length,
         affected,
         now,
       });
@@ -617,6 +1661,7 @@ export async function setup(ctx) {
         z,
         blastRadius,
         hitCount: affected.length,
+        launchedVehicles: launchedVehicles.length,
         affected,
         now,
       });
@@ -1163,13 +2208,13 @@ export async function setup(ctx) {
     }
 
     if (actionType === "nuke-aim" && !currentAim?.active) {
-      const preset = MINI_NUKE_CONFIG.distances[2]; // default 105m (safe outside 86m blast radius)
+      const preset = MINI_NUKE_CONFIG.distances[2]; // default 215m (safe outside 185m blast radius)
       nukeAimStates.set(entityId, { active: true, distanceIndex: 2, startedAt: now });
       ctx.events.emit("nuke:aiming", {
         entityId,
         distanceMeters: preset.meters,
         distanceLabel: preset.label,
-        text: `Выберите точку удара мини-ядеркой (радиус взрыва 86 м)! Дистанция: ${preset.label}. Повернись куда бить и нажми огонь (R2) для запуска, или смени дистанцию.`,
+        text: `Выберите точку удара мини-ядеркой (радиус взрыва ${MINI_NUKE_CONFIG.blastRadius} м)! Дистанция: ${preset.label}. Повернись куда бить и нажми огонь (R2) для запуска, или смени дистанцию.`,
         now,
       });
       return true;
@@ -1189,9 +2234,13 @@ export async function setup(ctx) {
     nukeLaunchCooldowns.set(entityId, now);
     const distIdx = currentAim?.distanceIndex ?? 2;
     const chosenDistance = distanceMeters != null
-      ? finite(distanceMeters, 105)
+      ? finite(distanceMeters, MINI_NUKE_CONFIG.distances[2].meters)
       : MINI_NUKE_CONFIG.distances[distIdx].meters;
-    const target = computeMiniNukeTarget(transform, chosenDistance, map.halfSize ?? 1000);
+    const preliminary = computeMiniNukeTarget(transform, chosenDistance, map.halfSize ?? 1000);
+    const groundY = finite(transform.y) <= -6
+      ? finite(transform.y)
+      : Math.max(0, finite(physics?.groundHeightAt?.(preliminary.x, preliminary.z, 0), 0));
+    const target = computeMiniNukeTarget(transform, chosenDistance, map.halfSize ?? 1000, groundY);
     nukeCounts.set(entityId, count - 1);
     nukeAimStates.delete(entityId);
     nukeSerial += 1;
@@ -1213,7 +2262,7 @@ export async function setup(ctx) {
     const launchStartX = finite(transform.x);
     const launchStartY = finite(transform.y) + 2;
     const launchStartZ = finite(transform.z);
-    const arcHeight = Math.max(26, Math.min(95, nuke.distanceMeters * 0.55));
+    const arcHeight = Math.max(36, Math.min(130, nuke.distanceMeters * 0.45));
     ctx.events.emit("sound:spatial", {
       entityId,
       key: "bomb.nuke",
@@ -1230,7 +2279,7 @@ export async function setup(ctx) {
         arcHeight,
         flightMs: MINI_NUKE_CONFIG.impactDelayMs,
       },
-      radius: 650,
+      radius: 1500,
     });
     ctx.events.emit("nuke:launched", {
       entityId,
@@ -1243,7 +2292,7 @@ export async function setup(ctx) {
       distanceMeters: nuke.distanceMeters,
       blastRadius: MINI_NUKE_CONFIG.blastRadius,
       remaining: count - 1,
-      text: `Мини-ядерка запущена на ${Math.round(nuke.distanceMeters)} метров! Радиус поражения 86 метров — в укрытие!`,
+      text: `Мини-ядерка запущена на ${Math.round(nuke.distanceMeters)} метров! Радиус поражения ${MINI_NUKE_CONFIG.blastRadius} метров — в укрытие!`,
       now,
     });
     return true;
@@ -1487,16 +2536,23 @@ export async function setup(ctx) {
         }
         armor?.grantJuggernautArmor?.(ent.id);
       }
+      // Exclusive Smertonos cannon is also granted with Juggernaut drops!
+      if (ent?.alive) {
+        grantExclusiveCannon(ent.id, { select: false });
+      }
     }
   });
 
-  // Periodic tick: electro super-jump physics, mines, mini-nukes, internal stim, bunker beacon, living rival economy & boss AI
+  // Periodic tick: electro super-jump physics, cannonballs, mines, mini-nukes, internal stim, bunker beacon, living rival economy & boss AI
   function tickSpecialOps(now = Date.now(), dt = 0.05) {
     if (!battleRoyale.isActive?.()) return;
     initializeOfficialsIfNeeded();
 
     // 0. Smoothly integrate Electro-Lukashenko Super-Jump + Meteor Slam flights every physics tick
     tickElectroJumps(now, dt);
+
+    // 0b. Integrate flying physical Smertonos cannonballs & charged shots every physics tick
+    tickCannonballs(now, dt);
 
     // 1. Check armed landmines (horizontal proximity + elevation tolerance + occupied enemy vehicles)
     const activeVehicles = typeof vehicles?.snapshot === "function" ? vehicles.snapshot() : [];
@@ -1798,22 +2854,30 @@ export async function setup(ctx) {
         }
       }
 
-      // 5f. Rival Mini-Nuke tactical strikes (rich rivals or enemy Electro-Lukashenko launch nukes at safe 95-158m distance!)
+      // 5f. Rival Mini-Nuke tactical strikes (rich rivals or enemy Electro-Lukashenko launch nukes from solid ground at safe distance outside blastRadius!)
+      const botPara = ctx.components.get(bot.id, "Parachute");
+      const botGroundY = finite(pos.y) <= -6
+        ? finite(pos.y)
+        : Math.max(0, finite(physics?.groundHeightAt?.(pos.x, pos.z, 0), 0));
+      const botAirborne = Boolean(botPara?.airborne || electroJumpStates.has(bot.id) || (finite(pos.y) > botGroundY + 3.5));
       if (
         isFullMatch
+        && !botAirborne
         && nukeCountOf(bot.id) > 0
         && (forceDirector || now - lastRivalNukeAt >= 32_000)
       ) {
         const botTeam = Number(teams.teamOf(bot.id)) || 0;
+        const minSafeDist = MINI_NUKE_CONFIG.blastRadius + 20; // 205m -> safely outside 185m blast!
+        const maxStrikeDist = 340;
         let nukeTarget = null;
         let bestDist = Infinity;
         for (const cand of aliveEntities) {
           if (cand.id === bot.id) continue;
           if (botTeam > 0 && Number(teams.teamOf(cand.id)) === botTeam) continue;
           const cPos = ctx.components.get(cand.id, "Transform");
-          if (!cPos || finite(cPos.y) <= -6) continue;
+          if (!cPos || finite(cPos.y) <= -6 || finite(cPos.y) > 25) continue;
           const d = distance2(pos, cPos);
-          if (d >= 95 && d <= 158 && d < bestDist) {
+          if (d >= minSafeDist && d <= maxStrikeDist && d < bestDist) {
             bestDist = d;
             nukeTarget = cPos;
           }
@@ -1882,7 +2946,16 @@ export async function setup(ctx) {
         handleNukeAction(playerId, aimingNuke?.active ? "nuke-launch" : "nuke-aim", null, tNow);
       }
       if (input.electroModePressed) {
-        cycleElectroMode(playerId, tNow);
+        const selectedWeapon = weapons.selected?.(playerId)?.id ?? null;
+        if (selectedWeapon === "cannon") {
+          cycleCannonMode(playerId, tNow);
+        } else if (weapons.has?.(playerId, "electro-rifle")) {
+          cycleElectroMode(playerId, tNow);
+        } else if (weapons.has?.(playerId, "cannon")) {
+          cycleCannonMode(playerId, tNow);
+        } else {
+          cycleElectroMode(playerId, tNow);
+        }
       }
       const activeJump = electroJumpStates.get(playerId);
       if (input.electroJumpReleased) {
@@ -1902,10 +2975,43 @@ export async function setup(ctx) {
         handleElectroJumpAction(playerId, tNow);
         return originalHandleInput(playerId, { ...input, firePressed: false, jumpPressed: false }, now);
       }
+
+      // Smertonos physical cannon firing & hold-to-charge handling
+      const holdingCannon = weapons.selected?.(playerId)?.id === "cannon"
+        && !vehicles?.isDriving?.(playerId)
+        && !vehicles?.isPassenger?.(playerId)
+        && !injury?.isDowned?.(playerId);
+      if (holdingCannon) {
+        const cMode = cannonModeOf(playerId);
+        if (cMode.id === "charged") {
+          if (input.fireHeld) {
+            if (!cannonCharges.has(playerId)) startCannonCharge(playerId, tNow);
+          } else if (cannonCharges.has(playerId)) {
+            releaseCannonCharge(playerId, tNow);
+          } else if (input.firePressed) {
+            // Quick tap in charged mode fires a quick low-charge cannonball
+            fireCannon(playerId, tNow, { chargeRatio: CANNON_CONFIG.chargeMinRatio });
+          }
+        } else {
+          if (cannonCharges.has(playerId)) {
+            cannonCharges.delete(playerId);
+            ctx.events.emit("cannon:charge-cancelled", { entityId: playerId, reason: "mode-switched", now: tNow });
+          }
+          if (input.firePressed) {
+            fireCannon(playerId, tNow);
+          }
+        }
+      } else if (cannonCharges.has(playerId)) {
+        cannonCharges.delete(playerId);
+        ctx.events.emit("cannon:charge-cancelled", { entityId: playerId, reason: "interrupted", now: tNow });
+      }
+
       if (input.specialAction && typeof input.specialAction === "object") {
         const type = String(input.specialAction.type ?? "");
         if (type === "plant-mine") plantMine(playerId, tNow);
         else if (type === "cycle-electro-mode") cycleElectroMode(playerId, tNow);
+        else if (type === "cycle-cannon-mode") cycleCannonMode(playerId, tNow);
+        else if (type === "set-cannon-mode") setCannonMode(playerId, input.specialAction.modeId, tNow);
         else if (type === "electro-jump") handleElectroJumpAction(playerId, tNow);
         else if (type === "nuke-aim" || type === "nuke-cycle-distance" || type === "nuke-launch") {
           handleNukeAction(playerId, type, input.specialAction.distanceMeters ?? null, tNow);
@@ -1936,9 +3042,28 @@ export async function setup(ctx) {
     const aim = nukeAimStates.get(playerId);
     const puzzle = bunkerPuzzles.get(playerId);
     const mode = electroModeOf(playerId);
+    const cMode = cannonModeOf(playerId);
+    const cCharge = cannonCharges.get(playerId) ?? null;
+    const cChargeRatio = cCharge
+      ? Number(Math.max(0, Math.min(1, (tNow - cCharge.startedAt) / CANNON_CONFIG.chargeMaxMs)).toFixed(3))
+      : 0;
+    const selectedId = weapons.selected?.(playerId)?.id ?? null;
     const nearHatch = Boolean(selfPos && distance3(selfPos, HATCH_TOP) <= 3.5);
     const nearExit = Boolean(selfPos && distance3(selfPos, BUNKER_ENTRANCE) <= 3.5);
     const nearVault = Boolean(selfPos && distance3(selfPos, BUNKER_VAULT) <= 3.8);
+
+    snap.cannonballs = activeCannonballs.map((ball) => ({
+      id: ball.id,
+      ownerId: ball.ownerId,
+      modeId: ball.modeId,
+      chargeRatio: ball.chargeRatio,
+      x: Number(ball.x.toFixed(2)),
+      y: Number(ball.y.toFixed(2)),
+      z: Number(ball.z.toFixed(2)),
+      vx: Number(ball.vx.toFixed(1)),
+      vy: Number(ball.vy.toFixed(1)),
+      vz: Number(ball.vz.toFixed(1)),
+    }));
 
     snap.specialOps = {
       mines: mineCountOf(playerId),
@@ -1947,6 +3072,15 @@ export async function setup(ctx) {
       nukeAiming: Boolean(aim?.active),
       nukeDistance: aim?.active ? MINI_NUKE_CONFIG.distances[aim.distanceIndex] : MINI_NUKE_CONFIG.distances[2],
       hasElectroRifle: Boolean(weapons.has?.(playerId, "electro-rifle")),
+      hasCannon: Boolean(weapons.has?.(playerId, "cannon")),
+      cannonSelected: selectedId === "cannon",
+      cannonMode: {
+        id: cMode.id,
+        label: cMode.label,
+        shortLabel: cMode.shortLabel,
+      },
+      cannonCharging: Boolean(cCharge),
+      cannonChargeRatio: cChargeRatio,
       electroLukashenko: Boolean(entities.get(playerId)?.electroLukashenko),
       electroMode: {
         id: mode.id,
@@ -1989,12 +3123,17 @@ export async function setup(ctx) {
         && !ev.startsWith("bunker:")
         && !ev.startsWith("mine:")
         && !ev.startsWith("nuke:")
+        && !ev.startsWith("cannon:")
+        && ev !== "vehicle:launched"
       ) return false;
       const p = packet.payload ?? {};
       if (
         ev === "mine:detonated"
         || ev === "nuke:detonated"
         || ev === "nuke:launched"
+        || ev === "cannon:launched"
+        || ev === "cannon:impact"
+        || ev === "vehicle:launched"
         || ev === "special:electro-equipped"
         || ev === "special:electro-jump"
         || ev === "special:rival-buyback"
@@ -2028,12 +3167,21 @@ export async function setup(ctx) {
     electroJumpPhaseOf,
     electroModeOf,
     cycleElectroMode,
+    cannonModeOf,
+    setCannonMode,
+    cycleCannonMode,
+    fireCannon,
+    startCannonCharge,
+    releaseCannonCharge,
+    grantExclusiveCannon,
     equipElectroLukashenko,
     handleBunkerInteraction,
     submitBunkerPuzzleChoice,
     runRivalLateGameStep,
     plantedMines,
     pendingNukes,
+    activeCannonballs,
+    pendingCannonSalvos,
     sites: {
       HATCH_TOP,
       BUNKER_ENTRANCE,

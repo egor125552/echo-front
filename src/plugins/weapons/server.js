@@ -90,6 +90,27 @@ const DEFINITIONS = {
     soundRadius: 240,
     reloadMs: 900,
   },
+  cannon: {
+    id: "cannon",
+    name: "Смертонос",
+    automatic: false,
+    holdRepeat: false,
+    customBallistics: true,
+    magazine: 5,
+    reserve: 35,
+    damage: 290,
+    shattersArmor: true,
+    armorDamageMultiplier: 4.5,
+    piercesVehicles: true,
+    rpm: 52,
+    range: 700,
+    muzzleVelocity: 155,
+    projectileMass: 18,
+    projectileRadius: 0.22,
+    soundKey: "weapon.cannon",
+    soundRadius: 720,
+    reloadMs: 3400,
+  },
 };
 
 export const manifest = {
@@ -190,6 +211,7 @@ export async function setup(ctx) {
 
     const weapon = inventory.items[inventory.selected];
     const definition = DEFINITIONS[weapon.id];
+    if (definition?.customBallistics) return false;
     finishReload(weapon, definition, now);
 
     if (weapon.ammo <= 0 && weapon.reserve > 0 && !weapon.reloadUntil) {
@@ -316,6 +338,11 @@ export async function setup(ctx) {
     has(entityId, weaponId) {
       return Boolean(ctx.components.get(entityId, "Weapons")?.items?.some((item) => item.id === weaponId));
     },
+    selected(entityId) {
+      const inventory = ctx.components.get(entityId, "Weapons");
+      if (!inventory?.items?.length) return null;
+      return inventory.items[inventory.selected] ?? null;
+    },
     takeAmmo(entityId, weaponId, amount = 0) {
       const inventory = ctx.components.get(entityId, "Weapons");
       const qty = Math.max(0, Math.floor(Number(amount) || 0));
@@ -381,6 +408,46 @@ export async function setup(ctx) {
         weaponId: inventory.items[idx].id,
       });
       return true;
+    },
+    consumeAmmo(entityId, count = 1, now = Date.now(), { reloadMs = null, minIntervalMs = null } = {}) {
+      const entity = entities.get(entityId);
+      if (!entity?.alive) return { ok: false, reason: "dead" };
+      const inventory = ctx.components.get(entityId, "Weapons");
+      if (!inventory?.items?.length) return { ok: false, reason: "no-weapon" };
+      const weapon = inventory.items[inventory.selected];
+      const definition = DEFINITIONS[weapon.id];
+      if (!definition) return { ok: false, reason: "unknown-weapon" };
+      finishReload(weapon, definition, now);
+      if (weapon.ammo <= 0 && weapon.reserve > 0 && !weapon.reloadUntil) {
+        weapon.reloadUntil = now + (Number(reloadMs) || definition.reloadMs);
+      }
+      if (weapon.reloadUntil > now) {
+        return { ok: false, reason: "reloading", reloadRemainingMs: weapon.reloadUntil - now };
+      }
+      if (weapon.ammo <= 0) {
+        return { ok: false, reason: "empty" };
+      }
+      const delay = Number.isFinite(Number(minIntervalMs))
+        ? Math.max(0, Number(minIntervalMs))
+        : (60000 / definition.rpm);
+      if (now - weapon.lastFireAt < delay) {
+        return { ok: false, reason: "cooldown" };
+      }
+      const spent = Math.min(weapon.ammo, Math.max(1, Math.floor(Number(count) || 1)));
+      weapon.lastFireAt = now;
+      weapon.ammo -= spent;
+      const effectiveReload = Number(reloadMs) || definition.reloadMs;
+      if (weapon.ammo === 0 && weapon.reserve > 0) {
+        weapon.reloadUntil = now + effectiveReload;
+      }
+      return {
+        ok: true,
+        spent,
+        weaponId: weapon.id,
+        ammo: weapon.ammo,
+        reserve: weapon.reserve,
+        reloading: weapon.reloadUntil > now,
+      };
     },
     tickAutomatic(now = Date.now()) {
       for (const [entityId, input] of ctx.components.entries("Input")) {

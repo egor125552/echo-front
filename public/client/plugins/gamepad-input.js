@@ -45,7 +45,7 @@ function buttonDown(gamepad, index, threshold = 0.5) {
 
 function selectGamepad() {
   const pads = typeof navigator.getGamepads === "function" ? navigator.getGamepads() : [];
-  const connected = Array.from(pads ?? []).filter(Boolean);
+  const connected = Array.from(pads ?? []).filter((pad) => Boolean(pad) && pad.connected !== false);
   return connected.find((pad) => pad.mapping === "standard") ?? connected[0] ?? null;
 }
 
@@ -74,6 +74,8 @@ export async function setup(ctx) {
   let latestParachute = null;
   let latestSelf = null;
   let latestSpecialOps = null;
+  let latestMode = null;
+  let latestTutorialPhase = null;
   let driving = false;
   let analog = {
     moveForward: 0,
@@ -143,12 +145,15 @@ export async function setup(ctx) {
     const pad = selectGamepad();
     const actuator = pad?.vibrationActuator;
     if (actuator && typeof actuator.playEffect === "function") {
-      void actuator.playEffect(actuator.type || "dual-rumble", {
+      const effectType = actuator.type && actuator.type !== "trigger-rumble"
+        ? actuator.type
+        : "dual-rumble";
+      Promise.resolve(actuator.playEffect(effectType, {
         startDelay: 0,
         duration: Math.max(85, Number(options.duration) || 105),
         weakMagnitude: Number(options.weak) || 0.68,
         strongMagnitude: Number(options.strong) || 0.86,
-      });
+      })).catch(() => {});
     }
   }
 
@@ -389,6 +394,9 @@ export async function setup(ctx) {
         squareDeferredTap = true;
       } else {
         jumpPressed = true;
+        if (latestMode === "tdm" || latestTutorialPhase === "reload") {
+          reload = true;
+        }
         emitChanged("gamepad:square:jump", true);
       }
     } else if (square.down && !driving && squareHoldStartedAt != null) {
@@ -506,7 +514,7 @@ export async function setup(ctx) {
       dpadUpHoldStartedAt = null;
       dpadUpElectroTriggered = false;
     } else if (dpadUp.pressed) {
-      const canCycleElectro = Boolean(latestSpecialOps?.hasElectroRifle) && !latestSelf?.downed;
+      const canCycleElectro = Boolean(latestSpecialOps?.hasElectroRifle || latestSpecialOps?.hasCannon) && !latestSelf?.downed;
       if (!canCycleElectro) {
         stimulantPressed = true;
         pulseGamepadConfirm({ duration: 90, weak: 0.62, strong: 0.78 });
@@ -767,6 +775,8 @@ export async function setup(ctx) {
     latestSelf = self ?? null;
     latestParachute = self?.parachute ?? null;
     latestSpecialOps = snapshot?.specialOps ?? null;
+    latestMode = snapshot?.mode ?? network?.mode ?? latestMode;
+    latestTutorialPhase = snapshot?.tutorial?.enabled ? (snapshot.tutorial.phase ?? null) : null;
     const selfDriving = (snapshot?.vehicles ?? []).some(
       (vehicle) => vehicle?.driverId === pid,
     );
@@ -787,6 +797,8 @@ export async function setup(ctx) {
     latestSelf = null;
     latestParachute = null;
     latestSpecialOps = null;
+    latestMode = null;
+    latestTutorialPhase = null;
     reset("network-disconnected");
   });
 

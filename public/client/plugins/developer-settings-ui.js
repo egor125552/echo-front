@@ -140,7 +140,7 @@ export async function setup(ctx) {
       '<button id="developer-ragdoll-test" type="button">Запустить тест выбранного Ragdoll</button>' +
       '<button id="developer-ragdoll-reset-all" type="button">Сбросить все профили Ragdoll</button>' +
       '<p id="developer-settings-note"></p>' +
-      '<div id="developer-ragdoll-diagnostics" aria-live="polite" aria-atomic="true">' +
+      '<div id="developer-ragdoll-diagnostics">' +
       '<strong>Последний реально применённый Ragdoll</strong>' +
       '<p id="developer-ragdoll-diagnostics-text">Пока нет данных. Активируй ragdoll после изменения параметров.</p>' +
       '</div>' +
@@ -154,14 +154,14 @@ export async function setup(ctx) {
       '</label>' +
       '<button id="developer-ragdoll-stability-apply" type="button">Применить стабильность Ragdoll</button>' +
       '<button id="developer-ragdoll-stability-reset" type="button">Сбросить стабильность Ragdoll</button>' +
-      '<p id="developer-ragdoll-stability-diagnostics" aria-live="polite" aria-atomic="true"></p>' +
+      '<p id="developer-ragdoll-stability-diagnostics"></p>' +
       '<hr>' +
       '<h3>Парашют</h3>' +
       '<p id="developer-parachute-note"></p>' +
       '<div id="developer-parachute-fields" class="settings-grid"></div>' +
       '<button id="developer-parachute-apply" type="button">Применить параметры парашюта</button>' +
       '<button id="developer-parachute-reset" type="button">Сбросить параметры парашюта</button>' +
-      '<div aria-live="polite" aria-atomic="true">' +
+      '<div>' +
       '<strong>Текущее состояние парашюта</strong>' +
       '<p id="developer-parachute-diagnostics-text">Сейчас парашют не активен.</p>' +
       '</div>' +
@@ -306,7 +306,7 @@ export async function setup(ctx) {
     const unstable = active.some((group) => Boolean(group.nonFinite));
     const diagnosticNode = panel.querySelector("#developer-ragdoll-stability-diagnostics");
     if (diagnosticNode) {
-      diagnosticNode.textContent = [
+      const nextText = [
         "Активных ragdoll-групп: " + (Number(diagnostics.activeGroups) || 0) + ".",
         "Физических тел в группах: " + (Number(diagnostics.groupedBodies) || 0) + ".",
         "Внутренних контактов частей тела сейчас: " + totalContacts + ".",
@@ -314,6 +314,7 @@ export async function setup(ctx) {
         diagnostics.selfCollisionEnabled ? "Самоколлизия включена." : "Самоколлизия выключена.",
         unstable ? "Внимание: обнаружено некорректное физическое значение." : "Физика остаётся конечной.",
       ].join(" ");
+      if (diagnosticNode.textContent !== nextText) diagnosticNode.textContent = nextText;
     }
   }
 
@@ -358,23 +359,22 @@ export async function setup(ctx) {
     const node = panel?.querySelector("#developer-parachute-diagnostics-text");
     if (!node) return;
     const state = value?.state;
-    if (!state?.airborne) {
-      node.textContent = "Сейчас парашют не активен.";
-      return;
-    }
-    node.textContent = [
-      "Фаза: " + (state.phase ?? "неизвестно") + ".",
-      "Высота: " + formatNumber(state.altitude, 1) + " м.",
-      "Вертикальная скорость: " + formatNumber(state.verticalVelocity, 2) + " м/с.",
-      "Реальная скорость снижения: " + formatNumber(state.downwardSpeed, 2) + " м/с.",
-      state.phase === "freefall"
-        ? "Горизонтальная скорость свободного падения: " + formatNumber(state.freefallHorizontalSpeed, 2) + " м/с."
-        : "Скорость планирования: " + formatNumber(state.glideSpeed, 2) + " м/с.",
-      "Полная воздушная скорость: " + formatNumber(state.airSpeed, 2) + " м/с.",
-      "Ветер: " + formatNumber(state.windSpeed, 2) + " м/с.",
-      "Наполнение купола: " + formatNumber((state.inflation ?? 0) * 100, 0) + " процентов.",
-      state.landingApproach ? "Режим захода на посадку активен." : "Обычный полёт.",
-    ].join(" ");
+    const nextText = !state?.airborne
+      ? "Сейчас парашют не активен."
+      : [
+        "Фаза: " + (state.phase ?? "неизвестно") + ".",
+        "Высота: " + formatNumber(state.altitude, 1) + " м.",
+        "Вертикальная скорость: " + formatNumber(state.verticalVelocity, 2) + " м/с.",
+        "Реальная скорость снижения: " + formatNumber(state.downwardSpeed, 2) + " м/с.",
+        state.phase === "freefall"
+          ? "Горизонтальная скорость свободного падения: " + formatNumber(state.freefallHorizontalSpeed, 2) + " м/с."
+          : "Скорость планирования: " + formatNumber(state.glideSpeed, 2) + " м/с.",
+        "Полная воздушная скорость: " + formatNumber(state.airSpeed, 2) + " м/с.",
+        "Ветер: " + formatNumber(state.windSpeed, 2) + " м/с.",
+        "Наполнение купола: " + formatNumber((state.inflation ?? 0) * 100, 0) + " процентов.",
+        state.landingApproach ? "Режим захода на посадку активен." : "Обычный полёт.",
+      ].join(" ");
+    if (node.textContent !== nextText) node.textContent = nextText;
   }
 
   function renderSelectedProfile() {

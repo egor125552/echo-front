@@ -14,12 +14,12 @@ const EXPECTED_RAGDOLL_BODIES = 16;
 // from turning a person into a spacecraft. The centre-of-mass limits are high
 // enough for a dramatic throw, while relative limits stop limbs from feeding
 // unbounded energy back through joints and self-collision.
-const MAX_COM_SPEED = 70;
-const MAX_COM_UPWARD_SPEED = 30;
-const MAX_RELATIVE_PART_SPEED = 42;
-const MAX_PART_SPEED = 85;
-const MAX_PART_UPWARD_SPEED = 45;
-const MAX_PART_ANGULAR_SPEED = 45;
+const MAX_COM_SPEED = 88;
+const MAX_COM_UPWARD_SPEED = 44;
+const MAX_RELATIVE_PART_SPEED = 48;
+const MAX_PART_SPEED = 105;
+const MAX_PART_UPWARD_SPEED = 58;
+const MAX_PART_ANGULAR_SPEED = 48;
 
 function finite(value) {
   return Number.isFinite(Number(value));
@@ -60,7 +60,20 @@ export async function setup(ctx) {
 
   function allocateGroup() {
     const id = freeGroups.shift();
-    if (id == null) throw new Error("No collision group available for ragdoll");
+    if (id == null) {
+      // Graceful overflow fallback: share the least-populated active ragdoll group instead of crashing the match
+      let fallback = null;
+      for (const candidate of groups.values()) {
+        if (!fallback || candidate.bodies.size < fallback.bodies.size) {
+          fallback = candidate;
+        }
+      }
+      if (fallback) {
+        latestGroupId = fallback.id;
+        return fallback;
+      }
+      throw new Error("No collision group available for ragdoll");
+    }
     const group = {
       id,
       sequence: ++sequence,

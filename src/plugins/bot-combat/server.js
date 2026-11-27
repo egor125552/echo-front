@@ -350,14 +350,14 @@ export async function setup(ctx) {
           ? perception.nearestVisibleEnemy(bot.id, preMaxRange, { humanPriority: 0.62 })
           : null;
         if (inventory?.items?.length > 1) {
-          const dist = quickVisible?.distance ?? 36;
+          const dist = quickVisible?.distance ?? 26;
           const usable = inventory.items
             .map((item, idx) => ({ item, idx, ready: item.ammo > 0 && !(Number(item.reloadUntil) > now) }))
             .filter(({ item }) => item.ammo > 0 || item.reserve > 0);
-          const priority = dist >= 34
+          const priority = dist >= 30
             ? ["sniper", "marksman", "rifle", "pistol"]
-            : dist >= 18
-              ? ["marksman", "sniper", "rifle", "pistol"]
+            : dist >= 22
+              ? ["marksman", "rifle", "sniper", "pistol"]
               : ["rifle", "marksman", "pistol", "sniper"];
           for (const requireReady of [true, false]) {
             let chosen = -1;

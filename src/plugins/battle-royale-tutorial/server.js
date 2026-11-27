@@ -73,6 +73,7 @@ export async function setup(ctx) {
         armorCollected: false,
         neededLoot: null,
         groundRunSteps: 0,
+        autoDeployedEarly: false,
         demoBotId: entities.all().find((candidate) => candidate.bot)?.id ?? null,
       });
     }
@@ -172,7 +173,8 @@ export async function setup(ctx) {
   ctx.events.on("parachute:deployed", ({ entityId, automatic, now } = {}) => {
     const state = ensure(entityId);
     if (!state) return;
-    if (state.phase === "deploy-parachute" && !automatic) {
+    if (state.phase === "deploy-parachute") {
+      if (automatic) state.autoDeployedEarly = true;
       advance(entityId, "steer-parachute", now);
       return;
     }
@@ -184,8 +186,18 @@ export async function setup(ctx) {
   ctx.events.on("parachute:landed", ({ entityId, now } = {}) => {
     const state = ensure(entityId);
     if (!state) return;
-    if (state.phase === "land") advance(entityId, "ground-run", now);
-    else if (state.phase === "automatic-parachute-land") advance(entityId, "select-navigation", now);
+    if (state.phase === "deploy-parachute") {
+      state.autoDeployedEarly = true;
+      advance(entityId, "ground-run", now);
+      return;
+    }
+    if (state.phase === "steer-parachute" || state.phase === "land") {
+      advance(entityId, "ground-run", now);
+      return;
+    }
+    if (state.phase === "automatic-parachute" || state.phase === "automatic-parachute-land") {
+      advance(entityId, "select-navigation", now);
+    }
   });
 
   ctx.events.on("sound:spatial", ({ entityId, gait, now } = {}) => {
@@ -388,6 +400,7 @@ export async function setup(ctx) {
         routeCancelled: state.routeCancelled,
         rifleCollected: state.rifleCollected,
         armorCollected: state.armorCollected,
+        autoDeployedEarly: Boolean(state.autoDeployedEarly),
       };
     },
     acknowledgeSpeech(playerId, phase, now = Date.now()) {

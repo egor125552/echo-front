@@ -15,6 +15,13 @@ function isTypingTarget(target) {
     && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
+function isInteractivePageControl(target) {
+  if (!(target instanceof Element)) return false;
+  if (target.closest("#accessible-game-menu")) return false;
+  if (target.closest("#settings-panel, #technical-tools, #help-panel, #about-panel, dialog")) return true;
+  return Boolean(target.closest("input, textarea, select, button, a, summary, label, [contenteditable='true']"));
+}
+
 function neutralizeGameplay(sample = {}) {
   return {
     ...sample,
@@ -57,7 +64,7 @@ function createMenuUi() {
   section.setAttribute("aria-labelledby", "accessible-game-menu-title");
   section.innerHTML = `
     <h2 id="accessible-game-menu-title">Меню</h2>
-    <p id="accessible-game-menu-help">Каждый пункт меню — кнопка. Можно нажать пальцем или двойным касанием VoiceOver. Стрелки вверх и вниз выбирают пункт, Enter подтверждает, Escape возвращает назад. В режиме жестов проведите вправо по пустому месту меню, чтобы вернуться к игре.</p>
+    <p id="accessible-game-menu-help">Каждый пункт меню — кнопка. Можно нажать пальцем или двойным касанием VoiceOver. В режиме жестов смах вверх и вниз по всему меню перелистывает пункты, короткое касание выбирает активный пункт, смах влево возвращает назад, смах вправо возвращает в игру.</p>
     <button id="accessible-game-menu-resume" type="button">Вернуться в игру</button>
     <ul id="accessible-game-menu-list"></ul>
     <p id="accessible-game-menu-status" role="status" aria-live="assertive" aria-atomic="true"></p>
@@ -130,6 +137,13 @@ export async function setup(ctx) {
   let twoFingerStart = null;
   let focusBeforeMenu = null;
   let menuSwipeStart = null;
+  let suppressMenuClickUntil = 0;
+
+  function nowMs() {
+    return typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  }
 
   function announce(text, { interrupt = true } = {}) {
     const value = String(text ?? "").trim();
@@ -165,8 +179,16 @@ export async function setup(ctx) {
       button.type = "button";
       button.textContent = item.label;
       button.dataset.menuIndex = String(itemIndex);
-      button.addEventListener("focus", () => { index = itemIndex; });
+      if (itemIndex === index) button.setAttribute("aria-current", "true");
+      button.addEventListener("focus", () => {
+        index = itemIndex;
+        for (const el of ui.list.querySelectorAll("button")) {
+          if (el === button) el.setAttribute("aria-current", "true");
+          else el.removeAttribute("aria-current");
+        }
+      });
       button.addEventListener("click", () => {
+        if (nowMs() < suppressMenuClickUntil) return;
         index = itemIndex;
         void item.action?.();
       });
@@ -175,7 +197,9 @@ export async function setup(ctx) {
     });
     // Each menu entry is a native button, so both taps and VoiceOver activation
     // execute the action rather than merely changing a listbox selection.
-    ui.list.querySelector(`[data-menu-index="${index}"]`)?.focus({ preventScroll: true });
+    const activeButton = ui.list.querySelector(`[data-menu-index="${index}"]`);
+    activeButton?.focus({ preventScroll: true });
+    activeButton?.scrollIntoView?.({ block: "nearest" });
     if (announceTitle) {
       announce(items.length ? `${screen.title}. ${itemSpeech()}` : `${screen.title}. Список пуст.`);
     } else if (items.length) {
@@ -190,7 +214,11 @@ export async function setup(ctx) {
     if (open) focusBeforeMenu = document.activeElement;
     ui.section.hidden = !open;
     const page = document.querySelector("main");
-    if (page) page.inert = open;
+    if (page) {
+      page.inert = open;
+      if (open) page.setAttribute("aria-hidden", "true");
+      else page.removeAttribute("aria-hidden");
+    }
     if (open) {
       input.disable();
       ctx.events.emit("input:gamepad-turn", { turn: 0, reason: "menu-open" });
@@ -260,6 +288,141 @@ export async function setup(ctx) {
       .sort((a, b) => a.distance - b.distance || a.name.localeCompare(b.name, "ru"));
   }
 
+  function settingsScreen() {
+    const hasHaptics = typeof ctx.services?.has === "function" && ctx.services.has("haptic-feedback");
+    const haptics = hasHaptics ? ctx.services.get("haptic-feedback") : null;
+    const hasTouchSettings = typeof ctx.services?.has === "function" && ctx.services.has("touch-control-settings");
+    const touchSettings = hasTouchSettings ? ctx.services.get("touch-control-settings") : null;
+    const hasEnemyAi = typeof ctx.services?.has === "function" && ctx.services.has("enemy-ai-settings");
+    const enemyAi = hasEnemyAi ? ctx.services.get("enemy-ai-settings") : network;
+    const speechEnabled = Boolean(speech?.enabled);
+    const speechRate = Number(speech?.rate) || 1.7;
+    const hapticsEnabled = haptics ? Boolean(haptics.enabled) : true;
+    const hapticsPercent = Math.round((Number(haptics?.intensity) || 1) * 100);
+    const touchMode = touchSettings?.mode ?? document.documentElement.dataset.touchMode ?? "buttons";
+    const isAi = (enemyAi?.mode ?? enemyAi?.enemyAiMode) === "ai";
+
+    const refreshSettings = (focusIndex, message) => {
+      screen = settingsScreen();
+      index = focusIndex;
+      render();
+      if (message) announce(message);
+    };
+
+    const items = [
+      {
+        label: `Игровая озвучка: ${speechEnabled ? "включена" : "выключена"}`,
+        action: () => {
+          const next = !Boolean(speech?.enabled);
+          if (typeof speech?.setEnabled === "function") {
+            speech.setEnabled(next, { announce: false });
+          } else {
+            const box = document.querySelector("#speech-enabled");
+            if (box) {
+              box.checked = next;
+              box.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          }
+          screen = settingsScreen();
+          index = 0;
+          render();
+          if (next) announce("Игровая озвучка включена.");
+        },
+      },
+      {
+        label: `Скорость речи: ${speechRate.toFixed(1)}× (нажмите, чтобы изменить)`,
+        action: () => {
+          const current = Number(speech?.rate) || 1.7;
+          const next = current >= 2.45 ? 0.9 : Math.min(2.5, Math.round((current + 0.2) * 10) / 10);
+          if (typeof speech?.setRate === "function") {
+            speech.setRate(next);
+          } else {
+            const slider = document.querySelector("#speech-rate");
+            if (slider) {
+              slider.value = String(next);
+              slider.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+          refreshSettings(1, `Скорость речи ${next.toFixed(1)}.`);
+        },
+      },
+      {
+        label: "Проверить игровой голос",
+        action: () => {
+          speech.say("Проверка игровой озвучки. Скорость речи настроена.", { interrupt: true });
+        },
+      },
+    ];
+
+    if (haptics) {
+      const hapticsToggleIndex = items.length;
+      items.push({
+        label: `Вибрация: ${hapticsEnabled ? "включена" : "выключена"}`,
+        action: () => {
+          const next = !Boolean(haptics.enabled);
+          haptics.setEnabled?.(next);
+          refreshSettings(hapticsToggleIndex, `Вибрация ${next ? "включена" : "выключена"}.`);
+        },
+      });
+      const hapticsStrengthIndex = items.length;
+      items.push({
+        label: `Сила вибрации: ${hapticsPercent}% (нажмите, чтобы изменить)`,
+        action: () => {
+          const current = Math.round((Number(haptics.intensity) || 1) * 100);
+          const nextPercent = current >= 100 ? 20 : Math.min(100, current + 20);
+          haptics.setIntensity?.(nextPercent / 100);
+          refreshSettings(hapticsStrengthIndex, `Сила вибрации ${nextPercent} процентов.`);
+        },
+      });
+      items.push({
+        label: "Проверить вибрацию",
+        action: () => {
+          haptics.test?.("default");
+          announce("Проверка вибрации.");
+        },
+      });
+    }
+
+    if (touchSettings) {
+      const touchIndex = items.length;
+      items.push({
+        label: `Управление на iPhone: ${touchMode === "gestures" ? "Жесты на весь экран" : "Кнопки"}`,
+        action: () => {
+          const next = touchSettings.mode === "gestures" ? "buttons" : "gestures";
+          touchSettings.setMode(next);
+          refreshSettings(
+            touchIndex,
+            next === "gestures" ? "Включены жесты на весь экран." : "Включено управление кнопками.",
+          );
+        },
+      });
+    }
+
+    const aiIndex = items.length;
+    items.push({
+      label: `Режим ботов: ${isAi ? "Боты с ИИ (враги и напарники)" : "Обычные боты"}`,
+      action: () => {
+        const next = isAi ? "standard" : "ai";
+        if (typeof enemyAi?.setMode === "function") enemyAi.setMode(next);
+        else network.setEnemyAiMode?.(next);
+        refreshSettings(
+          aiIndex,
+          next === "ai"
+            ? "Включён режим: боты с ИИ (враги и напарники)."
+            : "Включён режим: обычные боты.",
+        );
+      },
+    });
+
+    items.push({ label: "Назад", action: goBack });
+
+    return {
+      id: "settings",
+      title: "Настройки звука и управления",
+      items,
+    };
+  }
+
   function mainScreen() {
     const hasEnemyAi = typeof ctx.services?.has === "function" && ctx.services.has("enemy-ai-settings");
     const enemyAi = hasEnemyAi
@@ -267,11 +430,16 @@ export async function setup(ctx) {
       : network;
     const isAi = (enemyAi?.mode ?? enemyAi?.enemyAiMode) === "ai";
     const items = [
+      ...(network.mode === "battle-royale"
+        ? [{ label: "Карта", action: () => show(mapScreen(), { push: true }) }]
+        : []),
       { label: "Друзья", action: () => show(friendsScreen(), { push: true }) },
       ...(network.mode === "battle-royale"
         ? [{ label: "Отряд и инвентарь", action: () => show(squadHubScreen(), { push: true }) }]
         : []),
+      { label: "Настройки звука и управления", action: () => show(settingsScreen(), { push: true }) },
       {
+        id: "bot-mode",
         label: `Режим ботов: ${isAi ? "Боты с ИИ (враги и напарники)" : "Обычные боты"}`,
         action: () => {
           const next = isAi ? "standard" : "ai";
@@ -281,7 +449,8 @@ export async function setup(ctx) {
             ? "Включён режим: боты с ИИ (враги и напарники)."
             : "Включён режим: обычные боты.");
           screen = mainScreen();
-          index = network.mode === "battle-royale" ? 3 : 2;
+          const botIdx = screen.items.findIndex((item) => item.id === "bot-mode");
+          index = botIdx >= 0 ? botIdx : 0;
           render();
         },
       },
@@ -448,9 +617,11 @@ export async function setup(ctx) {
     const minesCost = Number(prices.mines) || 450;
     const miniNukeCost = Number(prices.miniNuke) || 2500;
     const electroDropCost = Number(prices.electroDrop) || 3000;
+    const cannonCost = Number(prices.cannon) || 1800;
     const specialOps = latestSnapshot?.specialOps ?? {};
     const marksmanOwned = Boolean(shopState.marksmanOwned ?? self?.weapons?.includes?.("marksman"));
     const sniperOwned = Boolean(shopState.sniperOwned ?? self?.weapons?.includes?.("sniper"));
+    const cannonOwned = Boolean(shopState.cannonOwned ?? specialOps.hasCannon ?? self?.weapons?.includes?.("cannon"));
     const deadMates = Array.isArray(shopState.deadTeammates) ? shopState.deadTeammates : [];
     const turboPurchased = Number(shopState.turboPurchasedCount ?? self?.turboPurchasedCount) || 0;
     const turboLimit = Number(shopState.turboPurchaseLimit ?? self?.turboPurchaseLimit) || 3;
@@ -479,6 +650,12 @@ export async function setup(ctx) {
     items.push({
       label: `Вызвать сброс Джаггернаута (600 брони, 700 здоровья, гора стимуляторов — стягивает всех врагов) — ${juggernautDropCost} долларов`,
       action: () => queueBuy("juggernaut-drop"),
+    });
+    items.push({
+      label: cannonOwned
+        ? `Ядра для эксклюзивной пушки «Смертонос» (+20 ядер) — ${cannonCost} долларов`
+        : `Эксклюзивная пушка «Смертонос» (700 м, 5 режимов, запускает машины и врагов в воздух) — ${cannonCost} долларов`,
+      action: () => queueBuy("cannon"),
     });
     items.push({
       label: `Мини-ядерка (+1000 ударов по выбранной точке, в запасе ${specialOps.miniNukes ?? 0}) — ${miniNukeCost} долларов`,
@@ -575,7 +752,7 @@ export async function setup(ctx) {
     const nukes = Number(ops.miniNukes) || 0;
     const hasElectro = Boolean(ops.hasElectroRifle);
     const modeLabel = ops.electroMode?.label || "Шок (ломает броню и подбрасывает)";
-    const nukeDistLabel = ops.nukeDistance?.label || "Средне (52 м)";
+    const nukeDistLabel = ops.nukeDistance?.label || "Средне (215 метров — безопасно)";
     const items = [
       {
         label: `Поставить мину под ноги (осталось ${mines} из ${maxMines})`,
@@ -587,37 +764,37 @@ export async function setup(ctx) {
       {
         label: ops.nukeAiming
           ? `Запустить мини-ядерку сейчас! Дистанция: ${nukeDistLabel}`
-          : `Мини-ядерка: навести удар (осталось ${nukes})`,
+          : `Мини-ядерка: навести удар (радиус 185 м, осталось ${nukes})`,
         action: () => {
           queueSpecialAction({ type: ops.nukeAiming ? "nuke-launch" : "nuke-aim" });
           closeMenu({ announceClose: false });
         },
       },
       {
-        label: "Запустить мини-ядерку: Под себя (4 м — опасно!)",
+        label: "Запустить мини-ядерку: Под себя (4 м — смертельно опасно!)",
         action: () => {
           queueSpecialAction({ type: "nuke-launch", distanceMeters: 4 });
           closeMenu({ announceClose: false });
         },
       },
       {
-        label: "Запустить мини-ядерку: Близко (24 м вперёд)",
+        label: "Запустить мини-ядерку: Близко (115 м вперёд — край ударной волны)",
         action: () => {
-          queueSpecialAction({ type: "nuke-launch", distanceMeters: 24 });
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 115 });
           closeMenu({ announceClose: false });
         },
       },
       {
-        label: "Запустить мини-ядерку: Средне (52 м вперёд)",
+        label: "Запустить мини-ядерку: Средне (215 м вперёд — безопасно)",
         action: () => {
-          queueSpecialAction({ type: "nuke-launch", distanceMeters: 52 });
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 215 });
           closeMenu({ announceClose: false });
         },
       },
       {
-        label: "Запустить мини-ядерку: Далеко (86 м вперёд)",
+        label: "Запустить мини-ядерку: Далеко (320 м вперёд)",
         action: () => {
-          queueSpecialAction({ type: "nuke-launch", distanceMeters: 86 });
+          queueSpecialAction({ type: "nuke-launch", distanceMeters: 320 });
           closeMenu({ announceClose: false });
         },
       },
@@ -632,6 +809,55 @@ export async function setup(ctx) {
         : [{
             label: "Электро-автомат (нет — найди в бункере Резиденции или закажи в магазине)",
             action: () => announce("Электро-автомата пока нет. Его можно забрать в бункере Резиденции или заказать сброс груза в магазине."),
+          }]),
+      ...(ops.hasCannon
+        ? [
+            {
+              label: `Пушка «Смертонос»: сменить режим (сейчас: ${ops.cannonMode?.shortLabel || "Ударное ядро"})`,
+              action: () => {
+                queueSpecialAction({ type: "cycle-cannon-mode" });
+                closeMenu({ announceClose: false });
+              },
+            },
+            {
+              label: "Смертонос — Режим 1: Стандартный (ударное ядро на 700 м)",
+              action: () => {
+                queueSpecialAction({ type: "set-cannon-mode", modeId: "standard" });
+                closeMenu({ announceClose: false });
+              },
+            },
+            {
+              label: "Смертонос — Режим 2: Картечь-веер (7 ядер по толпе)",
+              action: () => {
+                queueSpecialAction({ type: "set-cannon-mode", modeId: "shrapnel" });
+                closeMenu({ announceClose: false });
+              },
+            },
+            {
+              label: "Смертонос — Режим 3: Сквозной бронебой (пробивает стены и машины насквозь)",
+              action: () => {
+                queueSpecialAction({ type: "set-cannon-mode", modeId: "piercing" });
+                closeMenu({ announceClose: false });
+              },
+            },
+            {
+              label: "Смертонос — Режим 4: Зарядный (удерживай огонь R2 и отпусти)",
+              action: () => {
+                queueSpecialAction({ type: "set-cannon-mode", modeId: "charged" });
+                closeMenu({ announceClose: false });
+              },
+            },
+            {
+              label: "Смертонос — Режим 5: Залповый (5 тяжёлых ядер подряд)",
+              action: () => {
+                queueSpecialAction({ type: "set-cannon-mode", modeId: "salvo" });
+                closeMenu({ announceClose: false });
+              },
+            },
+          ]
+        : [{
+            label: "Пушка «Смертонос» (эксклюзив — магазин 1800 долларов, Джаггернаут или Электрический Лукашенко)",
+            action: () => announce("Эксклюзивная пушка Смертонос доступна в магазине за 1800 долларов, а также в сбросах Джаггернаута и Электрического Лукашенко."),
           }]),
       { label: "Назад", action: goBack },
     ];
@@ -1072,13 +1298,15 @@ export async function setup(ctx) {
   }
 
   function openMain() {
-    if (!network.connected) return;
+    const gameVisible = !document.querySelector("#game-panel")?.hidden;
+    if (!network.connected && !gameVisible) return;
     stack = [];
     show(mainScreen());
   }
 
   function openMap() {
-    if (!network.connected) return;
+    const gameVisible = !document.querySelector("#game-panel")?.hidden;
+    if (!network.connected && !gameVisible) return;
     if (network.mode !== "battle-royale") {
       announce("Карта навигации доступна в королевской битве.");
       return;
@@ -1088,7 +1316,8 @@ export async function setup(ctx) {
   }
 
   function openSquadMenu({ fromGamepadHold = false } = {}) {
-    if (!network.connected) return;
+    const gameVisible = !document.querySelector("#game-panel")?.hidden;
+    if (!network.connected && !gameVisible) return;
     if (network.mode !== "battle-royale") {
       announce("Меню отряда и инвентаря доступно в королевской битве.");
       return;
@@ -1160,6 +1389,7 @@ export async function setup(ctx) {
 
   window.addEventListener("keydown", (event) => {
     if (isTypingTarget(event.target)) return;
+    if (!open && isInteractivePageControl(event.target)) return;
     const gameActive = !document.querySelector("#game-panel")?.hidden;
     if (!gameActive) return;
 
@@ -1201,6 +1431,7 @@ export async function setup(ctx) {
   }, { capture: true, passive: false });
 
   window.addEventListener("keyup", (event) => {
+    if (!open && isInteractivePageControl(event.target)) return;
     if (!open && event.code !== "KeyM" && event.code !== "KeyI" && event.code !== "Enter") return;
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape", "KeyM", "KeyI"].includes(event.code)) {
       event.preventDefault();
@@ -1211,7 +1442,10 @@ export async function setup(ctx) {
   mobile.menu?.addEventListener("click", () => open ? closeMenu() : openMain());
   mobile.map?.addEventListener("click", openMap);
   mobile.squad?.addEventListener("click", () => open && screen?.id === "squad-hub" ? closeMenu() : openSquadMenu());
-  ui.resume.addEventListener("click", closeMenu);
+  ui.resume.addEventListener("click", () => {
+    if (nowMs() < suppressMenuClickUntil) return;
+    closeMenu();
+  });
 
   ctx.events.on("input:touch", ({ control, down } = {}) => {
     if (!down) return;
@@ -1274,46 +1508,72 @@ export async function setup(ctx) {
     }
   });
 
-  // Gestures on empty menu space allow full navigation in fullscreen gesture mode:
-  // swipe up/down moves selection, tap activates, swipe left goes back, swipe right closes.
+  // Full-surface gestures across the open menu in fullscreen gesture mode:
+  // swipe up/down moves selection even when starting on a menu button,
+  // short tap activates the selected item, swipe left goes back, swipe right closes.
   ui.section.addEventListener("touchstart", (event) => {
     menuSwipeStart = null;
     if (!open || document.documentElement.dataset.touchMode !== "gestures"
-      || event.touches.length !== 1 || event.target?.closest?.("button, a, input, select, textarea, summary")) return;
+      || event.touches.length !== 1) return;
+    if (isTypingTarget(event.target)) return;
     const touch = event.touches[0];
     menuSwipeStart = {
       id: touch.identifier,
       x: touch.clientX,
       y: touch.clientY,
-      time: typeof performance !== "undefined" ? performance.now() : Date.now(),
+      time: nowMs(),
+      moved: false,
+      startedOnResume: Boolean(event.target instanceof Element && event.target.closest("#accessible-game-menu-resume")),
     };
   }, { passive: true });
+  ui.section.addEventListener("touchmove", (event) => {
+    if (!menuSwipeStart || !open) return;
+    const touch = [...(event.touches ?? [])].find((item) => item.identifier === menuSwipeStart.id);
+    if (!touch) return;
+    const dist = Math.hypot(touch.clientX - menuSwipeStart.x, touch.clientY - menuSwipeStart.y);
+    if (dist >= 14) {
+      menuSwipeStart.moved = true;
+      if (event.cancelable) event.preventDefault();
+    }
+  }, { passive: false });
   ui.section.addEventListener("touchend", (event) => {
     if (!menuSwipeStart || !open) return;
-    const touch = [...(event.changedTouches ?? [])].find((item) => item.identifier === menuSwipeStart.id);
-    if (touch) {
-      const dx = touch.clientX - menuSwipeStart.x;
-      const dy = touch.clientY - menuSwipeStart.y;
-      const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-      const duration = Math.max(0, now - (menuSwipeStart.time ?? now));
-      if (dx >= 90 && Math.abs(dy) <= 65) {
-        event.preventDefault?.();
-        closeMenu();
-      } else if (dx <= -70 && Math.abs(dy) <= 65) {
-        event.preventDefault?.();
-        goBack();
-      } else if (dy <= -45 && Math.abs(dx) <= 65) {
-        event.preventDefault?.();
-        move(-1);
-      } else if (dy >= 45 && Math.abs(dx) <= 65) {
-        event.preventDefault?.();
-        move(1);
-      } else if (Math.hypot(dx, dy) <= 20 && duration <= 280) {
-        event.preventDefault?.();
-        activate();
-      }
-    }
+    const swipe = menuSwipeStart;
     menuSwipeStart = null;
+    const touch = [...(event.changedTouches ?? [])].find((item) => item.identifier === swipe.id);
+    if (!touch) return;
+    const dx = touch.clientX - swipe.x;
+    const dy = touch.clientY - swipe.y;
+    const now = nowMs();
+    const duration = Math.max(0, now - (swipe.time ?? now));
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    if (dx >= 75 && absX >= absY) {
+      if (event.cancelable) event.preventDefault();
+      suppressMenuClickUntil = now + 450;
+      closeMenu();
+    } else if (dx <= -60 && absX >= absY) {
+      if (event.cancelable) event.preventDefault();
+      suppressMenuClickUntil = now + 450;
+      goBack();
+    } else if (dy <= -36 && absY > absX) {
+      if (event.cancelable) event.preventDefault();
+      suppressMenuClickUntil = now + 450;
+      move(-1);
+    } else if (dy >= 36 && absY > absX) {
+      if (event.cancelable) event.preventDefault();
+      suppressMenuClickUntil = now + 450;
+      move(1);
+    } else if (!swipe.moved && Math.hypot(dx, dy) <= 20 && duration <= 320) {
+      if (event.cancelable) event.preventDefault();
+      suppressMenuClickUntil = now + 450;
+      if (swipe.startedOnResume) closeMenu();
+      else activate();
+    } else if (swipe.moved) {
+      if (event.cancelable) event.preventDefault();
+      suppressMenuClickUntil = now + 450;
+    }
   }, { passive: false });
   ui.section.addEventListener("touchcancel", () => { menuSwipeStart = null; }, { passive: true });
 
@@ -1373,7 +1633,7 @@ export async function setup(ctx) {
   document.addEventListener("touchstart", (event) => {
     if (open || event.touches.length !== 2
       || document.documentElement.dataset.touchMode !== "gestures") return;
-    if (Array.from(event.touches).some((touch) => isTypingTarget(touch.target))) return;
+    if (Array.from(event.touches).some((touch) => isInteractivePageControl(touch.target))) return;
     const points = Array.from(event.touches).map((touch) => ({ x: touch.clientX, y: touch.clientY }));
     twoFingerStart = points;
     twoFingerTimer = setTimeout(() => {

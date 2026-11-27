@@ -30,7 +30,10 @@ function nowMs() {
 
 function interactiveTarget(target) {
   return target instanceof Element
-    && Boolean(target.closest("button, input, select, textarea, a, summary, [contenteditable='true']"));
+    && Boolean(target.closest(
+      "button, input, select, textarea, a, summary, label, [contenteditable='true'], "
+      + "#settings-panel, #technical-tools, #help-panel, #about-panel, #accessible-game-menu, dialog",
+    ));
 }
 
 export async function setup(ctx) {

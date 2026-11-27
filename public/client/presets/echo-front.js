@@ -6,6 +6,7 @@ import * as parkourInput from "../plugins/parkour-input.js";
 import * as gamepadInput from "../plugins/gamepad-input.js";
 import * as iphoneGestures from "../plugins/iphone-gestures.js";
 import * as touchControlSettings from "../plugins/touch-control-settings.js";
+import * as controlProfile from "../plugins/control-profile.js";
 import * as journal from "../plugins/play-journal.js";
 import * as smoothing from "../plugins/snapshot-smoothing.js";
 import * as hapticFeedback from "../plugins/haptic-feedback.js";
@@ -54,6 +55,7 @@ export const echoFrontClientPreset = [
   parkourInput,
   gamepadInput,
   touchControlSettings,
+  controlProfile,
   iphoneGestures,
   journal,
   smoothing,

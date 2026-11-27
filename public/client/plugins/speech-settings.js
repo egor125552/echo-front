@@ -116,6 +116,7 @@ export async function setup(ctx) {
     if (!grid) return null;
     const label = document.createElement("label");
     label.className = "setting-row";
+    label.htmlFor = "speech-voice";
     const caption = document.createElement("span");
     caption.textContent = "Голос";
     voiceSelect = document.createElement("select");
@@ -395,18 +396,28 @@ export async function setup(ctx) {
     return null;
   }
 
-  rateInput?.addEventListener("input", () => {
-    rate = clampRate(rateInput.value);
-    localStorage.setItem(RATE_KEY, String(rate));
+  function setRate(value) {
+    rate = clampRate(value);
+    try { localStorage.setItem(RATE_KEY, String(rate)); } catch {}
     syncUi();
+    return rate;
+  }
+
+  function setEnabled(value, { announce = true } = {}) {
+    enabled = Boolean(value);
+    try { localStorage.setItem(ENABLED_KEY, String(enabled)); } catch {}
+    if (!enabled) stop();
+    else if (announce) say("Игровая озвучка включена", { interrupt: true });
+    syncUi();
+    return enabled;
+  }
+
+  rateInput?.addEventListener("input", () => {
+    setRate(rateInput.value);
   });
 
   enabledInput?.addEventListener("change", () => {
-    enabled = Boolean(enabledInput.checked);
-    localStorage.setItem(ENABLED_KEY, String(enabled));
-    if (!enabled) stop();
-    else say("Игровая озвучка включена", { interrupt: true });
-    syncUi();
+    setEnabled(Boolean(enabledInput.checked), { announce: true });
   });
 
   testButton?.addEventListener("click", () => {
@@ -431,6 +442,8 @@ export async function setup(ctx) {
   ctx.services.provide("speech", {
     say,
     stop,
+    setEnabled,
+    setRate,
     prime(reason = "manual") { return primeFromGesture(reason); },
     refreshVoices,
     get requestGeneration() { return generation; },

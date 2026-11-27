@@ -576,6 +576,65 @@ export async function setup(ctx) {
     handbrakeArmed = true;
   });
 
+  function applyBlastImpulse(origin = {}, {
+    radius = 28,
+    maxUpVelocity = 28,
+    maxOutVelocity = 36,
+    maxSpin = 5.5,
+    direction = null,
+    directVehicleId = null,
+    now = Date.now(),
+  } = {}) {
+    const body = bodyState();
+    if (!body || !chassis?.body) return [];
+    const ox = Number(origin?.x) || 0;
+    const oy = Number(origin?.y) || 0;
+    const oz = Number(origin?.z) || 0;
+    const dx = body.x - ox;
+    const dz = body.z - oz;
+    const dist = Math.hypot(dx, (body.y - oy) * 0.5, dz);
+    const isDirect = directVehicleId === VEHICLE_ID;
+    if (!isDirect && dist > Math.max(1, Number(radius) || 28)) return [];
+    const falloff = isDirect ? 1 : (1 - clamp(dist / Math.max(1, Number(radius) || 28), 0, 1) * 0.55);
+    const horizLen = Math.hypot(dx, dz);
+    let dirX = horizLen > 0.25 ? dx / horizLen : (Number(direction?.x) || 0.7);
+    let dirZ = horizLen > 0.25 ? dz / horizLen : (Number(direction?.z) || -0.7);
+    const norm = Math.hypot(dirX, dirZ) || 1;
+    dirX /= norm;
+    dirZ /= norm;
+
+    const addVx = dirX * maxOutVelocity * falloff;
+    const addVy = Math.max(9, maxUpVelocity * falloff);
+    const addVz = dirZ * maxOutVelocity * falloff;
+    const curVel = chassis.body.linvel();
+    chassis.body.wakeUp();
+    chassis.body.setLinvel({
+      x: clamp((Number(curVel?.x) || 0) + addVx, -95, 95),
+      y: clamp(Math.max(Number(curVel?.y) || 0, 0) + addVy, 6, 74),
+      z: clamp((Number(curVel?.z) || 0) + addVz, -95, 95),
+    }, true);
+    const spin = clamp(maxSpin * falloff, 1.2, 12.0);
+    chassis.body.setAngvel({
+      x: (dirZ >= 0 ? 1 : -1) * spin * 0.72,
+      y: (dirX >= 0 ? 1 : -1) * spin * 0.55,
+      z: (dirX >= 0 ? -1 : 1) * spin * 0.68,
+    }, true);
+
+    ctx.events.emit("vehicle:launched", {
+      vehicleId: VEHICLE_ID,
+      vehicleKind: "offroad",
+      driverId,
+      x: body.x,
+      y: body.y,
+      z: body.z,
+      vx: addVx,
+      vy: addVy,
+      vz: addVz,
+      now,
+    });
+    return [{ vehicleId: VEHICLE_ID, driverId, vy: addVy, speed: Math.hypot(addVx, addVy, addVz) }];
+  }
+
   ctx.services.provide("vehicles", {
     vehicleId: VEHICLE_ID,
     enterDistance: VEHICLE_ENTER_DISTANCE,
@@ -584,6 +643,7 @@ export async function setup(ctx) {
     exit,
     setInput,
     tickPhysics,
+    applyBlastImpulse,
     crashMetricsForForce(forceMagnitude, options = {}) {
       return vehicleCrashMetrics(forceMagnitude, options);
     },

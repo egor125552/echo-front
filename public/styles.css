@@ -175,9 +175,18 @@ summary {
   font-weight: 650;
 }
 
+.setting-row:has(input[type="checkbox"]) {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  min-height: 3rem;
+  padding: 0.25rem 0;
+  cursor: pointer;
+}
+
 .setting-row input[type="checkbox"] {
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.65rem;
+  height: 1.65rem;
+  cursor: pointer;
 }
 
 .setting-range {
@@ -393,6 +402,9 @@ html[data-touch-mode="gestures"][data-game-active="true"] body {
   overflow: hidden;
   overscroll-behavior: none;
 }
+html[data-touch-mode="gestures"][data-game-active="true"] main > :not(#game-panel):not(#announcer):not(#speech-status) {
+  display: none !important;
+}
 html[data-touch-mode="gestures"][data-game-active="true"] #game-panel {
   display: block;
   position: fixed;
@@ -451,18 +463,49 @@ html[data-touch-mode="gestures"][data-game-active="true"] #gesture-toolbar butto
 html[data-touch-mode="gestures"][data-game-active="true"] #accessible-game-menu:not([hidden]) {
   display: block;
   position: fixed;
-  z-index: 40;
+  z-index: 50;
   inset: 0;
   margin: 0;
   border-radius: 0;
   overflow-y: auto;
   max-height: 100dvh;
   padding: max(1rem, env(safe-area-inset-top)) 1rem max(1rem, env(safe-area-inset-bottom));
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+html[data-touch-mode="gestures"][data-game-active="true"] #accessible-game-menu button {
+  touch-action: none;
 }
 #touch-control-mode,
+#control-profile-mode,
 #haptics-test-pattern,
 #enemy-ai-mode,
 #journal-format { min-height: 3rem; width: 100%; font: inherit; }
+
+#tutorial-setup-dialog {
+  width: min(92vw, 34rem);
+  padding: 1.25rem;
+}
+#tutorial-setup-dialog .setup-dialog-body h2 {
+  margin: 0 0 0.65rem;
+  font-size: 1.25rem;
+}
+#tutorial-setup-dialog #tutorial-setup-prompt {
+  margin: 0 0 1rem;
+  line-height: 1.5;
+}
+#tutorial-setup-dialog .setup-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.6rem;
+}
+#tutorial-setup-dialog .setup-actions button {
+  width: 100%;
+  min-height: 3.1rem;
+  margin: 0;
+  text-align: left;
+}
 #journal-text-view {
   background: #0f141c;
   color: #f4f7fb;
@@ -528,6 +571,11 @@ html[data-touch-mode="gestures"][data-game-active="true"] #accessible-game-menu:
 }
 #accessible-game-menu-list button {
   width: 100%;
+}
+#accessible-game-menu-list button[aria-current="true"] {
+  background: #8fd3ff;
+  color: #061018;
+  border-color: #bfe6ff;
 }
 #accessible-game-menu-resume {
   background: #8fd3ff;

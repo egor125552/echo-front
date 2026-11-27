@@ -177,6 +177,9 @@ export async function setup(ctx) {
   const originalStateFor = vehicles.stateFor.bind(vehicles);
   const originalSnapshot = vehicles.snapshot.bind(vehicles);
   const originalSummary = vehicles.summary.bind(vehicles);
+  const originalApplyBlastImpulse = typeof vehicles.applyBlastImpulse === "function"
+    ? vehicles.applyBlastImpulse.bind(vehicles)
+    : (() => []);
 
   const extras = new Map();
   const despawnCounts = {supercar:0,offroad:0};
@@ -1395,6 +1398,78 @@ export async function setup(ctx) {
     };
   }
 
+  function applyBlastImpulse(origin = {}, options = {}) {
+    const launched = [...(originalApplyBlastImpulse(origin, options) ?? [])];
+    const ox = Number(origin?.x) || 0;
+    const oy = Number(origin?.y) || 0;
+    const oz = Number(origin?.z) || 0;
+    const radius = Math.max(1, Number(options.radius) || 28);
+    const maxUpVelocity = Number(options.maxUpVelocity) || 28;
+    const maxOutVelocity = Number(options.maxOutVelocity) || 36;
+    const maxSpin = Number(options.maxSpin) || 5.5;
+    const direction = options.direction ?? null;
+    const directVehicleId = options.directVehicleId ?? null;
+    const now = Number(options.now) || Date.now();
+
+    for (const entry of extras.values()) {
+      const body = bodyState(entry);
+      const rigid = entry.body ?? entry.bodyEntry?.body;
+      if (!body || !rigid) continue;
+      const dx = body.x - ox;
+      const dz = body.z - oz;
+      const dist = Math.hypot(dx, (body.y - oy) * 0.5, dz);
+      const isDirect = directVehicleId === entry.id;
+      if (!isDirect && dist > radius) continue;
+      const falloff = isDirect ? 1 : (1 - clamp(dist / radius, 0, 1) * 0.55);
+      const horizLen = Math.hypot(dx, dz);
+      let dirX = horizLen > 0.25 ? dx / horizLen : (Number(direction?.x) || 0.7);
+      let dirZ = horizLen > 0.25 ? dz / horizLen : (Number(direction?.z) || -0.7);
+      const norm = Math.hypot(dirX, dirZ) || 1;
+      dirX /= norm;
+      dirZ /= norm;
+
+      // Lighter supercars launch even higher & farther than heavy off-road jeeps!
+      const massBoost = entry.tuning.kind === "supercar" ? 1.18 : 1.0;
+      const addVx = dirX * maxOutVelocity * falloff * massBoost;
+      const addVy = Math.max(9.5, maxUpVelocity * falloff * massBoost);
+      const addVz = dirZ * maxOutVelocity * falloff * massBoost;
+      const curVel = rigid.linvel();
+      entry.idleSettleSubsteps = 0;
+      rigid.wakeUp();
+      rigid.setLinvel({
+        x: clamp((Number(curVel?.x) || 0) + addVx, -102, 102),
+        y: clamp(Math.max(Number(curVel?.y) || 0, 0) + addVy, 6.5, 80),
+        z: clamp((Number(curVel?.z) || 0) + addVz, -102, 102),
+      }, true);
+      const spin = clamp(maxSpin * falloff * massBoost, 1.2, 12.8);
+      rigid.setAngvel({
+        x: (dirZ >= 0 ? 1 : -1) * spin * 0.76,
+        y: (dirX >= 0 ? 1 : -1) * spin * 0.58,
+        z: (dirX >= 0 ? -1 : 1) * spin * 0.72,
+      }, true);
+
+      ctx.events.emit("vehicle:launched", {
+        vehicleId: entry.id,
+        vehicleKind: entry.tuning.kind,
+        driverId: entry.driverId,
+        x: body.x,
+        y: body.y,
+        z: body.z,
+        vx: addVx,
+        vy: addVy,
+        vz: addVz,
+        now,
+      });
+      launched.push({
+        vehicleId: entry.id,
+        driverId: entry.driverId,
+        vy: addVy,
+        speed: Math.hypot(addVx, addVy, addVz),
+      });
+    }
+    return launched;
+  }
+
   Object.assign(vehicles, {
     enterDistance: ENTER_DISTANCE,
     interact,
@@ -1403,6 +1478,7 @@ export async function setup(ctx) {
     exit,
     setInput,
     tickPhysics,
+    applyBlastImpulse,
     isDriving,
     driverId,
     stateFor,

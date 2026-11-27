@@ -80,6 +80,7 @@ export async function setup(ctx) {
   let lastZone = null;
   let lastZoneWarningAt = 0;
   let lastBunkerPrompt = null;
+  let lastCannonRangeAnnounceAt = -Infinity;
   const lastBotKillfeedByKiller = new Map();
 
   function updateLiveMode() {
@@ -299,6 +300,7 @@ export async function setup(ctx) {
         "electro-rifle": "Электрический автомат-шокер",
         marksman: "Винтовка",
         sniper: "Снайперка",
+        cannon: "Пушка Смертонос. Тяжёлая — присядь для упора",
         pistol: "Пистолет",
       };
       announce(names[payload.weaponId] ?? "Пистолет", { interrupt: true });
@@ -307,13 +309,14 @@ export async function setup(ctx) {
     if (
       packet.event === "weapon:unlocked"
       && payload.entityId === network.playerId
-      && (payload.weaponId === "rifle" || payload.weaponId === "electro-rifle" || payload.weaponId === "marksman" || payload.weaponId === "sniper")
+      && (payload.weaponId === "rifle" || payload.weaponId === "electro-rifle" || payload.weaponId === "marksman" || payload.weaponId === "sniper" || payload.weaponId === "cannon")
     ) {
       const unlockNames = {
         rifle: mode === "battle-royale" ? "Подобран автомат" : "Открыт автомат",
         "electro-rifle": "Получен электрический автомат-шокер",
         marksman: mode === "battle-royale" ? "Получена винтовка" : "Открыта винтовка",
         sniper: mode === "battle-royale" ? "Получена снайперка" : "Открыта снайперка",
+        cannon: "Получена эксклюзивная пушка Смертонос! Пять режимов, дальность 700 метров",
       };
       announce(unlockNames[payload.weaponId], { interrupt: false });
     }
@@ -425,7 +428,7 @@ export async function setup(ctx) {
       if (packet.event === "special:electro-equipped") {
         if (payload.entityId === network.playerId) {
           announce(
-            "Костюм «Электрический Лукашенко» надет! 800 здоровья, 800 брони, встроенный стимулятор, электрический автомат-шокер и мини-ядерка!",
+            "Костюм «Электрический Лукашенко» надет! 800 здоровья, 800 брони, встроенный стимулятор, электро-автомат, пушка Смертонос и мини-ядерка!",
             { interrupt: true, repeat: true },
           );
         } else {
@@ -437,6 +440,45 @@ export async function setup(ctx) {
       }
       if (packet.event === "special:electro-mode-changed" && payload.entityId === network.playerId) {
         announce(`Режим электро-автомата: ${payload.modeLabel || payload.shortLabel}`, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "special:cannon-mode-changed" && payload.entityId === network.playerId) {
+        announce(`Режим Смертоноса: ${payload.modeLabel || payload.shortLabel}`, { interrupt: true, repeat: true });
+      }
+      if (packet.event === "cannon:charge-milestone" && payload.entityId === network.playerId) {
+        const pct = Number(payload.percent) || 50;
+        announce(
+          pct >= 100 ? "Смертонос заряжен на 100%! Отпусти огонь!" : "Заряд Смертоноса 50%.",
+          { interrupt: true, repeat: true },
+        );
+      }
+      if (packet.event === "cannon:recoil-unbraced" && payload.entityId === network.playerId) {
+        announce(
+          payload.heavy
+            ? "Отдача стоя сбила тебя с ног! Присядь для упора!"
+            : "Отдача стоя отбросила тебя назад! Присядь для упора.",
+          { interrupt: false, repeat: true },
+        );
+      }
+      if (packet.event === "cannon:impact" && payload.ownerId === network.playerId) {
+        const hits = Number(payload.hitCount) || 0;
+        const cars = Number(payload.launchedVehicles) || 0;
+        const traveled = Math.round(Number(payload.traveled) || 0);
+        if (hits > 0 || cars > 0) {
+          const parts = [];
+          if (hits > 0) parts.push(`целей: ${hits}`);
+          if (cars > 0) parts.push(`машин взлетело: ${cars}`);
+          const prefix = payload.pierced ? "Сквозное пробитие" : "Разрыв ядра";
+          announce(`${prefix} (${traveled} м)! ${parts.join(", ")}.`, { interrupt: false, repeat: true });
+        } else if (!payload.pierced && traveled >= 180) {
+          const nowMs = Date.now();
+          if (nowMs - lastCannonRangeAnnounceAt >= 2200) {
+            lastCannonRangeAnnounceAt = nowMs;
+            announce(`Ядро разорвалось на ${traveled} метрах.`, { interrupt: false, repeat: true });
+          }
+        }
+      }
+      if (packet.event === "vehicle:launched" && payload.driverId === network.playerId) {
+        announce("Твою машину подбросило в воздух ударной волной!", { interrupt: true, repeat: true });
       }
       if (packet.event === "special:electro-jump") {
         const isSelf = payload.entityId === network.playerId;
@@ -491,14 +533,18 @@ export async function setup(ctx) {
         announce(payload.text, { interrupt: true, repeat: true });
       }
       if (packet.event === "nuke:launched") {
+        const radius = Math.round(Number(payload.blastRadius) || 185);
         if (payload.entityId === network.playerId && payload.text) {
           announce(payload.text, { interrupt: true, repeat: true });
         } else {
-          announce(`Тревога! ${payload.ownerName || "Противник"} запустил мини-ядерку с радиусом 86 метров!`, { interrupt: true, repeat: true });
+          announce(`Тревога! ${payload.ownerName || "Противник"} запустил мини-ядерку с радиусом ${radius} метров!`, { interrupt: true, repeat: true });
         }
       }
       if (packet.event === "nuke:detonated" && payload.ownerId === network.playerId) {
-        announce(`Взрыв мини-ядерки на 86 метров! Поражено целей: ${payload.hitCount ?? 0}.`, { interrupt: true, repeat: true });
+        const radius = Math.round(Number(payload.blastRadius) || 185);
+        const cars = Math.max(0, Number(payload.launchedVehicles) || 0);
+        const carSuffix = cars > 0 ? `, машин взлетело: ${cars}` : "";
+        announce(`Ядерный взрыв на ${radius} метров! Поражено целей: ${payload.hitCount ?? 0}${carSuffix}.`, { interrupt: true, repeat: true });
       }
       if (packet.event === "crate:airdrop-incoming" && payload.electroLukashenko) {
         announce("Сброшен особый груз «Электрический Лукашенко»! Враги уже стягиваются к нему!", { interrupt: true, repeat: true });

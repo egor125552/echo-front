@@ -248,11 +248,13 @@ export async function setup(ctx) {
     loop = false,
     foreground = false,
     offset = 0,
+    playbackRate = 1,
   } = {}) {
     const source = audioContext.createBufferSource();
     const gainNode = audioContext.createGain();
     source.buffer = buffer;
     source.loop = Boolean(loop);
+    source.playbackRate.value = Math.max(0.4, Math.min(2.2, Number(playbackRate) || 1));
     gainNode.gain.value = gain;
     source.connect(gainNode).connect(foreground ? foregroundInput : masterInput);
     trackSource(source, channel, replace);
@@ -289,6 +291,7 @@ export async function setup(ctx) {
     replace = false,
     loop = false,
     offset = 0,
+    playbackRate = 1,
   } = {}) {
     const local = localize(position);
     const attenuation = distanceAttenuation(local.distance, {
@@ -313,6 +316,7 @@ export async function setup(ctx) {
 
     source.buffer = buffer;
     source.loop = Boolean(loop);
+    source.playbackRate.value = Math.max(0.4, Math.min(2.2, Number(playbackRate) || 1));
     distanceGain.gain.value = gain * attenuation;
     occlusionGain.gain.value = 1 - occlusionAmount * 0.22;
     occlusionFilter.type = "lowpass";
@@ -384,6 +388,11 @@ export async function setup(ctx) {
         const at = audioContext.currentTime + Math.max(0.02, Number(rampSec) || 0.08);
         distanceGain.gain.linearRampToValueAtTime(currentGain * nextAttenuation, at);
       },
+      setPlaybackRate(nextRate, rampSec = 0.08) {
+        const clamped = Math.max(0.4, Math.min(2.2, Number(nextRate) || 1));
+        const at = audioContext.currentTime + Math.max(0.02, Number(rampSec) || 0.08);
+        source.playbackRate.linearRampToValueAtTime(clamped, at);
+      },
       updateOcclusion(nextAmount) {
         const normalized = clamp01(nextAmount);
         const at = audioContext.currentTime + 0.08;
@@ -433,6 +442,7 @@ export async function setup(ctx) {
       const buffer = await load(url);
       return playSpatialBuffer(buffer, position, options);
     },
+    playCenteredBuffer,
     playSpatialBuffer,
   });
 }

@@ -338,7 +338,13 @@ export async function setup(ctx) {
   const downloadFallback = document.querySelector("#journal-download-fallback");
   const clearButton = document.querySelector("#journal-clear");
   const status = document.querySelector("#journal-status");
+  const journalPanel = document.querySelector("#journal-panel");
+  const technicalTools = document.querySelector("#technical-tools");
   let lastDownloadUrl = null;
+  let lastUiRenderAt = 0;
+  let uiRefreshTimer = null;
+  let uiDirty = false;
+  let textDirty = false;
 
   let enabled = localStorage.getItem(ENABLED_KEY) !== "false";
   let startedAtPerf = performance.now();
@@ -366,11 +372,46 @@ export async function setup(ctx) {
     return entityNames.get(id) || id;
   }
 
-  function renderTextView() {
+  function isPanelVisible() {
+    if (!journalPanel) return false;
+    if (!journalPanel.open) return false;
+    if (technicalTools && !technicalTools.open) return false;
+    return true;
+  }
+
+  function renderTextView({ force = false } = {}) {
     if (!textView) return;
+    if (!force && !isPanelVisible()) {
+      textDirty = true;
+      return;
+    }
+    textDirty = false;
     const start = Math.max(0, textLines.length - MAX_VIEW_LINES);
-    textView.value = textLines.slice(start).join("\n");
-    textView.scrollTop = textView.scrollHeight;
+    const nextValue = textLines.slice(start).join("\n");
+    if (textView.value !== nextValue) {
+      textView.value = nextValue;
+      textView.scrollTop = textView.scrollHeight;
+    }
+  }
+
+  function scheduleVisibleUiSync() {
+    if (!isPanelVisible()) {
+      uiDirty = true;
+      return;
+    }
+    const now = performance.now();
+    const elapsed = now - lastUiRenderAt;
+    if (elapsed >= 1000) {
+      flushUi({ force: true });
+      return;
+    }
+    uiDirty = true;
+    if (uiRefreshTimer == null) {
+      uiRefreshTimer = setTimeout(() => {
+        uiRefreshTimer = null;
+        if (uiDirty || textDirty) flushUi();
+      }, Math.max(100, 1000 - elapsed));
+    }
   }
 
   function pushTextLine(sentence, timeMs = stamp(), { force = false } = {}) {
@@ -380,14 +421,15 @@ export async function setup(ctx) {
     if (textLines.length > MAX_STORED_TEXT_LINES) {
       textLines.splice(0, textLines.length - MAX_STORED_TEXT_LINES);
     }
-    renderTextView();
+    textDirty = true;
+    scheduleVisibleUiSync();
   }
 
   function append(record, { force = false, text = null } = {}) {
     if (!enabled && !force) return;
     lines.push(JSON.stringify(record));
     if (text) pushTextLine(text, record?.[1] ?? stamp(), { force });
-    updateUi();
+    else scheduleVisibleUiSync();
   }
 
   function resetJournal() {
@@ -412,22 +454,37 @@ export async function setup(ctx) {
       downloadFallback.hidden = true;
       downloadFallback.textContent = "";
     }
-    renderTextView();
-    updateUi();
+    flushUi({ force: true });
   }
 
-  function updateUi() {
+  function updateUi({ force = false } = {}) {
     if (enabledInput) enabledInput.checked = enabled;
     const count = Math.max(0, lines.length - 1);
     const hasAnyRecords = lines.length > 0 || textLines.length > 0;
     const hasAnyText = textLines.length > 0;
     if (downloadButton) downloadButton.disabled = !hasAnyRecords;
     if (copyButton) copyButton.disabled = !hasAnyText;
+    if (!force && !isPanelVisible()) {
+      uiDirty = true;
+      return;
+    }
+    uiDirty = false;
+    lastUiRenderAt = performance.now();
     if (status) {
-      status.textContent = enabled
+      const nextStatus = enabled
         ? `Журнал включён. Событий в тексте: ${Math.max(0, textLines.length - 1)}, записей всего: ${count}.`
         : `Журнал выключен. Сохранено событий: ${Math.max(0, textLines.length - 1)}.`;
+      if (status.textContent !== nextStatus) status.textContent = nextStatus;
     }
+  }
+
+  function flushUi({ force = false } = {}) {
+    if (uiRefreshTimer != null) {
+      clearTimeout(uiRefreshTimer);
+      uiRefreshTimer = null;
+    }
+    renderTextView({ force });
+    updateUi({ force });
   }
 
   function recordInput(input = {}) {
@@ -699,7 +756,17 @@ export async function setup(ctx) {
         text: formatJournalMarkerAsText("journal-on"),
       });
     }
-    updateUi();
+    flushUi({ force: true });
+    if (copyStatus) {
+      copyStatus.textContent = enabled ? "Запись журнала включена." : "Запись журнала выключена.";
+    }
+  });
+
+  journalPanel?.addEventListener("toggle", () => {
+    if (isPanelVisible()) flushUi({ force: true });
+  });
+  technicalTools?.addEventListener("toggle", () => {
+    if (isPanelVisible()) flushUi({ force: true });
   });
 
   copyButton?.addEventListener("click", () => { void copyTextJournal(); });
@@ -708,15 +775,18 @@ export async function setup(ctx) {
     try {
       downloadJournal().catch((error) => {
         console.error("Play journal download failed", error);
-        if (status) status.textContent = "Не удалось скачать журнал.";
+        if (copyStatus) copyStatus.textContent = "Не удалось скачать журнал.";
       });
     } catch (error) {
       console.error("Play journal download failed", error);
-      if (status) status.textContent = "Не удалось скачать журнал.";
+      if (copyStatus) copyStatus.textContent = "Не удалось скачать журнал.";
     }
   });
 
-  clearButton?.addEventListener("click", resetJournal);
+  clearButton?.addEventListener("click", () => {
+    resetJournal();
+    if (copyStatus) copyStatus.textContent = "Журнал очищен.";
+  });
 
   setInterval(() => {
     const now = performance.now();

@@ -308,7 +308,12 @@ export async function setup(ctx) {
           const input = ctx.components.get(entityId, "Input");
           if (!input) continue;
 
-          const turnSpeed = entity.bot ? BOT_TURN_SPEED : HUMAN_TURN_SPEED;
+          const weaponsComp = ctx.components.get(entityId, "Weapons");
+          const selectedWeaponId = weaponsComp?.items?.[weaponsComp.selected]?.id ?? null;
+          const holdingHeavyCannon = selectedWeaponId === "cannon" && !entity.electroJumpActive;
+
+          const baseTurnSpeed = entity.bot ? BOT_TURN_SPEED : HUMAN_TURN_SPEED;
+          const turnSpeed = holdingHeavyCannon ? baseTurnSpeed * 0.55 : baseTurnSpeed;
           let rawForward = input.forward;
           const strafeFactor = entity.bot ? 0.7 : 1;
           let rawStrafe = input.strafe * strafeFactor;
@@ -362,7 +367,8 @@ export async function setup(ctx) {
           }
 
           const inputLength = Math.hypot(rawForward, rawStrafe);
-          if (transform.crouching && input.sprint && inputLength > 0.15) {
+          const effectiveSprint = Boolean(input.sprint) && !holdingHeavyCannon;
+          if (transform.crouching && effectiveSprint && inputLength > 0.15) {
             transform.crouching = false;
             transform.inCover = false;
             transform.coverKind = null;
@@ -377,9 +383,11 @@ export async function setup(ctx) {
               now,
             });
           }
-          const baseSpeed = input.sprint ? 5.4 : (transform.crouching ? 2.15 : 3.25);
+          const baseSpeed = holdingHeavyCannon
+            ? (transform.crouching ? 1.25 : 1.85)
+            : (effectiveSprint ? 5.4 : (transform.crouching ? 2.15 : 3.25));
           const speed = Number.isFinite(transform.movementSpeed)
-            ? Math.max(0, transform.movementSpeed)
+            ? (holdingHeavyCannon ? Math.min(Math.max(0, transform.movementSpeed), baseSpeed) : Math.max(0, transform.movementSpeed))
             : baseSpeed;
           const scale = inputLength > 1 ? 1 / inputLength : 1;
           const forward = rawForward * scale;

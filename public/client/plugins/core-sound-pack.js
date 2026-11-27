@@ -3,6 +3,7 @@ const SOUNDS = {
   "weapon.rifle": "/assets/audio/core/automatic-shot.mp3",
   "weapon.marksman": "/assets/aistudio/single-shot-m-1-rifle_c09ae09f.mp3",
   "weapon.sniper": "/assets/aistudio/precise-booming-shot-from-a-short-barreled-weapon_4606b104.mp3",
+  "weapon.cannon": "/assets/aistudio/shot-from-an-antique-gun_1f6e6664.mp3",
   "footstep.forest.1": "/assets/audio/footsteps/forest/forest-step-1.mp3",
   "footstep.forest.2": "/assets/audio/footsteps/forest/forest-step-2.mp3",
   "footstep.forest.3": "/assets/audio/footsteps/forest/forest-step-3.mp3",
@@ -16,6 +17,8 @@ const SOUNDS = {
   "death.full": "/assets/audio/core/death-full.mp3",
   "bomb.nuke": "/assets/aistudio/dropped-a-bomb-and-it-exploded_188d696e.mp3",
   "bomb.mine": "/assets/aistudio/bomb-drop-and-explosion_424c5b6a.mp3",
+  "cannon.impact": "/assets/aistudio/bomb-drop-and-explosion_424c5b6a.mp3",
+  "cannon.pierce": "/assets/aistudio/bomb-drop-and-explosion_424c5b6a.mp3",
 };
 
 function numbered(prefix, count) {
@@ -69,8 +72,11 @@ export const SPATIAL_SOUND_PROFILES = {
   "weapon.rifle": { gain: 1.05, referenceDistance: 3, rolloffFactor: 0.28, airAbsorptionMinHz: 2800 },
   "weapon.marksman": { gain: 1.12, referenceDistance: 4, rolloffFactor: 0.24, airAbsorptionMinHz: 2600 },
   "weapon.sniper": { gain: 1.25, referenceDistance: 5.5, rolloffFactor: 0.19, airAbsorptionMinHz: 2200 },
-  "bomb.nuke": { gain: 1.4, referenceDistance: 4.5, rolloffFactor: 0.16, airAbsorptionMinHz: 1800 },
-  "bomb.mine": { gain: 1.25, referenceDistance: 8, rolloffFactor: 0.22, airAbsorptionMinHz: 2100 },
+  "weapon.cannon": { gain: 1.55, referenceDistance: 36, rolloffFactor: 0.075, airAbsorptionMinHz: 1100 },
+  "cannon.impact": { gain: 1.38, referenceDistance: 58, rolloffFactor: 0.048, airAbsorptionMinHz: 850 },
+  "cannon.pierce": { gain: 1.32, referenceDistance: 48, rolloffFactor: 0.055, airAbsorptionMinHz: 1100 },
+  "bomb.nuke": { gain: 1.65, referenceDistance: 85, rolloffFactor: 0.028, airAbsorptionMinHz: 680 },
+  "bomb.mine": { gain: 1.25, referenceDistance: 12, rolloffFactor: 0.18, airAbsorptionMinHz: 1900 },
   default: { gain: 1, referenceDistance: 2, rolloffFactor: 0.5, airAbsorptionMinHz: 4200 },
 };
 
@@ -80,6 +86,7 @@ const WEAPON_SOUND_KEYS = Object.freeze({
   "electro-rifle": "weapon.rifle",
   marksman: "weapon.marksman",
   sniper: "weapon.sniper",
+  cannon: "weapon.cannon",
 });
 
 const WEAPON_HOLD_INTERVAL_MS = Object.freeze({
@@ -187,8 +194,434 @@ export async function setup(ctx) {
   let humanThreatPingBuffer = null;
   let humanPresenceBlipBuffer = null;
   let humanFriendPingBuffer = null;
+  let cannonballRoarBuffer = null;
+  let cannonLaunchPunchBuffer = null;
+  let cannonImpactBuffer = null;
+  let cannonPierceBuffer = null;
+  const cannonballLoops = new Map();
+  let cannonChargeNodes = null;
+  let lastCannonImpactAudioAt = -Infinity;
   const lastHumanThreatPingAt = new Map();
   const lastHumanPresenceAt = new Map();
+
+  function createCannonballRoarBuffer(audioContext) {
+    const sampleRate = Math.max(8000, Number(audioContext?.sampleRate) || 44100);
+    const duration = 1.6;
+    const length = Math.max(1, Math.floor(sampleRate * duration));
+    const buffer = audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    // Generate extra tail for seamless crossfade across the loop seam
+    const fadeLen = Math.min(Math.floor(sampleRate * 0.14), Math.floor(length / 4));
+    const totalLen = length + fadeLen;
+    const raw = new Float32Array(totalLen);
+    let lpSub = 0;
+    let lpBody = 0;
+    let lpAir = 0;
+    // Exact integer cycle counts over 1.6s so tonal/modulation layers loop with zero clicks
+    const fSub = 80 / duration;
+    const fLow = 124 / duration;
+    const fMid = 184 / duration;
+    const fChop1 = 15 / duration;
+    const fChop2 = 30 / duration;
+    for (let i = 0; i < totalLen; i += 1) {
+      const t = i / sampleRate;
+      const white = Math.random() * 2 - 1;
+      // Multi-band turbulent wind & air-displacement roar (heavy low-mid body, no high mosquito squeak)
+      lpSub = lpSub * 0.986 + white * 0.014;
+      lpBody = lpBody * 0.945 + white * 0.055;
+      lpAir = lpAir * 0.84 + white * 0.16;
+      const bandMid = lpBody - lpSub;
+      const bandAir = lpAir - lpBody;
+      const rumble = Math.sin(2 * Math.PI * fSub * t) * 0.34
+        + Math.sin(2 * Math.PI * fLow * t) * 0.28
+        + Math.sin(2 * Math.PI * fMid * t) * 0.14;
+      const spinChop = 0.76 + 0.16 * Math.sin(2 * Math.PI * fChop1 * t) + 0.08 * Math.sin(2 * Math.PI * fChop2 * t);
+      const turbulent = lpSub * 3.6 + bandMid * 2.5 + bandAir * 0.72;
+      const mixed = (rumble * 0.65 + turbulent * 0.95) * spinChop;
+      raw[i] = Math.tanh(mixed * 1.45) * 0.86;
+    }
+    for (let i = 0; i < length; i += 1) {
+      if (i < fadeLen) {
+        const w = 0.5 - 0.5 * Math.cos((Math.PI * i) / fadeLen);
+        data[i] = raw[i] * w + raw[length + i] * (1 - w);
+      } else {
+        data[i] = raw[i];
+      }
+    }
+    return buffer;
+  }
+
+  function createCannonLaunchPunchBuffer(audioContext) {
+    const sampleRate = Math.max(8000, Number(audioContext?.sampleRate) || 44100);
+    const duration = 0.95;
+    const length = Math.max(1, Math.floor(sampleRate * duration));
+    const buffer = audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    let phaseSub = 0;
+    let phaseCrack = 0;
+    let lpNoise = 0;
+    let lpSubNoise = 0;
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate;
+      // Seismic sub-drop: 96 Hz -> 27 Hz
+      const subFreq = 27 + 69 * Math.exp(-t * 10.5);
+      phaseSub += (2 * Math.PI * subFreq) / sampleRate;
+      const subEnv = Math.min(1, t / 0.005) * Math.exp(-t * 3.8);
+      const subWave = Math.sin(phaseSub) * subEnv * 0.95;
+
+      // Cast-iron breech slam & pressure transient (first 60ms)
+      const crackFreq = 46 + 150 * Math.exp(-t * 48);
+      phaseCrack += (2 * Math.PI * crackFreq) / sampleRate;
+      const crackEnv = Math.min(1, t / 0.002) * Math.exp(-t * 28);
+      const ironRing = (Math.sin(2 * Math.PI * 138 * t) * 0.45 + Math.sin(2 * Math.PI * 214 * t) * 0.25)
+        * Math.exp(-t * 14);
+
+      // Pressurized blast roar
+      const white = Math.random() * 2 - 1;
+      lpNoise = lpNoise * 0.91 + white * 0.09;
+      lpSubNoise = lpSubNoise * 0.975 + white * 0.025;
+      const blastEnv = Math.min(1, t / 0.004) * Math.exp(-t * 4.6);
+      const blast = (lpNoise * 1.9 + lpSubNoise * 2.8) * blastEnv;
+
+      const tailFade = t > duration - 0.08 ? Math.max(0, (duration - t) / 0.08) : 1;
+      const sample = (subWave + Math.sin(phaseCrack) * crackEnv * 0.65 + ironRing * 0.35 + blast * 0.78) * tailFade;
+      data[i] = Math.tanh(sample * 1.4) * 0.9;
+    }
+    return buffer;
+  }
+
+  function createCannonImpactBuffer(audioContext) {
+    const sampleRate = Math.max(8000, Number(audioContext?.sampleRate) || 44100);
+    const duration = 2.15;
+    const length = Math.max(1, Math.floor(sampleRate * duration));
+    const buffer = audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    let phaseSub = 0;
+    let lpDeep = 0;
+    let lpMid = 0;
+    let lpGravel = 0;
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate;
+      // Ground-shaking seismic shockwave (82 Hz -> 22 Hz)
+      const subFreq = 22 + 60 * Math.exp(-t * 5.8);
+      phaseSub += (2 * Math.PI * subFreq) / sampleRate;
+      const subEnv = Math.min(1, t / 0.004) * Math.exp(-t * 2.4);
+      const sub = Math.sin(phaseSub) * subEnv * 1.05;
+
+      // Dense rolling blast & distant artillery thunder tail
+      const white = Math.random() * 2 - 1;
+      lpDeep = lpDeep * 0.985 + white * 0.015;
+      lpMid = lpMid * 0.935 + white * 0.065;
+      lpGravel = lpGravel * 0.82 + white * 0.18;
+      const attackCrack = (lpGravel - lpMid) * Math.exp(-t * 22) * 2.2;
+      const blastBody = (lpMid - lpDeep) * Math.min(1, t / 0.01) * Math.exp(-t * 2.25) * 2.5;
+      const rollingThunder = lpDeep * Math.min(1, t / 0.03) * Math.exp(-t * 1.15)
+        * (0.82 + 0.18 * Math.sin(2 * Math.PI * 5.2 * t)) * 4.2;
+
+      const tailFade = t > duration - 0.18 ? Math.max(0, (duration - t) / 0.18) : 1;
+      const sample = (sub + attackCrack + blastBody + rollingThunder) * tailFade;
+      data[i] = Math.tanh(sample * 1.35) * 0.92;
+    }
+    return buffer;
+  }
+
+  function createCannonPierceBuffer(audioContext) {
+    const sampleRate = Math.max(8000, Number(audioContext?.sampleRate) || 44100);
+    const duration = 0.9;
+    const length = Math.max(1, Math.floor(sampleRate * duration));
+    const buffer = audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    let phaseThud = 0;
+    let lpLow = 0;
+    let lpMid = 0;
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate;
+      const thudFreq = 36 + 108 * Math.exp(-t * 14);
+      phaseThud += (2 * Math.PI * thudFreq) / sampleRate;
+      const thud = Math.sin(phaseThud) * Math.min(1, t / 0.002) * Math.exp(-t * 5.2) * 0.95;
+
+      // Steel/concrete tearing resonance
+      const crunchTone = (
+        Math.sin(2 * Math.PI * 285 * t) * 0.42
+        + Math.sin(2 * Math.PI * 465 * t) * 0.30
+        + Math.sin(2 * Math.PI * 710 * t) * 0.18
+      ) * Math.exp(-t * 11.5);
+
+      const white = Math.random() * 2 - 1;
+      lpLow = lpLow * 0.965 + white * 0.035;
+      lpMid = lpMid * 0.85 + white * 0.15;
+      const shred = ((lpMid - lpLow) * 2.1 * Math.exp(-t * 8.5) + lpLow * 3.1 * Math.exp(-t * 3.2));
+
+      const tailFade = t > duration - 0.1 ? Math.max(0, (duration - t) / 0.1) : 1;
+      data[i] = Math.tanh((thud + crunchTone * 0.55 + shred * 0.85) * 1.4) * 0.9 * tailFade;
+    }
+    return buffer;
+  }
+
+  function playCannonLaunchPunch(position, { isSelf = false, modeId = "standard", chargeRatio = 0 } = {}) {
+    if (!audio?.context) return;
+    cannonLaunchPunchBuffer ??= createCannonLaunchPunchBuffer(audio.context);
+    const charge = Math.max(0, Math.min(1, Number(chargeRatio) || 0));
+    const modeRate = modeId === "piercing"
+      ? 1.12
+      : modeId === "shrapnel"
+        ? 1.06
+        : modeId === "charged"
+          ? Math.max(0.76, 0.98 - charge * 0.2)
+          : 0.94;
+    if (isSelf && typeof audio.playCenteredBuffer === "function") {
+      try {
+        audio.playCenteredBuffer(cannonLaunchPunchBuffer, {
+          gain: 0.9 + charge * 0.34,
+          playbackRate: modeRate,
+          channel: "own-cannon-punch",
+        });
+      } catch {}
+      return;
+    }
+    if (position && typeof audio.playSpatialBuffer === "function") {
+      try {
+        audio.playSpatialBuffer(cannonLaunchPunchBuffer, position, {
+          radius: 920,
+          gain: 1.25 + charge * 0.4,
+          referenceDistance: 40,
+          rolloffFactor: 0.065,
+          airAbsorptionMinHz: 950,
+          playbackRate: modeRate,
+        });
+      } catch {}
+    }
+  }
+
+  let nukeShockwaveBuffer = null;
+
+  function createNukeShockwaveBuffer(audioContext) {
+    const sampleRate = Math.max(8000, Number(audioContext?.sampleRate) || 44100);
+    const duration = 4.2;
+    const length = Math.max(1, Math.floor(sampleRate * duration));
+    const buffer = audioContext.createBuffer(1, length, sampleRate);
+    const data = buffer.getChannelData(0);
+    let phaseSub = 0;
+    let phaseSub2 = 0;
+    let lpSub = 0;
+    let lpRumble = 0;
+    let lpRoar = 0;
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sampleRate;
+      // 1. Massive seismic ground-wave sweep (68 Hz -> 19 Hz)
+      const subFreq = 19 + 49 * Math.exp(-t * 2.2);
+      phaseSub += (2 * Math.PI * subFreq) / sampleRate;
+      const subEnv = Math.min(1, t / 0.008) * Math.exp(-t * 0.95);
+      const sub = Math.sin(phaseSub) * subEnv * 1.1;
+
+      // Secondary harmonic chest-thump (115 Hz -> 34 Hz)
+      const sub2Freq = 34 + 81 * Math.exp(-t * 4.5);
+      phaseSub2 += (2 * Math.PI * sub2Freq) / sampleRate;
+      const sub2 = Math.sin(phaseSub2) * Math.min(1, t / 0.005) * Math.exp(-t * 2.1) * 0.55;
+
+      // 2. Pressure front crack + expanding nuclear wall + rolling atmospheric thunder
+      const white = Math.random() * 2 - 1;
+      lpSub = lpSub * 0.992 + white * 0.008;
+      lpRumble = lpRumble * 0.962 + white * 0.038;
+      lpRoar = lpRoar * 0.86 + white * 0.14;
+
+      const flashCrack = (lpRoar - lpRumble) * Math.exp(-t * 16) * 2.1;
+      const pressureWall = (lpRumble - lpSub) * Math.min(1, t / 0.035) * Math.exp(-t * 1.05) * 3.1;
+      const thunderTail = lpSub * Math.min(1, t / 0.09) * Math.exp(-t * 0.58)
+        * (0.78 + 0.22 * Math.sin(2 * Math.PI * 2.8 * t)) * 6.4;
+
+      const tailFade = t > duration - 0.35 ? Math.max(0, (duration - t) / 0.35) : 1;
+      const sample = (sub + sub2 + flashCrack + pressureWall + thunderTail) * tailFade;
+      data[i] = Math.tanh(sample * 1.25) * 0.88;
+    }
+    return buffer;
+  }
+
+  function playNukeShockwave(payload = {}) {
+    if (!audio?.context || typeof audio.playSpatialBuffer !== "function") return;
+    nukeShockwaveBuffer ??= createNukeShockwaveBuffer(audio.context);
+    const pos = {
+      x: Number(payload.x) || 0,
+      y: Number(payload.y) || 0,
+      z: Number(payload.z) || 0,
+    };
+    const dist = Math.hypot(pos.x - selfState.x, pos.y - selfState.y, pos.z - selfState.z);
+    // Subtle speed-of-sound delay on the distant seismic arrival so faraway nukes feel massive and physical
+    const arrivalDelayMs = dist > 55 ? Math.min(550, Math.round((dist - 55) * 1.25)) : 0;
+    const fireWave = () => {
+      try {
+        audio.playSpatialBuffer(nukeShockwaveBuffer, pos, {
+          radius: 1650,
+          gain: 1.48,
+          referenceDistance: 120,
+          rolloffFactor: 0.022,
+          airAbsorptionMinHz: 520,
+          playbackRate: 0.94,
+        });
+      } catch {}
+    };
+    if (arrivalDelayMs > 0) {
+      setTimeout(fireWave, arrivalDelayMs);
+    } else {
+      fireWave();
+    }
+  }
+
+  function playCannonImpactShockwave(payload = {}) {
+    if (!audio?.context || typeof audio.playSpatialBuffer !== "function") return;
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    const rapidFollowup = now - lastCannonImpactAudioAt < 110;
+    lastCannonImpactAudioAt = now;
+
+    const pierced = Boolean(payload.pierced);
+    const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
+    const blastRadius = Math.max(12, Number(payload.blastRadius) || 50);
+    const scaleFactor = Math.max(0.75, Math.min(1.45, blastRadius / 56));
+    const buffer = pierced
+      ? (cannonPierceBuffer ??= createCannonPierceBuffer(audio.context))
+      : (cannonImpactBuffer ??= createCannonImpactBuffer(audio.context));
+    const pos = {
+      x: Number(payload.x) || 0,
+      y: Number(payload.y) || 0,
+      z: Number(payload.z) || 0,
+    };
+    const baseGain = pierced ? 1.12 : Math.min(1.52, (1.16 + charge * 0.34) * (0.88 + scaleFactor * 0.14));
+    const gain = rapidFollowup ? baseGain * 0.48 : baseGain;
+    const playbackRate = pierced
+      ? 1.04
+      : Math.max(0.68, Math.min(1.06, 1.04 - charge * 0.22 - (scaleFactor - 1) * 0.16));
+    try {
+      audio.playSpatialBuffer(buffer, pos, {
+        radius: 1250,
+        gain,
+        referenceDistance: pierced ? 54 : Math.round(68 * scaleFactor),
+        rolloffFactor: pierced ? 0.052 : 0.042,
+        airAbsorptionMinHz: 780,
+        playbackRate,
+      });
+    } catch {}
+  }
+
+  function stopAllCannonballLoops() {
+    for (const ballId of cannonballLoops.keys()) {
+      audio.stopChannel?.(`cannonball:${ballId}`);
+    }
+    cannonballLoops.clear();
+  }
+
+  function stopCannonChargeHum() {
+    if (!cannonChargeNodes) return;
+    try { cannonChargeNodes.osc1.stop(); } catch {}
+    try { cannonChargeNodes.osc2.stop(); } catch {}
+    try { cannonChargeNodes.gain.disconnect(); } catch {}
+    cannonChargeNodes = null;
+  }
+
+  function syncCannonChargeHum(charging, chargeRatio = 0) {
+    if (!charging || !audio?.context) {
+      stopCannonChargeHum();
+      return;
+    }
+    const ratio = Math.max(0, Math.min(1, Number(chargeRatio) || 0));
+    const ctxAudio = audio.context;
+    if (!cannonChargeNodes) {
+      try {
+        const osc1 = ctxAudio.createOscillator();
+        const osc2 = ctxAudio.createOscillator();
+        const gain = ctxAudio.createGain();
+        osc1.type = "sawtooth";
+        osc2.type = "triangle";
+        osc1.frequency.setValueAtTime(72, ctxAudio.currentTime);
+        osc2.frequency.setValueAtTime(144, ctxAudio.currentTime);
+        gain.gain.setValueAtTime(0.06, ctxAudio.currentTime);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctxAudio.destination);
+        osc1.start();
+        osc2.start();
+        cannonChargeNodes = { osc1, osc2, gain };
+      } catch {
+        cannonChargeNodes = null;
+        return;
+      }
+    }
+    try {
+      const nowT = ctxAudio.currentTime;
+      cannonChargeNodes.osc1.frequency.setTargetAtTime(72 + ratio * 210, nowT, 0.04);
+      cannonChargeNodes.osc2.frequency.setTargetAtTime(144 + ratio * 420, nowT, 0.04);
+      cannonChargeNodes.gain.gain.setTargetAtTime(0.07 + ratio * 0.14, nowT, 0.04);
+    } catch {}
+  }
+
+  function cannonballPlaybackRate(ball, distToSelf) {
+    const charge = Math.max(0, Math.min(1, Number(ball?.chargeRatio) || 0));
+    const modeId = String(ball?.modeId ?? "standard");
+    const baseRate = modeId === "piercing"
+      ? 1.16
+      : modeId === "shrapnel"
+        ? 1.08
+        : modeId === "charged"
+          ? Math.max(0.76, 0.96 - charge * 0.2)
+          : 0.94;
+    const doppler = 1 - Math.min(0.22, Math.max(0, distToSelf) / 1500);
+    return Math.max(0.68, Math.min(1.45, baseRate * doppler));
+  }
+
+  function syncCannonballLoops(snapshot) {
+    const balls = Array.isArray(snapshot?.cannonballs) ? snapshot.cannonballs : [];
+    if (!balls.length || !audio?.context || typeof audio.playSpatialBuffer !== "function") {
+      if (cannonballLoops.size) stopAllCannonballLoops();
+      return;
+    }
+    cannonballRoarBuffer ??= createCannonballRoarBuffer(audio.context);
+
+    // Cap active flight loops to the 3 closest balls so 7-ball shrapnel & 5-ball salvo stay dense without clipping
+    const rankedBalls = balls
+      .filter((b) => b?.id)
+      .map((ball) => {
+        const bx = Number(ball.x) || 0;
+        const by = Number(ball.y) || 0;
+        const bz = Number(ball.z) || 0;
+        const dist = Math.hypot(bx - selfState.x, by - selfState.y, bz - selfState.z);
+        return { ball, pos: { x: bx, y: by, z: bz }, dist };
+      })
+      .sort((a, b) => a.dist - b.dist)
+      .slice(0, 3);
+
+    const activeIds = new Set(rankedBalls.map((entry) => entry.ball.id));
+    for (const ballId of [...cannonballLoops.keys()]) {
+      if (!activeIds.has(ballId)) {
+        audio.stopChannel?.(`cannonball:${ballId}`);
+        cannonballLoops.delete(ballId);
+      }
+    }
+
+    const multiAtten = rankedBalls.length > 1 ? 0.8 : 1;
+    for (const { ball, pos, dist } of rankedBalls) {
+      const charge = Math.max(0, Math.min(1, Number(ball.chargeRatio) || 0));
+      const rate = cannonballPlaybackRate(ball, dist);
+      const gain = (1.16 + charge * 0.44) * multiAtten;
+      const existing = cannonballLoops.get(ball.id);
+      if (existing) {
+        try { existing.update?.(pos); } catch {}
+        try { existing.setGain?.(gain, 0.08); } catch {}
+        try { existing.setPlaybackRate?.(rate, 0.12); } catch {}
+        continue;
+      }
+      const handle = audio.playSpatialBuffer(cannonballRoarBuffer, pos, {
+        radius: 960,
+        gain,
+        referenceDistance: 38,
+        rolloffFactor: 0.07,
+        airAbsorptionMinHz: 1100,
+        playbackRate: rate,
+        loop: true,
+        channel: `cannonball:${ball.id}`,
+        replace: true,
+      });
+      if (handle) cannonballLoops.set(ball.id, handle);
+    }
+  }
 
   function ensureHumanAudioBuffers() {
     if (!audio?.context) return false;
@@ -289,6 +722,7 @@ export async function setup(ctx) {
 
   async function playOwnShot() {
     if (!selfState.alive || !selfState.weapon || !selfState.canFire) return;
+    if (selfState.weapon === "cannon") return;
     if (Number.isFinite(selfState.ammo) && selfState.ammo <= 0) return;
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (selfState.weapon === "sniper" && now - lastOwnShotAt.sniper < 1040) return;
@@ -351,8 +785,14 @@ export async function setup(ctx) {
       z: Number(self.z) || 0,
     };
     selfAcousticZone = self.acousticZone ?? "outdoor";
+    syncCannonballLoops(snapshot);
+    syncCannonChargeHum(
+      Boolean(selfState.alive && snapshot?.specialOps?.cannonCharging),
+      snapshot?.specialOps?.cannonChargeRatio ?? 0,
+    );
     if (!selfState.alive) {
       stopAutomatic();
+      stopCannonChargeHum();
       audio.stopChannel("own-weapon");
       return;
     }
@@ -455,6 +895,14 @@ export async function setup(ctx) {
       audio.stopChannel("death");
       return;
     }
+    if (packet.event === "cannon:impact") {
+      playCannonImpactShockwave(payload);
+      return;
+    }
+    if (packet.event === "nuke:detonated") {
+      playNukeShockwave(payload);
+      return;
+    }
     const url = resolveSoundUrl(payload);
     if (!url) return;
     const isFootstep = payload.key.startsWith("footstep.");
@@ -465,11 +913,20 @@ export async function setup(ctx) {
         return;
       }
       if (packet.event !== "sound:spatial") return;
-      const isBombSound = payload.key === "bomb.nuke" || payload.key === "bomb.mine";
+      const isBombSound = payload.key === "bomb.nuke"
+        || payload.key === "bomb.mine"
+        || payload.key === "cannon.impact"
+        || payload.key === "cannon.pierce";
       const offset = Number.isFinite(Number(payload.offset))
         ? Number(payload.offset)
-        : (payload.key === "bomb.mine" ? 1.45 : 0);
+        : (payload.key === "bomb.mine" ? 1.45 : (payload.key === "cannon.impact" || payload.key === "cannon.pierce" ? 1.42 : 0));
       if (payload.entityId === network.playerId && !isBombSound) {
+        if (payload.key === "weapon.cannon") {
+          const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
+          playCannonLaunchPunch(null, { isSelf: true, modeId: payload.modeId, chargeRatio: charge });
+          await audio.playCentered(url, { gain: 1.38 + charge * 0.24, channel: "own-weapon" });
+          return;
+        }
         if (Object.values(WEAPON_SOUND_KEYS).includes(payload.key)) return;
         await audio.playCentered(url, { gain: isFootstep ? 0.45 : 0.85, offset });
         return;
@@ -496,6 +953,13 @@ export async function setup(ctx) {
           z: Number(trajectory.startZ) || 0,
         }
         : { x: payload.x, y: payload.y ?? 0, z: payload.z };
+      if (payload.key === "weapon.cannon") {
+        playCannonLaunchPunch(initialPos, {
+          isSelf: false,
+          modeId: payload.modeId,
+          chargeRatio: payload.chargeRatio,
+        });
+      }
       const handle = await audio.playSpatial(url, initialPos, {
         radius: trajectory ? Math.max(payload.radius ?? 650, 1200) : (payload.radius ?? 40),
         gain: profile.gain,

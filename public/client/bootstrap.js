@@ -439,10 +439,14 @@ async function checkAudioFromClick() {
 document.querySelector("#quick-speech-test")?.addEventListener("click", () => { void checkAudioFromClick(); });
 document.querySelector("#gesture-speech-test")?.addEventListener("click", () => { void checkAudioFromClick(); });
 document.querySelector("#gesture-main-menu")?.addEventListener("click", () => {
-  document.querySelector('[data-accessible-menu="main"]')?.click();
+  const menus = host.services.has("menus") ? host.services.get("menus") : null;
+  if (menus?.openMain) menus.openMain();
+  else document.querySelector('[data-accessible-menu="main"]')?.click();
 });
 document.querySelector("#gesture-squad")?.addEventListener("click", () => {
-  document.querySelector('[data-accessible-menu="squad"]')?.click();
+  const menus = host.services.has("menus") ? host.services.get("menus") : null;
+  if (menus?.openSquadMenu) menus.openSquadMenu();
+  else document.querySelector('[data-accessible-menu="squad"]')?.click();
 });
 document.querySelector("#gesture-crouch")?.addEventListener("click", () => {
   host.services.get("input")?.triggerVirtualAction?.("crouch");
@@ -460,7 +464,9 @@ document.querySelector("#gesture-electro-jump")?.addEventListener("click", () =>
   host.services.get("input")?.triggerVirtualAction?.("electro-jump");
 });
 document.querySelector("#gesture-map")?.addEventListener("click", () => {
-  document.querySelector('[data-accessible-menu="map"]')?.click();
+  const menus = host.services.has("menus") ? host.services.get("menus") : null;
+  if (menus?.openMap) menus.openMap();
+  else document.querySelector('[data-accessible-menu="map"]')?.click();
 });
 document.querySelector("#touch-switch-to-gestures")?.addEventListener("click", () => {
   host.services.get("touch-control-settings").setMode("gestures");
@@ -470,7 +476,209 @@ document.querySelector("#gesture-buttons-mode")?.addEventListener("click", () =>
   document.querySelector("#touch-control-mode")?.focus();
 });
 
-tutorialButton?.addEventListener("click", () => start("tdm", { tutorial: true }));
+const tutorialSetupDialog = document.querySelector("#tutorial-setup-dialog");
+const tutorialSetupTitle = document.querySelector("#tutorial-setup-title");
+const tutorialSetupPrompt = document.querySelector("#tutorial-setup-prompt");
+const tutorialSetupActions = document.querySelector("#tutorial-setup-actions");
+
+let tutorialSetupOpen = false;
+let focusBeforeTutorialSetup = null;
+
+function closeTutorialSetup({ restoreFocus = true } = {}) {
+  tutorialSetupOpen = false;
+  if (tutorialSetupDialog) {
+    if (typeof tutorialSetupDialog.close === "function" && tutorialSetupDialog.open) {
+      tutorialSetupDialog.close();
+    } else {
+      tutorialSetupDialog.removeAttribute("open");
+    }
+  }
+  const previous = focusBeforeTutorialSetup;
+  focusBeforeTutorialSetup = null;
+  if (restoreFocus && previous && typeof previous.focus === "function" && previous.isConnected) {
+    try { previous.focus({ preventScroll: true }); } catch { previous.focus(); }
+  }
+}
+
+function launchTutorialWithProfile(profile) {
+  const controlProfile = host.services.has("control-profile")
+    ? host.services.get("control-profile")
+    : null;
+  controlProfile?.setProfile?.(profile, { syncTouchMode: true, announce: false });
+  closeTutorialSetup({ restoreFocus: false });
+  void start("tdm", { tutorial: true });
+}
+
+function renderTutorialSetupStep(step = "root", { speak = true } = {}) {
+  if (!tutorialSetupDialog || !tutorialSetupPrompt || !tutorialSetupActions) {
+    void start("tdm", { tutorial: true });
+    return;
+  }
+
+  const controlProfile = host.services.has("control-profile")
+    ? host.services.get("control-profile")
+    : null;
+  const speech = host.services.get("speech");
+  const detectedPad = controlProfile?.detectedGamepad ?? null;
+
+  let prompt = "";
+  let buttons = [];
+
+  if (step === "gamepad-confirm" && detectedPad) {
+    prompt = detectedPad.isPlayStation
+      ? "Добро пожаловать в обучение. Похоже, у вас подключён джойстик от PlayStation, верно? Хотите играть с ним? Вы всегда сможете сменить управление в настройках."
+      : "Добро пожаловать в обучение. Похоже, у вас подключён геймпад, верно? Хотите играть с ним? Вы всегда сможете сменить управление в настройках.";
+    buttons = [
+      {
+        label: detectedPad.isPlayStation
+          ? "Да, играть с джойстиком PlayStation"
+          : "Да, играть с геймпадом",
+        primary: true,
+        onClick: () => launchTutorialWithProfile(detectedPad.kind),
+      },
+      ...(detectedPad.isPlayStation
+        ? [{
+            label: "Нет, это обычный геймпад",
+            onClick: () => launchTutorialWithProfile("gamepad-standard"),
+          }]
+        : [{
+            label: "Это джойстик от PlayStation",
+            onClick: () => launchTutorialWithProfile("gamepad-playstation"),
+          }]),
+      {
+        label: "Выбрать другой способ управления",
+        onClick: () => renderTutorialSetupStep("choose-method"),
+      },
+      {
+        label: "Отмена",
+        onClick: () => closeTutorialSetup(),
+      },
+    ];
+  } else if (step === "screen-reader") {
+    prompt = "Вы используете скринридер. Вы играете с подключённой клавиатурой или без клавиатуры, экранными кнопками?";
+    buttons = [
+      {
+        label: "С клавиатурой",
+        primary: true,
+        onClick: () => launchTutorialWithProfile("keyboard"),
+      },
+      {
+        label: "Без клавиатуры (экранные кнопки)",
+        onClick: () => launchTutorialWithProfile("touch-buttons"),
+      },
+      {
+        label: "Назад",
+        onClick: () => renderTutorialSetupStep("choose-method"),
+      },
+    ];
+  } else if (step === "gamepad-type") {
+    prompt = "Какой у вас геймпад? Это джойстик от PlayStation или обычный геймпад?";
+    buttons = [
+      {
+        label: "Джойстик от PlayStation",
+        primary: true,
+        onClick: () => launchTutorialWithProfile("gamepad-playstation"),
+      },
+      {
+        label: "Обычный геймпад (Xbox и другие)",
+        onClick: () => launchTutorialWithProfile("gamepad-standard"),
+      },
+      {
+        label: "Назад",
+        onClick: () => renderTutorialSetupStep("choose-method"),
+      },
+    ];
+  } else {
+    prompt = "Добро пожаловать в обучение. Выберите, как вам удобнее играть: со скринридером, экранными кнопками, жестами на весь экран, с клавиатуры или на геймпаде. Способ управления можно поменять в любой момент.";
+    buttons = [
+      {
+        label: "Скринридер (VoiceOver)",
+        primary: true,
+        onClick: () => renderTutorialSetupStep("screen-reader"),
+      },
+      {
+        label: "Экранные кнопки",
+        onClick: () => launchTutorialWithProfile("touch-buttons"),
+      },
+      {
+        label: "Жесты на весь экран",
+        onClick: () => launchTutorialWithProfile("touch-gestures"),
+      },
+      {
+        label: "Клавиатура",
+        onClick: () => launchTutorialWithProfile("keyboard"),
+      },
+      {
+        label: "Геймпад",
+        onClick: () => renderTutorialSetupStep("gamepad-type"),
+      },
+      {
+        label: "Отмена",
+        onClick: () => closeTutorialSetup(),
+      },
+    ];
+  }
+
+  tutorialSetupPrompt.textContent = prompt;
+  tutorialSetupActions.textContent = "";
+  let firstButton = null;
+  for (const item of buttons) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = item.label;
+    if (item.primary) btn.className = "primary-action";
+    btn.addEventListener("click", item.onClick);
+    tutorialSetupActions.append(btn);
+    if (!firstButton) firstButton = btn;
+  }
+
+  if (speak) {
+    speech?.say?.(prompt, { interrupt: true });
+  }
+  requestAnimationFrame(() => {
+    const focusTarget = tutorialSetupTitle ?? firstButton;
+    try { focusTarget?.focus({ preventScroll: true }); } catch { focusTarget?.focus(); }
+  });
+}
+
+function openTutorialSetup() {
+  if (!tutorialSetupDialog) {
+    void start("tdm", { tutorial: true });
+    return;
+  }
+  // Unlock WebAudio and SpeechSynthesis synchronously under the button click.
+  try { void host.services.get("audio")?.resume?.(); } catch {}
+  focusBeforeTutorialSetup = document.activeElement;
+  tutorialSetupOpen = true;
+
+  if (typeof tutorialSetupDialog.showModal === "function") {
+    try {
+      if (!tutorialSetupDialog.open) tutorialSetupDialog.showModal();
+    } catch {
+      tutorialSetupDialog.setAttribute("open", "");
+    }
+  } else {
+    tutorialSetupDialog.setAttribute("open", "");
+    tutorialSetupDialog.setAttribute("aria-modal", "true");
+  }
+
+  const detectedPad = host.services.has("control-profile")
+    ? host.services.get("control-profile").detectedGamepad
+    : null;
+  renderTutorialSetupStep(detectedPad ? "gamepad-confirm" : "choose-method", { speak: true });
+}
+
+tutorialSetupDialog?.addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeTutorialSetup();
+});
+
+host.events.on("control-profile:gamepad-detected", () => {
+  if (!tutorialSetupOpen) return;
+  renderTutorialSetupStep("gamepad-confirm", { speak: true });
+});
+
+tutorialButton?.addEventListener("click", () => openTutorialSetup());
 playButton?.addEventListener("click", () => start("tdm"));
 battleRoyaleButton?.addEventListener("click", () => start("battle-royale"));
 newMatchButton?.addEventListener("click", () => startNewBattleRoyaleMatch());

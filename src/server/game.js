@@ -39,6 +39,7 @@ const FORWARDED_EVENTS = new Set([
   "vehicle:passenger-entered",
   "vehicle:passenger-exited",
   "vehicle:impact",
+  "vehicle:launched",
   "vehicle:driver-lost",
   "vehicle:despawned",
   "squad:callout",
@@ -61,6 +62,7 @@ function shouldForwardEvent(eventName) {
     || name.startsWith("bunker:")
     || name.startsWith("mine:")
     || name.startsWith("nuke:")
+    || name.startsWith("cannon:")
     || name.startsWith("tutorial:");
 }
 
