@@ -314,6 +314,446 @@
       "duration": 0.8,
       "loop": false,
       "peak": 0.3512
+    },
+    "glass-hit-4": {
+      "url": "/assets/audio/destruction/glass-hit-4.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Glass/GLASBrk_Glass Break Hit_04_MWSFX_GL.mp3",
+      "atlasId": 3263,
+      "duration": 1.08,
+      "loop": false,
+      "peak": 0.4661
+    },
+    "glass-hit-5": {
+      "url": "/assets/audio/destruction/glass-hit-5.mp3",
+      "source": "Sonniss 2015/Secret Source - 003 Jaws Of Life/JOL_0707_GlassImpact_02_COMP.mp3",
+      "atlasId": 410,
+      "duration": 2.55,
+      "loop": false,
+      "peak": 0.4277
+    },
+    "glass-hit-6": {
+      "url": "/assets/audio/destruction/glass-hit-6.mp3",
+      "source": "Sonniss 2015/Secret Source - 003 Jaws Of Life/JOL_0753_GlassImpact_07_Senn8020.mp3",
+      "atlasId": 411,
+      "duration": 2.68,
+      "loop": false,
+      "peak": 0.4339
+    },
+    "glass-hit-7": {
+      "url": "/assets/audio/destruction/glass-hit-7.mp3",
+      "source": "Sonniss 2015/Soundopolis - Glass Smash Full/Glass_Break_Pane_702T_Fienup_005.mp3",
+      "atlasId": 507,
+      "duration": 2.3,
+      "loop": false,
+      "peak": 0.447
+    },
+    "glass-rain-4": {
+      "url": "/assets/audio/destruction/glass-rain-4.mp3",
+      "source": "Sonniss 2015/Coll Anderson - Car Destruction/EFX EXT Shattered Glass Impact 10 A.mp3",
+      "atlasId": 40,
+      "duration": 4.25,
+      "loop": false,
+      "peak": 0.2913
+    },
+    "glass-rain-5": {
+      "url": "/assets/audio/destruction/glass-rain-5.mp3",
+      "source": "Sonniss 2015/Soundopolis - Glass Smash Full/Glass_Break_BeerBottle_702T_Fienup_002.mp3",
+      "atlasId": 505,
+      "duration": 3.18,
+      "loop": false,
+      "peak": 0.3033
+    },
+    "glass-rain-6": {
+      "url": "/assets/audio/destruction/glass-rain-6.mp3",
+      "source": "Sonniss 2015/Soundopolis - Glass Smash Full/Glass_Break_Vase_D50_Fienup_003.mp3",
+      "atlasId": 508,
+      "duration": 5.5,
+      "loop": false,
+      "peak": 0.2901
+    },
+    "glass-rain-7": {
+      "url": "/assets/audio/destruction/glass-rain-7.mp3",
+      "source": "Sonniss 2015/Soundopolis - Glass Smash Full/Glass_Break_ChampagneBottle_D50_Fienup_003.mp3",
+      "atlasId": 506,
+      "duration": 2.35,
+      "loop": false,
+      "peak": 0.3145
+    },
+    "glass-detail-1": {
+      "url": "/assets/audio/destruction/glass-detail-1.mp3",
+      "source": "Sonniss 2020/Nikko Barrera-Amaya - Hardwork/Lyd_SFX_3_Glass_3.mp3",
+      "atlasId": 1202,
+      "duration": 1.05,
+      "loop": false,
+      "peak": 0.2266
+    },
+    "glass-detail-2": {
+      "url": "/assets/audio/destruction/glass-detail-2.mp3",
+      "source": "Sonniss 2020/Nikko Barrera-Amaya - Hardwork/Lyd_SFX_3_Glass_3.mp3",
+      "atlasId": 1202,
+      "duration": 1.05,
+      "loop": false,
+      "peak": 0.2162
+    },
+    "glass-detail-3": {
+      "url": "/assets/audio/destruction/glass-detail-3.mp3",
+      "source": "Sonniss 2015/Soundopolis - Glass Smash Full/Glass_Break_WineBottle_702T_Fienup_004.mp3",
+      "atlasId": 509,
+      "duration": 1.65,
+      "loop": false,
+      "peak": 0.2366
+    },
+    "wood-crack-3": {
+      "url": "/assets/audio/destruction/wood-crack-3.mp3",
+      "source": "Sonniss 2024/InMotionAudio - Wood/WOODBrk_Snap09_InMotionAudio_Wood.mp3",
+      "atlasId": 3177,
+      "duration": 0.82,
+      "loop": false,
+      "peak": 0.4005
+    },
+    "wood-crack-4": {
+      "url": "/assets/audio/destruction/wood-crack-4.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Tree Crack and Fall-13_MWSFX_TJ.mp3",
+      "atlasId": 3269,
+      "duration": 2.65,
+      "loop": false,
+      "peak": 0.3993
+    },
+    "wood-crack-5": {
+      "url": "/assets/audio/destruction/wood-crack-5.mp3",
+      "source": "Sonniss 2024/DavidDumais - Explosion SFX Pack/WOODCrsh_Designed Wood Crash And Debris 13_DDUMAIS_NONE.mp3",
+      "atlasId": 3080,
+      "duration": 1.68,
+      "loop": false,
+      "peak": 0.4202
+    },
+    "wood-fall-3": {
+      "url": "/assets/audio/destruction/wood-fall-3.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Large Tree Heavy Fall-07_MWSFX_LJ.mp3",
+      "atlasId": 3268,
+      "duration": 5.75,
+      "loop": false,
+      "peak": 0.4281
+    },
+    "wood-fall-4": {
+      "url": "/assets/audio/destruction/wood-fall-4.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_rummaging through compact wood dry branches_Eneas Mentzel_Debris & Rubble_14.mp3",
+      "atlasId": 2390,
+      "duration": 3.28,
+      "loop": false,
+      "peak": 0.3244
+    },
+    "wood-fall-5": {
+      "url": "/assets/audio/destruction/wood-fall-5.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Tree Crack and Fall-13_MWSFX_TJ.mp3",
+      "atlasId": 3269,
+      "duration": 1.55,
+      "loop": false,
+      "peak": 0.3237
+    },
+    "wood-detail-1": {
+      "url": "/assets/audio/destruction/wood-detail-1.mp3",
+      "source": "Sonniss 2024/InMotionAudio - Wood/WOODBrk_Snap09_InMotionAudio_Wood.mp3",
+      "atlasId": 3177,
+      "duration": 0.67,
+      "loop": false,
+      "peak": 0.2747
+    },
+    "wood-detail-2": {
+      "url": "/assets/audio/destruction/wood-detail-2.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_sand falling on scrapwood  exterior perspective_Eneas Mentzel_Debris & Rubble_06.mp3",
+      "atlasId": 2391,
+      "duration": 2.68,
+      "loop": false,
+      "peak": 0.2543
+    },
+    "wood-detail-3": {
+      "url": "/assets/audio/destruction/wood-detail-3.mp3",
+      "source": "Sonniss 2024/Rogue Waves - Creaking Door/DOORCreak_Wooden Door, Door Slams, Impacts, 3_RogueWaves_CreakingDoor.mp3",
+      "atlasId": 3468,
+      "duration": 1.05,
+      "loop": false,
+      "peak": 0.3196
+    },
+    "stone-hit-4": {
+      "url": "/assets/audio/destruction/stone-hit-4.mp3",
+      "source": "Sonniss 2020/PMSFX - Shattering Bricks/PM_SB_DESIGNED_IMPACT_48 Impact brick rock dirt gravel designed multi LFE.mp3",
+      "atlasId": 1291,
+      "duration": 2.25,
+      "loop": false,
+      "peak": 0.4239
+    },
+    "stone-hit-5": {
+      "url": "/assets/audio/destruction/stone-hit-5.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Invader - Alien Creature/Bluezone_BC0286_invader_debris_impact_011.mp3",
+      "atlasId": 2290,
+      "duration": 0.97,
+      "loop": false,
+      "peak": 0.4149
+    },
+    "stone-hit-6": {
+      "url": "/assets/audio/destruction/stone-hit-6.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Rock Brick and Dirt/Debris Brick_RBD 02.mp3",
+      "atlasId": 257,
+      "duration": 1.19,
+      "loop": false,
+      "peak": 0.3955
+    },
+    "stone-fall-4": {
+      "url": "/assets/audio/destruction/stone-fall-4.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Annihilation - Mech/Bluezone_BC0287_annihilation_debris_falling_rock_001.mp3",
+      "atlasId": 2245,
+      "duration": 1.77,
+      "loop": false,
+      "peak": 0.3639
+    },
+    "stone-fall-5": {
+      "url": "/assets/audio/destruction/stone-fall-5.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Demolisher - Robot/Bluezone_BC0290_demolisher_debris_rubble_texture_004.mp3",
+      "atlasId": 2268,
+      "duration": 2.34,
+      "loop": false,
+      "peak": 0.3618
+    },
+    "stone-fall-6": {
+      "url": "/assets/audio/destruction/stone-fall-6.mp3",
+      "source": "Sonniss 2024/CB Sounddesign - Sci-Fi Voices Volume 02 Big Battle Robot/HQ rubble cleared Preparing for new construction.mp3",
+      "atlasId": 3056,
+      "duration": 4.7,
+      "loop": false,
+      "peak": 0.3489
+    },
+    "stone-detail-1": {
+      "url": "/assets/audio/destruction/stone-detail-1.mp3",
+      "source": "Sonniss 2020/The Sound Pack Tree - Construction & Tools/044315 - Lay Brick 15.mp3",
+      "atlasId": 2008,
+      "duration": 0.92,
+      "loop": false,
+      "peak": 0.2888
+    },
+    "stone-detail-2": {
+      "url": "/assets/audio/destruction/stone-detail-2.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Rock Brick and Dirt/Hit Rock Debris_RBD 02.mp3",
+      "atlasId": 259,
+      "duration": 1.88,
+      "loop": false,
+      "peak": 0.3121
+    },
+    "stone-detail-3": {
+      "url": "/assets/audio/destruction/stone-detail-3.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Rock Brick and Dirt/Smash Rock On Debris_RBD 04.mp3",
+      "atlasId": 261,
+      "duration": 2.7,
+      "loop": false,
+      "peak": 0.3263
+    },
+    "dust-4": {
+      "url": "/assets/audio/destruction/dust-4.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_sand falling on scrapwood  exterior perspective_Eneas Mentzel_Debris & Rubble_06.mp3",
+      "atlasId": 2391,
+      "duration": 2.69,
+      "loop": false,
+      "peak": 0.2407
+    },
+    "dust-5": {
+      "url": "/assets/audio/destruction/dust-5.mp3",
+      "source": "Sonniss 2020/Tatak Audio - Rocks and Debris/Tatak_ROCKS_Falling Heavy Dusty Debris.mp3",
+      "atlasId": 1982,
+      "duration": 3.68,
+      "loop": false,
+      "peak": 0.2683
+    },
+    "dust-6": {
+      "url": "/assets/audio/destruction/dust-6.mp3",
+      "source": "Sonniss 2020/Tatak Audio - Rocks and Debris/Tatak_ROCKS_Pebbles Dust Tumbling Rolling Debris.mp3",
+      "atlasId": 1983,
+      "duration": 4.65,
+      "loop": false,
+      "peak": 0.2572
+    },
+    "metal-hit-4": {
+      "url": "/assets/audio/destruction/metal-hit-4.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Torturing Metal/METLCrsh_Drop Fall Metal Rattle Scrap Debris_06_MWSFX_TM.mp3",
+      "atlasId": 3274,
+      "duration": 0.72,
+      "loop": false,
+      "peak": 0.3905
+    },
+    "metal-hit-5": {
+      "url": "/assets/audio/destruction/metal-hit-5.mp3",
+      "source": "Sonniss 2020/Pole Position - Car Destruction/Car_Destruction_Chassis_Impact_t36_Ext_Drop_on_Ground_Metal_Crash_Bounce_Various_MKH8060.mp3",
+      "atlasId": 1333,
+      "duration": 3.6,
+      "loop": false,
+      "peak": 0.4098
+    },
+    "metal-hit-6": {
+      "url": "/assets/audio/destruction/metal-hit-6.mp3",
+      "source": "Sonniss 2015/Coll Anderson - Car Destruction/EFX EXT Metal Impact Drop 01 A.mp3",
+      "atlasId": 38,
+      "duration": 3.2,
+      "loop": false,
+      "peak": 0.3898
+    },
+    "metal-rattle-4": {
+      "url": "/assets/audio/destruction/metal-rattle-4.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Undoing-Computer/Bouncing Metal Rattle Scrap Debris_UC 06.mp3",
+      "atlasId": 267,
+      "duration": 2.3,
+      "loop": false,
+      "peak": 0.3456
+    },
+    "metal-rattle-5": {
+      "url": "/assets/audio/destruction/metal-rattle-5.mp3",
+      "source": "Sonniss 2024/The Soundcatcher - Seismic Activities/Metal_Rails_Pack_Rumble_Rattle_Shake_Vibrate_Debris_Mkh8040_Seismic_Activities_03.mp3",
+      "atlasId": 3523,
+      "duration": 6.7,
+      "loop": false,
+      "peak": 0.3231
+    },
+    "metal-rattle-6": {
+      "url": "/assets/audio/destruction/metal-rattle-6.mp3",
+      "source": "Sonniss 2024/The Soundcatcher - Seismic Activities/Staircase_Metal_Rumble_Rattling_Vibrate_Debris_D100_Seismic_Activities_03.mp3",
+      "atlasId": 3524,
+      "duration": 7.8,
+      "loop": false,
+      "peak": 0.3321
+    },
+    "metal-rattle-7": {
+      "url": "/assets/audio/destruction/metal-rattle-7.mp3",
+      "source": "Sonniss 2020/Pole Position - The Junkyard Metal Library/Metal_Spin_Hub_Cap_Rattle_Many_MKH8060.mp3",
+      "atlasId": 1522,
+      "duration": 3.6,
+      "loop": false,
+      "peak": 0.3133
+    },
+    "metal-bend-3": {
+      "url": "/assets/audio/destruction/metal-bend-3.mp3",
+      "source": "Sonniss 2024/Pole Position - The Stormbat Hull Interaction Library/Metal - RATTLE - Shudder Constant - Geofon.mp3",
+      "atlasId": 3427,
+      "duration": 6.7,
+      "loop": false,
+      "peak": 0.3135
+    },
+    "metal-bend-4": {
+      "url": "/assets/audio/destruction/metal-bend-4.mp3",
+      "source": "Sonniss 2024/Jake Fielding - Haunted Metal Vol.3 - Cinematic Tones & Textures/DSGNRise_Tense Metallic Creaky Hits, Groan_JF_Haunted Metal Vol 3_14.mp3",
+      "atlasId": 3204,
+      "duration": 6.3,
+      "loop": false,
+      "peak": 0.3135
+    },
+    "metal-bend-5": {
+      "url": "/assets/audio/destruction/metal-bend-5.mp3",
+      "source": "Sonniss 2020/Pole Position - The Junkyard Metal Library/Metal_Creak_Van_Door_Back_and_Forth_Various_CO100k.mp3",
+      "atlasId": 1520,
+      "duration": 4.1,
+      "loop": false,
+      "peak": 0.3136
+    },
+    "metal-bend-6": {
+      "url": "/assets/audio/destruction/metal-bend-6.mp3",
+      "source": "Sonniss 2015/RDGSFX008 - The Metal Shelf/Metal Shelf Creaking 01.mp3",
+      "atlasId": 371,
+      "duration": 5.9,
+      "loop": false,
+      "peak": 0.3058
+    },
+    "metal-detail-1": {
+      "url": "/assets/audio/destruction/metal-detail-1.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Foley Session 01/Chain Metal Drop On Floor_VS 02.mp3",
+      "atlasId": 249,
+      "duration": 0.84,
+      "loop": false,
+      "peak": 0.2774
+    },
+    "metal-detail-2": {
+      "url": "/assets/audio/destruction/metal-detail-2.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Undoing-Computer/Drop Fall Metal Rattle Scrap Debris_UC 10.mp3",
+      "atlasId": 269,
+      "duration": 0.91,
+      "loop": false,
+      "peak": 0.28
+    },
+    "metal-detail-3": {
+      "url": "/assets/audio/destruction/metal-detail-3.mp3",
+      "source": "Sonniss 2020/Eiravaein Worksb - Quirboilly/Quirboilly,leather,metal,twist,contort,large,supple,lining,flimsymetal,zipper,drop,slightdistance,roomAMB,slide,lightclatter.mp3",
+      "atlasId": 1001,
+      "duration": 1.39,
+      "loop": false,
+      "peak": 0.2451
+    },
+    "metal-detail-4": {
+      "url": "/assets/audio/destruction/metal-detail-4.mp3",
+      "source": "Sonniss 2020/Eiravaein Worksb - Quirboilly/Quirboilly,leather,metal,twist,contort,small,smooth,lightmetal,drop,slightdistance,roomAMB,release,bounce,settle.mp3",
+      "atlasId": 1002,
+      "duration": 1.28,
+      "loop": false,
+      "peak": 0.2364
+    },
+    "tile-break-3": {
+      "url": "/assets/audio/destruction/tile-break-3.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMBrk_Ceramic Roof Tile Cracking_JSE_SD.mp3",
+      "atlasId": 2508,
+      "duration": 4.2,
+      "loop": false,
+      "peak": 0.375
+    },
+    "tile-break-4": {
+      "url": "/assets/audio/destruction/tile-break-4.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMBrk_Ceramic Roof Tile Cracking_JSE_SD.mp3",
+      "atlasId": 2508,
+      "duration": 3.5,
+      "loop": false,
+      "peak": 0.3677
+    },
+    "tile-fall-3": {
+      "url": "/assets/audio/destruction/tile-fall-3.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "duration": 3.8,
+      "loop": false,
+      "peak": 0.3324
+    },
+    "tile-fall-4": {
+      "url": "/assets/audio/destruction/tile-fall-4.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "duration": 4.3,
+      "loop": false,
+      "peak": 0.3237
+    },
+    "fire-low-2": {
+      "url": "/assets/audio/destruction/fire-low-2.wav",
+      "source": "Sonniss 2021-2023/Stefano Cremona - Pure Nature Ambiences/Campfire.mp3",
+      "atlasId": 2911,
+      "duration": 12.82,
+      "loop": true,
+      "peak": 0.35
+    },
+    "fire-crackle-2": {
+      "url": "/assets/audio/destruction/fire-crackle-2.wav",
+      "source": "Sonniss 2024/UberDuo - The Wood Stove Audio Prop Set/FIREMisc_Fire Crackling In A Woodstove_UberDuo_WOOD.mp3",
+      "atlasId": 3567,
+      "duration": 14.67,
+      "loop": true,
+      "peak": 0.38
+    },
+    "fire-pop-2": {
+      "url": "/assets/audio/destruction/fire-pop-2.mp3",
+      "source": "Sonniss 2024/UberDuo - The Wood Stove Audio Prop Set/FIREMisc_Fire Crackling In A Woodstove_UberDuo_WOOD.mp3",
+      "atlasId": 3567,
+      "duration": 3.4,
+      "loop": false,
+      "peak": 0.3244
+    },
+    "fire-pop-3": {
+      "url": "/assets/audio/destruction/fire-pop-3.mp3",
+      "source": "Sonniss 2021-2023/Stefano Cremona - Pure Nature Ambiences/Campfire.mp3",
+      "atlasId": 2911,
+      "duration": 3.4,
+      "loop": false,
+      "peak": 0.3232
     }
   }
 }
