@@ -460,15 +460,22 @@ export async function setup(ctx) {
     const arrivalDelayMs = dist > 55 ? Math.min(550, Math.round((dist - 55) * 1.25)) : 0;
     const fireWave = () => {
       try {
-        if (heavySounds.play("nuke", pos, { radius: 1650, gain: 0.94, referenceDistance: 120, rolloffFactor: 0.022, airAbsorptionMinHz: 700 })) return;
         nukeShockwaveBuffer ??= createNukeShockwaveBuffer(audio.context);
+        const playedRecorded = heavySounds.play("nuke", pos, {
+          radius: 1650,
+          gain: 1.04,
+          referenceDistance: 128,
+          rolloffFactor: 0.02,
+          airAbsorptionMinHz: 740,
+        });
+        // Layer a physical seismic sub-wave underneath the recorded Sonniss blast (or full synth fallback)
         audio.playSpatialBuffer(nukeShockwaveBuffer, pos, {
           radius: 1650,
-          gain: 1.48,
-          referenceDistance: 120,
+          gain: playedRecorded ? 0.44 : 1.48,
+          referenceDistance: 125,
           rolloffFactor: 0.022,
-          airAbsorptionMinHz: 520,
-          playbackRate: 0.94,
+          airAbsorptionMinHz: playedRecorded ? 240 : 520,
+          playbackRate: 0.92,
         });
       } catch {}
     };
@@ -482,28 +489,44 @@ export async function setup(ctx) {
   function playCannonImpactShockwave(payload = {}) {
     if (!audio?.context || typeof audio.playSpatialBuffer !== "function") return;
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const rapidFollowup = now - lastCannonImpactAudioAt < 110;
+    const rapidFollowup = now - lastCannonImpactAudioAt < 115;
     lastCannonImpactAudioAt = now;
 
     const pierced = Boolean(payload.pierced);
-    // The recorded contact group is already played by sound:spatial.
-    if (heavySounds.ready(pierced ? "pierce" : "impact")) return;
     const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
     const blastRadius = Math.max(12, Number(payload.blastRadius) || 50);
-    const scaleFactor = Math.max(0.75, Math.min(1.45, blastRadius / 56));
-    const buffer = pierced
-      ? (cannonPierceBuffer ??= createCannonPierceBuffer(audio.context))
-      : (cannonImpactBuffer ??= createCannonImpactBuffer(audio.context));
+    const scaleFactor = Math.max(0.75, Math.min(1.48, blastRadius / 56));
     const pos = {
       x: Number(payload.x) || 0,
       y: Number(payload.y) || 0,
       z: Number(payload.z) || 0,
     };
-    const baseGain = pierced ? 1.12 : Math.min(1.52, (1.16 + charge * 0.34) * (0.88 + scaleFactor * 0.14));
-    const gain = rapidFollowup ? baseGain * 0.48 : baseGain;
     const playbackRate = pierced
       ? 1.04
-      : Math.max(0.68, Math.min(1.06, 1.04 - charge * 0.22 - (scaleFactor - 1) * 0.16));
+      : Math.max(0.70, Math.min(1.08, 1.04 - charge * 0.2 - (scaleFactor - 1) * 0.14));
+
+    const recordedGroup = pierced ? "pierce" : "impact";
+    if (heavySounds.ready(recordedGroup)) {
+      const baseRecordedGain = pierced
+        ? 0.94
+        : Math.min(1.24, (0.86 + charge * 0.24) * (0.9 + scaleFactor * 0.12));
+      const gain = rapidFollowup ? baseRecordedGain * 0.46 : baseRecordedGain;
+      heavySounds.play(recordedGroup, pos, {
+        radius: 1250,
+        gain,
+        referenceDistance: pierced ? 54 : Math.round(70 * scaleFactor),
+        rolloffFactor: pierced ? 0.052 : 0.04,
+        airAbsorptionMinHz: 820,
+        playbackRate,
+      });
+      return;
+    }
+
+    const buffer = pierced
+      ? (cannonPierceBuffer ??= createCannonPierceBuffer(audio.context))
+      : (cannonImpactBuffer ??= createCannonImpactBuffer(audio.context));
+    const baseGain = pierced ? 1.12 : Math.min(1.52, (1.16 + charge * 0.34) * (0.88 + scaleFactor * 0.14));
+    const gain = rapidFollowup ? baseGain * 0.48 : baseGain;
     try {
       audio.playSpatialBuffer(buffer, pos, {
         radius: 1250,
@@ -972,23 +995,34 @@ export async function setup(ctx) {
           z: Number(trajectory.startZ) || 0,
         }
         : { x: payload.x, y: payload.y ?? 0, z: payload.z };
+      // cannon.impact recorded layers are driven by playCannonImpactShockwave so charge/radius/rapidFollowup ducking apply.
+      if (payload.key === "cannon.impact" && heavySounds.ready("impact")) return;
       const recordedGroup = payload.key === "weapon.cannon" ? "launch"
-        : payload.key === "cannon.impact" ? "impact"
         : payload.key === "cannon.pierce" ? "pierce" : null;
       if (recordedGroup && heavySounds.play(recordedGroup, initialPos, {
-        radius: payload.radius ?? 1200, gain: recordedGroup === "launch" ? 0.96 : 0.90,
-        playbackRate: recordedGroup === "launch" ? recordedLaunchRate(payload.modeId, Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0))) : 1,
-        referenceDistance: profile.referenceDistance, rolloffFactor: profile.rolloffFactor,
-        airAbsorptionMinHz: profile.airAbsorptionMinHz, occlusion,
+        radius: payload.radius ?? 1200,
+        gain: recordedGroup === "launch" ? 0.98 : 0.92,
+        playbackRate: recordedGroup === "launch"
+          ? recordedLaunchRate(payload.modeId, Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0)))
+          : 1.02,
+        referenceDistance: profile.referenceDistance,
+        rolloffFactor: profile.rolloffFactor,
+        airAbsorptionMinHz: profile.airAbsorptionMinHz,
+        occlusion,
       })) return;
       if (payload.key === "bomb.nuke" && trajectory && heavySounds.ready("nuke")) {
         const flight = heavySounds.buffer("nukeFlight");
         if (flight) {
-          const duration = Math.max(100, Number(trajectory.flightMs) || 2150) / 1000;
+          const duration = Math.max(0.4, (Number(trajectory.flightMs) || 2150) / 1000);
+          const naturalRate = Math.max(0.78, Math.min(1.08, flight.duration / Math.min(duration, flight.duration / 0.8)));
           const handle = audio.playSpatialBuffer(flight, initialPos, {
-            radius: Math.max(payload.radius ?? 650, 1200), gain: 0.55,
-            referenceDistance: profile.referenceDistance, rolloffFactor: profile.rolloffFactor,
-            airAbsorptionMinHz: 2200, occlusion, playbackRate: flight.duration / duration,
+            radius: Math.max(payload.radius ?? 650, 1250),
+            gain: 0.96,
+            referenceDistance: Math.max(72, profile.referenceDistance),
+            rolloffFactor: Math.min(0.032, profile.rolloffFactor),
+            airAbsorptionMinHz: 2400,
+            occlusion,
+            playbackRate: naturalRate,
           });
           if (handle) trackTrajectoryHandle(handle, trajectory);
           return;
@@ -1028,9 +1062,13 @@ export async function setup(ctx) {
         ...Object.values(SOUNDS).filter((url) => !url.includes("footsteps")),
         ...FOOTSTEP_SETS.forest.walk,
       ];
+      const destructionAudio = ctx.services.has?.("destruction-audio")
+        ? ctx.services.get("destruction-audio")
+        : null;
       const warming = Promise.allSettled([
         ...[...new Set(urls)].map((url) => audio.load(url).catch(() => null)),
         heavySounds.warm(),
+        destructionAudio?.warm?.(),
       ]);
       await Promise.race([
         warming,

@@ -215,7 +215,7 @@ export function detectNearbyCover({
   }
 
   for (const obstacle of obstacles || []) {
-    if (!obstacle) continue;
+    if (!obstacle || obstacle.destroyed) continue;
     if (obstacle.kind === "building-floor" || obstacle.kind === "building-stair" || obstacle.walkable) continue;
     const ox = finite(obstacle.x);
     const oy = finite(obstacle.y);

@@ -416,6 +416,7 @@ export async function setup(ctx) {
     if (kind === "building-door") return 0.92;
     if (kind === "building-floor") return 0.88;
     if (kind === "building-wall") return 0.82;
+    if (kind === "building-window") return 0.48;
     if (kind === "building-stair") return 0.34;
     if (kind === "world-boundary") return 0.9;
     return 0.55;
@@ -426,7 +427,8 @@ export async function setup(ctx) {
     if (!blockage || blockage.kind === "world-boundary") return blockage;
 
     const closedDoor = doors.find((door) => (
-      !door.open
+      !door.destroyed
+      && !door.open
       && Math.abs((position.y ?? 0) - (door.y ?? 0)) <= 1.6
       && Math.abs(position.x - door.x) <= 1.25
       && Math.abs(position.z - door.z) <= 1.8

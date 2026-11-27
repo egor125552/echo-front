@@ -20,6 +20,7 @@ import {
   nextElectroMode,
   submitPuzzleStep,
 } from "../../game/special-ops-arsenal.js";
+import { buildingsInBlastZone } from "../../game/building-destruction-model.js";
 
 export const manifest = {
   id: "battle-royale-special-ops",
@@ -1172,6 +1173,20 @@ export async function setup(ctx) {
                   ball.lastWallPierceTraveled = ball.traveled;
                   ball.vx *= 0.985;
                   ball.vz *= 0.985;
+                  ctx.events.emit("cannon:wall-pierce", {
+                    ownerId: ball.ownerId,
+                    colliderHandle: hit.colliderHandle ?? null,
+                    kind: hitKind,
+                    x: Number(hitX.toFixed(2)),
+                    y: Number(hitY.toFixed(2)),
+                    z: Number(hitZ.toFixed(2)),
+                    vx: Number(ball.vx.toFixed(2)),
+                    vy: Number(ball.vy.toFixed(2)),
+                    vz: Number(ball.vz.toFixed(2)),
+                    chargeRatio: ball.chargeRatio,
+                    blastRadius: 7.5,
+                    now,
+                  });
                   ctx.events.emit("sound:spatial", {
                     entityId: ball.ownerId,
                     key: "cannon.pierce",
@@ -2169,6 +2184,40 @@ export async function setup(ctx) {
     }
   }
 
+  function describeNukeBlastTargets(transform, chosenDistance) {
+    const destruction = ctx.services.has?.("building-destruction")
+      ? ctx.services.get("building-destruction")
+      : null;
+    const factory = ctx.services.has?.("building-factory")
+      ? ctx.services.get("building-factory")
+      : null;
+    const target = computeMiniNukeTarget(transform, chosenDistance, map.halfSize ?? 1000);
+    const buildings = destruction?.buildingStates?.()
+      ?? [
+        ...(factory?.list?.() ?? []).map((entry) => ({
+          id: entry.id,
+          name: entry.name,
+          stage: "intact",
+          x: (finite(entry.bounds?.minX) + finite(entry.bounds?.maxX)) / 2,
+          z: (finite(entry.bounds?.minZ) + finite(entry.bounds?.maxZ)) / 2,
+          bounds: entry.bounds,
+        })),
+        ...(map.building ? [{
+          id: String(map.building.id ?? "warehouse"),
+          name: String(map.building.name ?? "Склад"),
+          stage: "intact",
+          x: (finite(map.building.minX) + finite(map.building.maxX)) / 2,
+          z: (finite(map.building.minZ) + finite(map.building.maxZ)) / 2,
+          bounds: map.building,
+        }] : []),
+      ];
+    const hits = buildingsInBlastZone(buildings, target, MINI_NUKE_CONFIG.blastRadius);
+    const intactHits = hits.filter((b) => b.stage !== "collapsed");
+    const names = (intactHits.length ? intactHits : hits).slice(0, 3).map((b) => b.name);
+    const standingInside = Boolean(map.insideAnyBuilding?.(transform, 2));
+    return { target, hits, names, standingInside };
+  }
+
   // Mini-Nuke 2-step aim & launch
   function handleNukeAction(entityId, actionType, distanceMeters = null, now = Date.now(), delta = 1) {
     const entity = entities.get(entityId);
@@ -2197,11 +2246,16 @@ export async function setup(ctx) {
         : 2;
       const preset = MINI_NUKE_CONFIG.distances[nextIdx];
       nukeAimStates.set(entityId, { active: true, distanceIndex: nextIdx, startedAt: now });
+      const info = describeNukeBlastTargets(transform, preset.meters);
+      const targetHint = info.names.length
+        ? `В зоне взрыва: ${info.names.join(", ")}!`
+        : "Зданий в зоне взрыва нет.";
       ctx.events.emit("nuke:aiming", {
         entityId,
         distanceMeters: preset.meters,
         distanceLabel: preset.label,
-        text: `Мини-ядерка: дальность ${preset.label}. Нажми огонь или подтверди запуск!`,
+        targetBuildings: info.names,
+        text: `Мини-ядерка: дальность ${preset.label}. ${targetHint} Нажми огонь или подтверди запуск!`,
         now,
       });
       return true;
@@ -2210,11 +2264,18 @@ export async function setup(ctx) {
     if (actionType === "nuke-aim" && !currentAim?.active) {
       const preset = MINI_NUKE_CONFIG.distances[2]; // default 215m (safe outside 185m blast radius)
       nukeAimStates.set(entityId, { active: true, distanceIndex: 2, startedAt: now });
+      const info = describeNukeBlastTargets(transform, preset.meters);
+      const targetHint = info.names.length
+        ? ` В зоне взрыва: ${info.names.join(", ")}!`
+        : info.standingInside
+          ? " Сейчас точка удара далеко в лесу — смени дистанцию на 4 или 115 метров, чтобы разнести это здание!"
+          : " Зданий в зоне взрыва нет — повернись на здание или смени дистанцию.";
       ctx.events.emit("nuke:aiming", {
         entityId,
         distanceMeters: preset.meters,
         distanceLabel: preset.label,
-        text: `Выберите точку удара мини-ядеркой (радиус взрыва ${MINI_NUKE_CONFIG.blastRadius} м)! Дистанция: ${preset.label}. Повернись куда бить и нажми огонь (R2) для запуска, или смени дистанцию.`,
+        targetBuildings: info.names,
+        text: `Выберите точку удара мини-ядеркой (радиус взрыва ${MINI_NUKE_CONFIG.blastRadius} м)! Дистанция: ${preset.label}.${targetHint} Повернись куда бить и нажми огонь (R2) для запуска, или смени дистанцию.`,
         now,
       });
       return true;
@@ -2241,6 +2302,10 @@ export async function setup(ctx) {
       ? finite(transform.y)
       : Math.max(0, finite(physics?.groundHeightAt?.(preliminary.x, preliminary.z, 0), 0));
     const target = computeMiniNukeTarget(transform, chosenDistance, map.halfSize ?? 1000, groundY);
+    const launchInfo = describeNukeBlastTargets(transform, chosenDistance);
+    const launchTargetsSuffix = launchInfo.names.length
+      ? ` Накрывает: ${launchInfo.names.join(", ")}!`
+      : "";
     nukeCounts.set(entityId, count - 1);
     nukeAimStates.delete(entityId);
     nukeSerial += 1;
@@ -2291,8 +2356,9 @@ export async function setup(ctx) {
       z: nuke.z,
       distanceMeters: nuke.distanceMeters,
       blastRadius: MINI_NUKE_CONFIG.blastRadius,
+      targetBuildings: launchInfo.names,
       remaining: count - 1,
-      text: `Мини-ядерка запущена на ${Math.round(nuke.distanceMeters)} метров! Радиус поражения ${MINI_NUKE_CONFIG.blastRadius} метров — в укрытие!`,
+      text: `Мини-ядерка запущена на ${Math.round(nuke.distanceMeters)} метров!${launchTargetsSuffix} Радиус поражения ${MINI_NUKE_CONFIG.blastRadius} метров — в укрытие!`,
       now,
     });
     return true;

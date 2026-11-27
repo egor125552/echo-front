@@ -832,6 +832,49 @@ export function hapticCueForGameEvent(packet, playerId, context = {}) {
     };
   }
 
+  if (packet.event === "building:collapse") {
+    const dist = Number(context.distanceToListener);
+    const maxFeelDist = payload.stage === "collapsed" ? 260 : 120;
+    if (Number.isFinite(dist) && dist <= maxFeelDist) {
+      const proximity = Math.max(0.28, 1 - dist / maxFeelDist);
+      const isFull = payload.stage === "collapsed";
+      return {
+        kind: isFull ? "building:collapse" : "building:breach",
+        pattern: isFull ? "critical" : "impact",
+        priority: isFull ? HAPTIC_PRIORITY.HIGH : HAPTIC_PRIORITY.ACTION,
+        cooldownMs: isFull ? 280 : 180,
+        vibrate: isFull
+          ? [95, 35, Math.round(115 + proximity * 90), 30, 75]
+          : [50, 25, Math.round(65 + proximity * 55)],
+        gamepad: {
+          duration: Math.round((isFull ? 320 : 165) * Math.max(0.75, proximity)),
+          weak: Math.min(1, (isFull ? 0.88 : 0.62) * proximity),
+          strong: Math.min(1, (isFull ? 1.0 : 0.78) * proximity),
+        },
+      };
+    }
+  }
+
+  if (packet.event === "building:material" && (payload.stage === "break" || payload.stage === "collapse")) {
+    const dist = Number(context.distanceToListener);
+    if (Number.isFinite(dist) && dist <= 26) {
+      const proximity = Math.max(0.32, 1 - dist / 26);
+      const isGlass = payload.material === "glass";
+      return {
+        kind: isGlass ? "building:glass-break" : "building:wall-break",
+        pattern: "impact",
+        priority: HAPTIC_PRIORITY.ACTION,
+        cooldownMs: 130,
+        vibrate: isGlass ? 28 : [48, 22, Math.round(58 * proximity)],
+        gamepad: {
+          duration: Math.round((isGlass ? 90 : 145) * Math.max(0.75, proximity)),
+          weak: Math.min(1, (isGlass ? 0.65 : 0.72) * proximity),
+          strong: Math.min(1, (isGlass ? 0.42 : 0.84) * proximity),
+        },
+      };
+    }
+  }
+
   return null;
 }
 
@@ -1114,6 +1157,8 @@ export async function setup(ctx) {
       packet?.event === "cannon:impact"
       || packet?.event === "nuke:detonated"
       || packet?.event === "mine:detonated"
+      || packet?.event === "building:collapse"
+      || packet?.event === "building:material"
     ) {
       const ix = Number(payload.x);
       const iz = Number(payload.z);

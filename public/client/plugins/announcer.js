@@ -82,7 +82,14 @@ export async function setup(ctx) {
   let lastBunkerPrompt = null;
   let lastFireWarningAt = -Infinity;
   let lastCannonRangeAnnounceAt = -Infinity;
+  const announcedBuildingStage = new Map();
   const lastBotKillfeedByKiller = new Map();
+
+  function perfNow() {
+    return typeof performance !== "undefined" && typeof performance.now === "function"
+      ? performance.now()
+      : Date.now();
+  }
 
   function updateLiveMode() {
     live?.setAttribute("aria-live", speech.enabled ? "off" : "assertive");
@@ -112,6 +119,7 @@ export async function setup(ctx) {
     lastZone = null;
     lastZoneWarningAt = 0;
     lastFireWarningAt = -Infinity;
+    announcedBuildingStage.clear();
     if (network.tutorial) return;
     if (mode === "battle-royale") {
       announce(
@@ -154,21 +162,31 @@ export async function setup(ctx) {
         const currentLower = String(observed.location).toLowerCase();
         const previousLower = String(previous).toLowerCase();
         const stairTransition = currentLower.includes("лестниц") || previousLower.includes("лестниц");
+        const isBuildingOrRuins = (txt) => (
+          txt.includes("руин")
+          || txt.includes("разруш")
+          || txt.includes("склад")
+          || txt.includes("двухэтаж")
+          || txt.includes("хижин")
+          || txt.includes("резиденц")
+          || txt.includes("дом с припас")
+          || txt.includes("бункер")
+        );
         const important = stairTransition
-          || observed.location.startsWith("Склад")
-          || previous.startsWith("Склад");
+          || isBuildingOrRuins(currentLower)
+          || isBuildingOrRuins(previousLower);
         if (important) {
           announce(observed.location, {
-            interrupt: stairTransition,
+            interrupt: stairTransition || currentLower.includes("руин"),
             repeat: true,
           });
         }
       }
     }
-    if (self.alive && !snapshot?.spectator?.active && performance.now()-lastFireWarningAt>12000
-      && snapshot?.destruction?.fires?.some(f=>Math.hypot(f.x-self.x,f.y-(self.y??0),f.z-self.z)<4)) {
-      lastFireWarningAt=performance.now();
-      announce("Рядом пожар. Отойдите от огня.", {interrupt:false,repeat:true});
+    if (self.alive && !snapshot?.spectator?.active && perfNow() - lastFireWarningAt > 12000
+      && snapshot?.destruction?.fires?.some((f) => Math.hypot(f.x - self.x, f.y - (self.y ?? 0), f.z - self.z) < 4)) {
+      lastFireWarningAt = perfNow();
+      announce("Рядом пожар. Отойдите от огня.", { interrupt: false, repeat: true });
     }
     const bunkerPrompt = snapshot?.specialOps?.nearbyBunkerPrompt ?? null;
     if (bunkerPrompt && bunkerPrompt !== lastBunkerPrompt) {
@@ -558,6 +576,31 @@ export async function setup(ctx) {
       }
       if (packet.event === "crate:airdrop-landed" && payload.electroLukashenko) {
         announce("Груз «Электрический Лукашенко» приземлился!", { interrupt: true, repeat: true });
+      }
+      if (packet.event === "battle-royale:started") {
+        announcedBuildingStage.clear();
+      }
+      if (packet.event === "building:collapse") {
+        const isFull = payload.stage === "collapsed";
+        const buildingId = String(payload.buildingId || payload.buildingName || "building");
+        const prevStage = announcedBuildingStage.get(buildingId) ?? null;
+        const stageRank = { breached: 1, collapsed: 2 };
+        const nextRank = stageRank[payload.stage] ?? 0;
+        const prevRank = stageRank[prevStage] ?? 0;
+        const dist = lastSelf
+          ? Math.hypot((Number(payload.x) || 0) - (Number(lastSelf.x) || 0), (Number(payload.z) || 0) - (Number(lastSelf.z) || 0))
+          : 0;
+        if (nextRank > prevRank && (isFull ? dist <= 650 : dist <= 360)) {
+          announcedBuildingStage.set(buildingId, payload.stage);
+          const label = payload.buildingName || "Здание";
+          const dir = lastSelf ? zoneDirectionLabel(lastSelf, payload) : null;
+          const dirSuffix = dir && dist > 14 ? ` (${dir}, ${Math.round(dist)} м)` : "";
+          if (isFull) {
+            announce(`Обрушение! ${label} полностью рухнуло${dirSuffix}!`, { interrupt: false, repeat: true });
+          } else {
+            announce(`Пробиты стены: ${label}${dirSuffix}.`, { interrupt: false, repeat: true });
+          }
+        }
       }
       if (packet.event === "battle-royale:ended") {
         const effectiveTeam = Number(lastSelf?.team) || Number(team) || 0;

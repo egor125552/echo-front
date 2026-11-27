@@ -735,6 +735,17 @@ async function createRapierPhysics() {
     return dynamicBodyState(bodyId);
   }
 
+  function setDynamicBodyAngularVelocity(bodyId, angularVelocity = {}, wake = true) {
+    const body = dynamicBodies.get(bodyId)?.body;
+    if (!body) return null;
+    body.setAngvel({
+      x: Number(angularVelocity.x) || 0,
+      y: Number(angularVelocity.y) || 0,
+      z: Number(angularVelocity.z) || 0,
+    }, Boolean(wake));
+    return dynamicBodyState(bodyId);
+  }
+
   function dynamicBodyState(bodyId) {
     const body = dynamicBody(bodyId);
     if (!body) return null;
@@ -1064,6 +1075,7 @@ async function createRapierPhysics() {
     dynamicBodyState,
     setDynamicBodyTranslation,
     setDynamicBodyLinearVelocity,
+    setDynamicBodyAngularVelocity,
     removeDynamicBody,
     step,
     colliderInfo(colliderOrHandle) {

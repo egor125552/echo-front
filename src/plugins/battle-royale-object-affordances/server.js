@@ -142,6 +142,7 @@ export async function setup(ctx) {
     const actor = { x: finite(x), y: finite(y), z: finite(z) };
 
     const doorCandidate = (map.doors ?? [])
+      .filter((door) => !door.destroyed)
       .filter((door) => Math.abs(actor.y - finite(door.y)) <= INTERACTION_VERTICAL_TOLERANCE)
       .map((door) => ({ door, distance: doorDistance(actor, door) }))
       .filter((entry) => entry.distance <= DOOR_INTERACTION_MARGIN)
