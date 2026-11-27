@@ -1,3 +1,5 @@
+import { createHeavyWeaponSoundLayers } from "./heavy-weapon-sound-layers.js";
+
 const SOUNDS = {
   "weapon.pistol": "/assets/audio/core/pistol-shot.mp3",
   "weapon.rifle": "/assets/audio/core/automatic-shot.mp3",
@@ -185,6 +187,8 @@ export const manifest = {
 export async function setup(ctx) {
   const audio = ctx.services.get("audio");
   const network = ctx.services.get("network");
+  const heavySounds = createHeavyWeaponSoundLayers(audio);
+  void heavySounds.warm();
   let selfState = { weapon: null, ammo: null, alive: false, canFire: true, team: 0, x: 0, y: 0, z: 0 };
   let selfAcousticZone = "outdoor";
   let automaticTimer = null;
@@ -358,6 +362,13 @@ export async function setup(ctx) {
     return buffer;
   }
 
+  function recordedLaunchRate(modeId, charge) {
+    if (modeId === "piercing") return 1.12;
+    if (modeId === "shrapnel") return 1.06;
+    if (modeId === "charged") return Math.max(0.76, 0.98 - charge * 0.2);
+    return 0.94;
+  }
+
   function playCannonLaunchPunch(position, { isSelf = false, modeId = "standard", chargeRatio = 0 } = {}) {
     if (!audio?.context) return;
     cannonLaunchPunchBuffer ??= createCannonLaunchPunchBuffer(audio.context);
@@ -439,7 +450,6 @@ export async function setup(ctx) {
 
   function playNukeShockwave(payload = {}) {
     if (!audio?.context || typeof audio.playSpatialBuffer !== "function") return;
-    nukeShockwaveBuffer ??= createNukeShockwaveBuffer(audio.context);
     const pos = {
       x: Number(payload.x) || 0,
       y: Number(payload.y) || 0,
@@ -450,6 +460,8 @@ export async function setup(ctx) {
     const arrivalDelayMs = dist > 55 ? Math.min(550, Math.round((dist - 55) * 1.25)) : 0;
     const fireWave = () => {
       try {
+        if (heavySounds.play("nuke", pos, { radius: 1650, gain: 0.94, referenceDistance: 120, rolloffFactor: 0.022, airAbsorptionMinHz: 700 })) return;
+        nukeShockwaveBuffer ??= createNukeShockwaveBuffer(audio.context);
         audio.playSpatialBuffer(nukeShockwaveBuffer, pos, {
           radius: 1650,
           gain: 1.48,
@@ -474,6 +486,8 @@ export async function setup(ctx) {
     lastCannonImpactAudioAt = now;
 
     const pierced = Boolean(payload.pierced);
+    // The recorded contact group is already played by sound:spatial.
+    if (heavySounds.ready(pierced ? "pierce" : "impact")) return;
     const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
     const blastRadius = Math.max(12, Number(payload.blastRadius) || 50);
     const scaleFactor = Math.max(0.75, Math.min(1.45, blastRadius / 56));
@@ -573,7 +587,7 @@ export async function setup(ctx) {
       if (cannonballLoops.size) stopAllCannonballLoops();
       return;
     }
-    cannonballRoarBuffer ??= createCannonballRoarBuffer(audio.context);
+    if (!heavySounds.ready("cannonFlight")) cannonballRoarBuffer ??= createCannonballRoarBuffer(audio.context);
 
     // Cap active flight loops to the 3 closest balls so 7-ball shrapnel & 5-ball salvo stay dense without clipping
     const rankedBalls = balls
@@ -604,13 +618,14 @@ export async function setup(ctx) {
       const existing = cannonballLoops.get(ball.id);
       if (existing) {
         try { existing.update?.(pos); } catch {}
-        try { existing.setGain?.(gain, 0.08); } catch {}
+        try { existing.setGain?.(gain * (existing.recordedFlight ? 0.72 : 1), 0.08); } catch {}
         try { existing.setPlaybackRate?.(rate, 0.12); } catch {}
         continue;
       }
-      const handle = audio.playSpatialBuffer(cannonballRoarBuffer, pos, {
+      const recordedFlight = heavySounds.buffer("cannonFlight");
+      const handle = audio.playSpatialBuffer(recordedFlight ?? cannonballRoarBuffer, pos, {
         radius: 960,
-        gain,
+        gain: recordedFlight ? gain * 0.72 : gain,
         referenceDistance: 38,
         rolloffFactor: 0.07,
         airAbsorptionMinHz: 1100,
@@ -619,7 +634,10 @@ export async function setup(ctx) {
         channel: `cannonball:${ball.id}`,
         replace: true,
       });
-      if (handle) cannonballLoops.set(ball.id, handle);
+      if (handle) {
+        handle.recordedFlight = Boolean(recordedFlight);
+        cannonballLoops.set(ball.id, handle);
+      }
     }
   }
 
@@ -923,6 +941,7 @@ export async function setup(ctx) {
       if (payload.entityId === network.playerId && !isBombSound) {
         if (payload.key === "weapon.cannon") {
           const charge = Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0));
+          if (heavySounds.play("launch", null, { gain: 0.86 + charge * 0.12, playbackRate: recordedLaunchRate(payload.modeId, charge), channel: "own-weapon" })) return;
           playCannonLaunchPunch(null, { isSelf: true, modeId: payload.modeId, chargeRatio: charge });
           await audio.playCentered(url, { gain: 1.38 + charge * 0.24, channel: "own-weapon" });
           return;
@@ -953,6 +972,28 @@ export async function setup(ctx) {
           z: Number(trajectory.startZ) || 0,
         }
         : { x: payload.x, y: payload.y ?? 0, z: payload.z };
+      const recordedGroup = payload.key === "weapon.cannon" ? "launch"
+        : payload.key === "cannon.impact" ? "impact"
+        : payload.key === "cannon.pierce" ? "pierce" : null;
+      if (recordedGroup && heavySounds.play(recordedGroup, initialPos, {
+        radius: payload.radius ?? 1200, gain: recordedGroup === "launch" ? 0.96 : 0.90,
+        playbackRate: recordedGroup === "launch" ? recordedLaunchRate(payload.modeId, Math.max(0, Math.min(1, Number(payload.chargeRatio) || 0))) : 1,
+        referenceDistance: profile.referenceDistance, rolloffFactor: profile.rolloffFactor,
+        airAbsorptionMinHz: profile.airAbsorptionMinHz, occlusion,
+      })) return;
+      if (payload.key === "bomb.nuke" && trajectory && heavySounds.ready("nuke")) {
+        const flight = heavySounds.buffer("nukeFlight");
+        if (flight) {
+          const duration = Math.max(100, Number(trajectory.flightMs) || 2150) / 1000;
+          const handle = audio.playSpatialBuffer(flight, initialPos, {
+            radius: Math.max(payload.radius ?? 650, 1200), gain: 0.55,
+            referenceDistance: profile.referenceDistance, rolloffFactor: profile.rolloffFactor,
+            airAbsorptionMinHz: 2200, occlusion, playbackRate: flight.duration / duration,
+          });
+          if (handle) trackTrajectoryHandle(handle, trajectory);
+          return;
+        }
+      }
       if (payload.key === "weapon.cannon") {
         playCannonLaunchPunch(initialPos, {
           isSelf: false,
@@ -987,9 +1028,10 @@ export async function setup(ctx) {
         ...Object.values(SOUNDS).filter((url) => !url.includes("footsteps")),
         ...FOOTSTEP_SETS.forest.walk,
       ];
-      const warming = Promise.allSettled(
-        [...new Set(urls)].map((url) => audio.load(url).catch(() => null)),
-      );
+      const warming = Promise.allSettled([
+        ...[...new Set(urls)].map((url) => audio.load(url).catch(() => null)),
+        heavySounds.warm(),
+      ]);
       await Promise.race([
         warming,
         new Promise((resolve) => setTimeout(resolve, 4000)),

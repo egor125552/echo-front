@@ -1,0 +1,150 @@
+{
+  "formatVersion": 1,
+  "sampleRate": 48000,
+  "channels": 1,
+  "layers": {
+    "cannon-launch-crack": {
+      "url": "/assets/audio/heavy-weapons/cannon-launch-crack.mp3",
+      "atlasId": 859,
+      "source": "Sonniss 2020/Bluezone - Tank - Explosion Sound Effects/Bluezone_BC0271_tank_artillery_cannon_shot_012.mp3",
+      "durationSeconds": 3.8,
+      "peak": 0.45592,
+      "sourceStartSeconds": 0
+    },
+    "cannon-launch-body": {
+      "url": "/assets/audio/heavy-weapons/cannon-launch-body.mp3",
+      "atlasId": 1925,
+      "source": "Sonniss 2020/Stefano Cremona - Explosions/DeepExplosion02.mp3",
+      "durationSeconds": 1.759,
+      "peak": 0.23752,
+      "sourceStartSeconds": 0
+    },
+    "cannon-launch-metal": {
+      "url": "/assets/audio/heavy-weapons/cannon-launch-metal.mp3",
+      "atlasId": 808,
+      "source": "Sonniss 2020/Bluezone - Cinematic Metal Impacts/Bluezone_BC0258_cinematic_metal_anvil_impact_005.mp3",
+      "durationSeconds": 1.823,
+      "peak": 0.11406,
+      "sourceStartSeconds": 0
+    },
+    "cannon-impact-crack": {
+      "url": "/assets/audio/heavy-weapons/cannon-impact-crack.mp3",
+      "atlasId": 2274,
+      "source": "Sonniss 2021-2023/BluezoneCorp - Detonation - Explosion/Bluezone_BC0277_explosion_urban_004_02.mp3",
+      "durationSeconds": 3.9,
+      "peak": 0.39534,
+      "sourceStartSeconds": 0
+    },
+    "cannon-impact-weight": {
+      "url": "/assets/audio/heavy-weapons/cannon-impact-weight.mp3",
+      "atlasId": 2421,
+      "source": "Sonniss 2021-2023/Gladestock Studios - Naval Warfare/GS cannonball impact 005.mp3",
+      "durationSeconds": 2.908,
+      "peak": 0.28493,
+      "sourceStartSeconds": 0
+    },
+    "cannon-impact-debris": {
+      "url": "/assets/audio/heavy-weapons/cannon-impact-debris.mp3",
+      "atlasId": 2262,
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_rubble_glass_010.mp3",
+      "durationSeconds": 2.59,
+      "peak": 0.12274,
+      "sourceStartSeconds": 0
+    },
+    "cannon-pierce-contact": {
+      "url": "/assets/audio/heavy-weapons/cannon-pierce-contact.mp3",
+      "atlasId": 1633,
+      "source": "Sonniss 2020/SmartSoundFX - Impacts, Hits & Whooshes/IMPACT METAL Short Slam_03.mp3",
+      "durationSeconds": 1.4,
+      "peak": 0.36418,
+      "sourceStartSeconds": 0.1
+    },
+    "cannon-pierce-debris": {
+      "url": "/assets/audio/heavy-weapons/cannon-pierce-debris.mp3",
+      "atlasId": 2260,
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_008.mp3",
+      "durationSeconds": 2.735,
+      "peak": 0.17126,
+      "sourceStartSeconds": 0.7
+    },
+    "nuke-explosion-crack": {
+      "url": "/assets/audio/heavy-weapons/nuke-explosion-crack.mp3",
+      "atlasId": 857,
+      "source": "Sonniss 2020/Bluezone - Tank - Explosion Sound Effects/Bluezone_BC0271_explosion_outdoors_large_005.mp3",
+      "durationSeconds": 3.55,
+      "peak": 0.36465,
+      "sourceStartSeconds": 0
+    },
+    "nuke-explosion-body": {
+      "url": "/assets/audio/heavy-weapons/nuke-explosion-body.mp3",
+      "atlasId": 1924,
+      "source": "Sonniss 2020/Stefano Cremona - Explosions/BigExplosion02.mp3",
+      "durationSeconds": 14.912,
+      "peak": 0.30398,
+      "sourceStartSeconds": 0
+    },
+    "nuke-explosion-thunder": {
+      "url": "/assets/audio/heavy-weapons/nuke-explosion-thunder.mp3",
+      "atlasId": 2436,
+      "source": "Sonniss 2021-2023/InspectorJ - Essentials 01 Thunder/THUN_InsJ_Thunder_Extremely-Close_03.mp3",
+      "durationSeconds": 10.15,
+      "peak": 0.15211,
+      "sourceStartSeconds": 0.9
+    },
+    "nuke-explosion-debris": {
+      "url": "/assets/audio/heavy-weapons/nuke-explosion-debris.mp3",
+      "atlasId": 1982,
+      "source": "Sonniss 2020/Tatak Audio - Rocks and Debris/Tatak_ROCKS_Falling Heavy Dusty Debris.mp3",
+      "durationSeconds": 6.08,
+      "peak": 0.1046,
+      "sourceStartSeconds": 0.8
+    },
+    "nuke-explosion-pressure": {
+      "url": "/assets/audio/heavy-weapons/nuke-explosion-pressure.mp3",
+      "atlasId": 2829,
+      "source": "Sonniss 2021-2023/Shapeforms Audio - Sci-Fi Weapons Cyberpunk Arsenal/EXPLDsgn_Explosion Rumble Distorted_07_SFRMS_SCIWPNS.mp3",
+      "durationSeconds": 4.745,
+      "peak": 0.16149,
+      "sourceStartSeconds": 0
+    },
+    "nuke-flight": {
+      "url": "/assets/audio/heavy-weapons/nuke-flight.mp3",
+      "atlasId": 1634,
+      "source": "Sonniss 2020/SmartSoundFX - Impacts, Hits & Whooshes/WHOOSH AIR Steady Smooth_02.mp3",
+      "durationSeconds": 1.26,
+      "peak": 0.20819,
+      "sourceStartSeconds": 0
+    },
+    "cannon-flight": {
+      "url": "/assets/audio/heavy-weapons/cannon-flight.wav",
+      "atlasId": 2752,
+      "source": "Sonniss 2021-2023/Pole Position Production - The Cinematic Transformation Library/CINEMATIC - WHOOSH - Upfront Short - 2 Jet Sharp Ricochet Metallic Sliding Whipping.mp3",
+      "durationSeconds": 1.04,
+      "peak": 0.19,
+      "sourceStartSeconds": 0.2
+    }
+  },
+  "groups": {
+    "launch": [
+      "cannon-launch-crack",
+      "cannon-launch-body",
+      "cannon-launch-metal"
+    ],
+    "impact": [
+      "cannon-impact-crack",
+      "cannon-impact-weight",
+      "cannon-impact-debris"
+    ],
+    "pierce": [
+      "cannon-pierce-contact",
+      "cannon-pierce-debris"
+    ],
+    "nuke": [
+      "nuke-explosion-crack",
+      "nuke-explosion-body",
+      "nuke-explosion-thunder",
+      "nuke-explosion-debris",
+      "nuke-explosion-pressure"
+    ]
+  }
+}
