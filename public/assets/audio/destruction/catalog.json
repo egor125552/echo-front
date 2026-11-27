@@ -754,6 +754,807 @@
       "duration": 3.4,
       "loop": false,
       "peak": 0.3232
+    },
+    "window-frame-1": {
+      "url": "/assets/audio/destruction/window-frame-1.mp3",
+      "source": "Sonniss 2015/TheLibrarybyEmptySea - Gateway Part1/patio_door_wood_glass_INT_hinge_creak_open_close_08.mp3",
+      "atlasId": 563,
+      "sourceStartSeconds": 0.485,
+      "duration": 1.4,
+      "loop": false,
+      "peak": 0.2867,
+      "role": "window-frame"
+    },
+    "window-frame-2": {
+      "url": "/assets/audio/destruction/window-frame-2.mp3",
+      "source": "Sonniss 2015/Coll Anderson - House/EFX INT HOUSE Modern Window Close Crank 01.mp3",
+      "atlasId": 79,
+      "sourceStartSeconds": 26.751,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.283,
+      "role": "window-frame"
+    },
+    "window-frame-3": {
+      "url": "/assets/audio/destruction/window-frame-3.mp3",
+      "source": "Sonniss 2015/RDGSFX005 - Squeaks and Creaks_v2/SQUEAKS AND CREAKS Window Rubs 02.M.mp3",
+      "atlasId": 355,
+      "sourceStartSeconds": 16.757,
+      "duration": 1.6,
+      "loop": false,
+      "peak": 0.2841,
+      "role": "window-frame"
+    },
+    "window-frame-4": {
+      "url": "/assets/audio/destruction/window-frame-4.mp3",
+      "source": "Sonniss 2020/Ivo Vicic - Honda Accord Type S/75 Interior_front_opening_closing window_mono_position 02.mp3",
+      "atlasId": 1112,
+      "sourceStartSeconds": 10.826,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2848,
+      "role": "window-frame"
+    },
+    "window-frame-5": {
+      "url": "/assets/audio/destruction/window-frame-5.mp3",
+      "source": "Sonniss 2020/SculpTunes - HHDoors - Household Doors and furnitures/HHDoors - Window Wooden Shutter Open and close - Close Perspective XY.mp3",
+      "atlasId": 1602,
+      "sourceStartSeconds": 34.57,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.287,
+      "role": "window-frame"
+    },
+    "door-impact-1": {
+      "url": "/assets/audio/destruction/door-impact-1.mp3",
+      "source": "Sonniss 2015/Coll Anderson - House/EFX INT HOUSE DOOR Bedroom Wood O_C Close Medium 01.mp3",
+      "atlasId": 76,
+      "sourceStartSeconds": 7.626,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.3603,
+      "role": "door-impact"
+    },
+    "door-impact-2": {
+      "url": "/assets/audio/destruction/door-impact-2.mp3",
+      "source": "Sonniss 2015/Coll Anderson - House/EFX INT HOUSE DOOR Front O_C Far Soft 01.mp3",
+      "atlasId": 77,
+      "sourceStartSeconds": 7.082,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.366,
+      "role": "door-impact"
+    },
+    "door-impact-3": {
+      "url": "/assets/audio/destruction/door-impact-3.mp3",
+      "source": "Sonniss 2020/344 Audio - Practical Doors/Dungeon Door Open, Close, Locked.mp3",
+      "atlasId": 681,
+      "sourceStartSeconds": 2.629,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.3574,
+      "role": "door-impact"
+    },
+    "door-impact-4": {
+      "url": "/assets/audio/destruction/door-impact-4.mp3",
+      "source": "Sonniss 2021-2023/West Wolf - Quiet School Ambiences/DOORWood_School Classroom-Door-CD03, Old Wooden Door, Squeaky, Opening, Closing, Recorded From The Classroom_WWA_QSRT_Neumann KM184_XY_3.mp3",
+      "atlasId": 2976,
+      "sourceStartSeconds": 3.679,
+      "duration": 1.6,
+      "loop": false,
+      "peak": 0.3521,
+      "role": "door-impact"
+    },
+    "door-impact-5": {
+      "url": "/assets/audio/destruction/door-impact-5.mp3",
+      "source": "Sonniss 2024/UberDuo - The School Audio Playset/Door, heavy, classroom, open.mp3",
+      "atlasId": 3561,
+      "sourceStartSeconds": 0.122,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.356,
+      "role": "door-impact"
+    },
+    "door-hinge-1": {
+      "url": "/assets/audio/destruction/door-hinge-1.mp3",
+      "source": "Sonniss 2015/TheLibrarybyEmptySea - Gateway Part1/patio_door_wood_glass_INT_hinge_creak_open_close_08.mp3",
+      "atlasId": 563,
+      "sourceStartSeconds": 4.373,
+      "duration": 0.71,
+      "loop": false,
+      "peak": 0.2642,
+      "role": "door-hinge"
+    },
+    "door-hinge-2": {
+      "url": "/assets/audio/destruction/door-hinge-2.mp3",
+      "source": "Sonniss 2020/SculpTunes - HHDoors - Household Doors and furnitures/HHDoors -  80s wooden door - 80s city apartment door - Opening and closing - close perspective XY.mp3",
+      "atlasId": 1600,
+      "sourceStartSeconds": 26.165,
+      "duration": 1.6,
+      "loop": false,
+      "peak": 0.267,
+      "role": "door-hinge"
+    },
+    "door-hinge-3": {
+      "url": "/assets/audio/destruction/door-hinge-3.mp3",
+      "source": "Sonniss 2020/Wav Junction Sound Effects - Doors/0002_Door_Thick_Open_Close_Squeaky.mp3",
+      "atlasId": 2053,
+      "sourceStartSeconds": 11.946,
+      "duration": 1.7,
+      "loop": false,
+      "peak": 0.2685,
+      "role": "door-hinge"
+    },
+    "door-hinge-4": {
+      "url": "/assets/audio/destruction/door-hinge-4.mp3",
+      "source": "Sonniss 2021-2023/West Wolf - Quiet School Ambiences/DOORWood_School Classroom-Door-CD03, Old Wooden Door, Squeaky, Opening, Closing, Recorded From The Classroom_WWA_QSRT_Neumann KM184_XY_3.mp3",
+      "atlasId": 2976,
+      "sourceStartSeconds": 14.959,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2661,
+      "role": "door-hinge"
+    },
+    "door-hinge-5": {
+      "url": "/assets/audio/destruction/door-hinge-5.mp3",
+      "source": "Sonniss 2024/Rogue Waves - Creaking Door/DOORCreak_Wooden Door, Opening and Closing 09_RogueWaves_CreakingDoor.mp3",
+      "atlasId": 3469,
+      "sourceStartSeconds": 4.591,
+      "duration": 1.7,
+      "loop": false,
+      "peak": 0.2658,
+      "role": "door-hinge"
+    },
+    "floor-creak-1": {
+      "url": "/assets/audio/destruction/floor-creak-1.mp3",
+      "source": "Sonniss 2015/RDGSFX005 - Squeaks and Creaks_v2/SQUEAKS AND CREAKS Hardwood Floor Creaks Long 01.M.mp3",
+      "atlasId": 347,
+      "sourceStartSeconds": 24.175,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2666,
+      "role": "floor-creak"
+    },
+    "floor-creak-2": {
+      "url": "/assets/audio/destruction/floor-creak-2.mp3",
+      "source": "Sonniss 2015/RDGSFX005 - Squeaks and Creaks_v2/SQUEAKS AND CREAKS Hardwood Floor Creaks Long 01.M.mp3",
+      "atlasId": 347,
+      "sourceStartSeconds": 10.991,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2636,
+      "role": "floor-creak"
+    },
+    "floor-creak-3": {
+      "url": "/assets/audio/destruction/floor-creak-3.mp3",
+      "source": "Sonniss 2015/RDGSFX005 - Squeaks and Creaks_v2/SQUEAKS AND CREAKS Hardwood Floor Creaks Long 01.M.mp3",
+      "atlasId": 347,
+      "sourceStartSeconds": 6.794,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2663,
+      "role": "floor-creak"
+    },
+    "floor-creak-4": {
+      "url": "/assets/audio/destruction/floor-creak-4.mp3",
+      "source": "Sonniss 2015/Coll Anderson - House/EFX INT HOUSE Clean Wood Creek 01.mp3",
+      "atlasId": 75,
+      "sourceStartSeconds": 14.906,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2672,
+      "role": "floor-creak"
+    },
+    "floor-creak-5": {
+      "url": "/assets/audio/destruction/floor-creak-5.mp3",
+      "source": "Sonniss 2015/Coll Anderson - House/EFX INT HOUSE Clean Wood Creek 01.mp3",
+      "atlasId": 75,
+      "sourceStartSeconds": 21.391,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2633,
+      "role": "floor-creak"
+    },
+    "floor-break-1": {
+      "url": "/assets/audio/destruction/floor-break-1.mp3",
+      "source": "Sonniss 2020/Wav Junction Sound Effects - Tools/0005_Hammer_on_Wood.mp3",
+      "atlasId": 2077,
+      "sourceStartSeconds": 0.981,
+      "duration": 1.0,
+      "loop": false,
+      "peak": 0.3445,
+      "role": "floor-break"
+    },
+    "floor-break-2": {
+      "url": "/assets/audio/destruction/floor-break-2.mp3",
+      "source": "Sonniss 2021-2023/David Dumais Audio - Melee Weapons Sound Effects Pack 1/WOODImpt_Impact Wood 23_DDUMAIS_NONE.mp3",
+      "atlasId": 2339,
+      "sourceStartSeconds": 0,
+      "duration": 1.1,
+      "loop": false,
+      "peak": 0.3435,
+      "role": "floor-break"
+    },
+    "floor-break-3": {
+      "url": "/assets/audio/destruction/floor-break-3.mp3",
+      "source": "Sonniss 2024/InMotionAudio - Wood/WOODFric_Scrapes09_InMotionAudio_Wood.mp3",
+      "atlasId": 3178,
+      "sourceStartSeconds": 0.301,
+      "duration": 0.271,
+      "loop": false,
+      "peak": 0.3463,
+      "role": "floor-break"
+    },
+    "floor-break-4": {
+      "url": "/assets/audio/destruction/floor-break-4.mp3",
+      "source": "Sonniss 2024/InMotionAudio - Wood/WOODImpt_Drops20_InMotionAudio_Wood.mp3",
+      "atlasId": 3179,
+      "sourceStartSeconds": 0.04,
+      "duration": 0.582,
+      "loop": false,
+      "peak": 0.3398,
+      "role": "floor-break"
+    },
+    "floor-break-5": {
+      "url": "/assets/audio/destruction/floor-break-5.mp3",
+      "source": "Sonniss 2024/InMotionAudio - Wood/WOODMvmt_FoleyMovement01_InMotionAudio_Wood.mp3",
+      "atlasId": 3180,
+      "sourceStartSeconds": 1.722,
+      "duration": 1.4,
+      "loop": false,
+      "peak": 0.3416,
+      "role": "floor-break"
+    },
+    "beam-strain-1": {
+      "url": "/assets/audio/destruction/beam-strain-1.mp3",
+      "source": "Sonniss 2015/Secret Source - 001 Boat Pulley/BOAT_042-PU011_Fast_Pulley_Tension_Release_w_Wood_Creaks_Series.m4a",
+      "atlasId": 401,
+      "sourceStartSeconds": 24.05,
+      "duration": 2.5,
+      "loop": false,
+      "peak": 0.2942,
+      "role": "beam-strain"
+    },
+    "beam-strain-2": {
+      "url": "/assets/audio/destruction/beam-strain-2.mp3",
+      "source": "Sonniss 2020/Bluezone - Forest Creature Sound Effects/Bluezone_BC0269_creature_wood_texture_crack_heavy_rumble_006.mp3",
+      "atlasId": 823,
+      "sourceStartSeconds": 1.893,
+      "duration": 1.7,
+      "loop": false,
+      "peak": 0.2957,
+      "role": "beam-strain"
+    },
+    "beam-strain-3": {
+      "url": "/assets/audio/destruction/beam-strain-3.mp3",
+      "source": "Sonniss 2020/Bluezone - Nightfall - Scary Sound Effects And Ambiences/Bluezone_BC0255_texture_wood_transition_impact_003.mp3",
+      "atlasId": 842,
+      "sourceStartSeconds": 3.429,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.2953,
+      "role": "beam-strain"
+    },
+    "beam-strain-4": {
+      "url": "/assets/audio/destruction/beam-strain-4.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Forest Textures/Bluezone_BC0279_forest_tree_wood_texture_creaking_016.mp3",
+      "atlasId": 2282,
+      "sourceStartSeconds": 1.973,
+      "duration": 0.714,
+      "loop": false,
+      "peak": 0.2954,
+      "role": "beam-strain"
+    },
+    "beam-strain-5": {
+      "url": "/assets/audio/destruction/beam-strain-5.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Tree Crack and Fall-13_MWSFX_TJ.mp3",
+      "atlasId": 3269,
+      "sourceStartSeconds": 1.839,
+      "duration": 1.7,
+      "loop": false,
+      "peak": 0.2916,
+      "role": "beam-strain"
+    },
+    "beam-fall-1": {
+      "url": "/assets/audio/destruction/beam-fall-1.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Large Tree Heavy Fall-07_MWSFX_LJ.mp3",
+      "atlasId": 3268,
+      "sourceStartSeconds": 7.717,
+      "duration": 3.3,
+      "loop": false,
+      "peak": 0.3594,
+      "role": "beam-fall"
+    },
+    "beam-fall-2": {
+      "url": "/assets/audio/destruction/beam-fall-2.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Large Tree Heavy Fall-07_MWSFX_LJ.mp3",
+      "atlasId": 3268,
+      "sourceStartSeconds": 1.829,
+      "duration": 2.4,
+      "loop": false,
+      "peak": 0.3592,
+      "role": "beam-fall"
+    },
+    "beam-fall-3": {
+      "url": "/assets/audio/destruction/beam-fall-3.mp3",
+      "source": "Sonniss 2024/Mechanical Wave - Lumberjack/WOODBrk_Tree Crack and Fall-13_MWSFX_TJ.mp3",
+      "atlasId": 3269,
+      "sourceStartSeconds": 2.271,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.3566,
+      "role": "beam-fall"
+    },
+    "beam-fall-4": {
+      "url": "/assets/audio/destruction/beam-fall-4.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Forest Textures/Bluezone_BC0279_forest_wood_log_debris_falling_3_007.mp3",
+      "atlasId": 2283,
+      "sourceStartSeconds": 0.303,
+      "duration": 1.309,
+      "loop": false,
+      "peak": 0.3593,
+      "role": "beam-fall"
+    },
+    "beam-fall-5": {
+      "url": "/assets/audio/destruction/beam-fall-5.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_scrap wood falling  interior perspective_Eneas Mentzel_Debris & Rubble_05.mp3",
+      "atlasId": 2392,
+      "sourceStartSeconds": 1.669,
+      "duration": 0.956,
+      "loop": false,
+      "peak": 0.3657,
+      "role": "beam-fall"
+    },
+    "stair-hit-1": {
+      "url": "/assets/audio/destruction/stair-hit-1.mp3",
+      "source": "Sonniss 2015/Coll Anderson - Metal Plate/EFX SD Metal plate bang 01 B.M.mp3",
+      "atlasId": 83,
+      "sourceStartSeconds": 0.239,
+      "duration": 1.2,
+      "loop": false,
+      "peak": 0.3704,
+      "role": "stair-hit"
+    },
+    "stair-hit-2": {
+      "url": "/assets/audio/destruction/stair-hit-2.mp3",
+      "source": "Sonniss 2015/Coll Anderson - Metal Plate/EFX SD Metal plate thunder 01 C.M.mp3",
+      "atlasId": 87,
+      "sourceStartSeconds": 7.263,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.3706,
+      "role": "stair-hit"
+    },
+    "stair-hit-3": {
+      "url": "/assets/audio/destruction/stair-hit-3.mp3",
+      "source": "Sonniss 2015/Secret Source - 003 Jaws Of Life/JOL_0187_MetalDestruction_14_Holophone_5ch.m4a",
+      "atlasId": 408,
+      "sourceStartSeconds": 4.394,
+      "duration": 0.726,
+      "loop": false,
+      "peak": 0.3569,
+      "role": "stair-hit"
+    },
+    "stair-hit-4": {
+      "url": "/assets/audio/destruction/stair-hit-4.mp3",
+      "source": "Sonniss 2015/Secret Source - 003 Jaws Of Life/JOL_0194_MetalDestruction_15_DPA4061.mp3",
+      "atlasId": 409,
+      "sourceStartSeconds": 1.183,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.3735,
+      "role": "stair-hit"
+    },
+    "stair-hit-5": {
+      "url": "/assets/audio/destruction/stair-hit-5.mp3",
+      "source": "Sonniss 2020/Alex Lane - Resonant Rusty Door/ResonantRustyDoor_impact_hard_11.mp3",
+      "atlasId": 699,
+      "sourceStartSeconds": 0,
+      "duration": 1.4,
+      "loop": false,
+      "peak": 0.3707,
+      "role": "stair-hit"
+    },
+    "stair-rattle-1": {
+      "url": "/assets/audio/destruction/stair-rattle-1.mp3",
+      "source": "Sonniss 2020/Ivo Vicic - Industrial hall/31 Industrial hall_metal hit_close_mid field.mp3",
+      "atlasId": 1116,
+      "sourceStartSeconds": 29.167,
+      "duration": 2.5,
+      "loop": false,
+      "peak": 0.2936,
+      "role": "stair-rattle"
+    },
+    "stair-rattle-2": {
+      "url": "/assets/audio/destruction/stair-rattle-2.mp3",
+      "source": "Sonniss 2015/RDGSFX008 - The Metal Shelf/Metal Shelf Low Movement 02.mp3",
+      "atlasId": 375,
+      "sourceStartSeconds": 6.074,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.2944,
+      "role": "stair-rattle"
+    },
+    "stair-rattle-3": {
+      "url": "/assets/audio/destruction/stair-rattle-3.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Metal Movements/METLMvmt_Metal Rattle 11_JSE_MM_Mono.mp3",
+      "atlasId": 2507,
+      "sourceStartSeconds": 2.047,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.2937,
+      "role": "stair-rattle"
+    },
+    "stair-rattle-4": {
+      "url": "/assets/audio/destruction/stair-rattle-4.mp3",
+      "source": "Sonniss 2024/Pole Position - The Stormbat Hull Interaction Library/Metal - RATTLE - Shudder Constant - Geofon.mp3",
+      "atlasId": 3427,
+      "sourceStartSeconds": 12.255,
+      "duration": 2.8,
+      "loop": false,
+      "peak": 0.2945,
+      "role": "stair-rattle"
+    },
+    "stair-rattle-5": {
+      "url": "/assets/audio/destruction/stair-rattle-5.mp3",
+      "source": "Sonniss 2021-2023/SmartSoundFX - Everyday Life 01/LADDER Metal Small Rattle.mp3",
+      "atlasId": 2838,
+      "sourceStartSeconds": 0.38,
+      "duration": 2.8,
+      "loop": false,
+      "peak": 0.293,
+      "role": "stair-rattle"
+    },
+    "roof-break-1": {
+      "url": "/assets/audio/destruction/roof-break-1.mp3",
+      "source": "Sonniss 2021-2023/Pole Position Production - The Stone & Sand Library/Roof Tile - DROP - Several - Mono - 100k.mp3",
+      "atlasId": 2767,
+      "sourceStartSeconds": 5.397,
+      "duration": 1.6,
+      "loop": false,
+      "peak": 0.3592,
+      "role": "roof-break"
+    },
+    "roof-break-2": {
+      "url": "/assets/audio/destruction/roof-break-2.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMBrk_Ceramic Roof Tile Cracking_JSE_SD.mp3",
+      "atlasId": 2508,
+      "sourceStartSeconds": 11.802,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.3346,
+      "role": "roof-break"
+    },
+    "roof-break-3": {
+      "url": "/assets/audio/destruction/roof-break-3.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMBrk_Ceramic Roof Tile Cracking_JSE_SD.mp3",
+      "atlasId": 2508,
+      "sourceStartSeconds": 1.519,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.3415,
+      "role": "roof-break"
+    },
+    "roof-break-4": {
+      "url": "/assets/audio/destruction/roof-break-4.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_Smashing a ceramics tile on concrete  exterior_Eneas Mentzel_Debris & Rubble_04.mp3",
+      "atlasId": 2389,
+      "sourceStartSeconds": 0,
+      "duration": 1.4,
+      "loop": false,
+      "peak": 0.3438,
+      "role": "roof-break"
+    },
+    "roof-break-5": {
+      "url": "/assets/audio/destruction/roof-break-5.mp3",
+      "source": "Sonniss 2024/BluezoneCorp - Stone Impact/Bluezone_BC0297_stone_impact_041.mp3",
+      "atlasId": 3024,
+      "sourceStartSeconds": 0,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.3423,
+      "role": "roof-break"
+    },
+    "roof-fall-1": {
+      "url": "/assets/audio/destruction/roof-fall-1.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "sourceStartSeconds": 26.394,
+      "duration": 0.689,
+      "loop": false,
+      "peak": 0.3238,
+      "role": "roof-fall"
+    },
+    "roof-fall-2": {
+      "url": "/assets/audio/destruction/roof-fall-2.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "sourceStartSeconds": 24.191,
+      "duration": 2.5,
+      "loop": false,
+      "peak": 0.3223,
+      "role": "roof-fall"
+    },
+    "roof-fall-3": {
+      "url": "/assets/audio/destruction/roof-fall-3.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "sourceStartSeconds": 13.802,
+      "duration": 2.5,
+      "loop": false,
+      "peak": 0.3372,
+      "role": "roof-fall"
+    },
+    "roof-fall-4": {
+      "url": "/assets/audio/destruction/roof-fall-4.mp3",
+      "source": "Sonniss 2021-2023/Pole Position Production - The Stone & Sand Library/Roof Tile - DROP - Several - Mono - 100k.mp3",
+      "atlasId": 2767,
+      "sourceStartSeconds": 10.618,
+      "duration": 1.3,
+      "loop": false,
+      "peak": 0.3386,
+      "role": "roof-fall"
+    },
+    "roof-fall-5": {
+      "url": "/assets/audio/destruction/roof-fall-5.mp3",
+      "source": "Sonniss 2024/CB Sounddesign - Sci-Fi Voices Volume 02 Big Battle Robot/HQ rubble cleared Preparing for new construction.mp3",
+      "atlasId": 3056,
+      "sourceStartSeconds": 3.151,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.3218,
+      "role": "roof-fall"
+    },
+    "wall-heavy-1": {
+      "url": "/assets/audio/destruction/wall-heavy-1.mp3",
+      "source": "Sonniss 2020/PMSFX - Rocky Impacts/PM_RI_Designed_19 Rocks Impact Hit Big LFE Heavy Designed.mp3",
+      "atlasId": 1278,
+      "sourceStartSeconds": 0.101,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.4054,
+      "role": "wall-heavy"
+    },
+    "wall-heavy-2": {
+      "url": "/assets/audio/destruction/wall-heavy-2.mp3",
+      "source": "Sonniss 2020/PMSFX - Rocky Impacts/PM_RI_Designed_7 Rocks Impact Hit Big LFE Heavy Designed.mp3",
+      "atlasId": 1279,
+      "sourceStartSeconds": 0,
+      "duration": 1.4,
+      "loop": false,
+      "peak": 0.4014,
+      "role": "wall-heavy"
+    },
+    "wall-heavy-3": {
+      "url": "/assets/audio/destruction/wall-heavy-3.mp3",
+      "source": "Sonniss 2020/PMSFX - Shattering Bricks/PM_SB_DESIGNED_IMPACT_116 Impact brick rock dirt gravel designed multi LFE.mp3",
+      "atlasId": 1290,
+      "sourceStartSeconds": 0,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.4091,
+      "role": "wall-heavy"
+    },
+    "wall-heavy-4": {
+      "url": "/assets/audio/destruction/wall-heavy-4.mp3",
+      "source": "Sonniss 2020/PMSFX - Shattering Bricks/PM_SB_DESIGNED_IMPACT_48 Impact brick rock dirt gravel designed multi LFE.mp3",
+      "atlasId": 1291,
+      "sourceStartSeconds": 0,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.4041,
+      "role": "wall-heavy"
+    },
+    "wall-heavy-5": {
+      "url": "/assets/audio/destruction/wall-heavy-5.mp3",
+      "source": "Sonniss 2024/BluezoneCorp - Stone Impact/Bluezone_BC0297_stone_impact_015.mp3",
+      "atlasId": 3023,
+      "sourceStartSeconds": 0,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.4056,
+      "role": "wall-heavy"
+    },
+    "wall-rubble-1": {
+      "url": "/assets/audio/destruction/wall-rubble-1.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Rock Brick and Dirt/Scree Rock_RBD 06.mp3",
+      "atlasId": 260,
+      "sourceStartSeconds": 4.17,
+      "duration": 2.8,
+      "loop": false,
+      "peak": 0.3308,
+      "role": "wall-rubble"
+    },
+    "wall-rubble-2": {
+      "url": "/assets/audio/destruction/wall-rubble-2.mp3",
+      "source": "Sonniss 2015/Mechanical Wave - Rock Brick and Dirt/Drop Rock On Rock Debris_RBD 03.mp3",
+      "atlasId": 258,
+      "sourceStartSeconds": 2.223,
+      "duration": 0.913,
+      "loop": false,
+      "peak": 0.3312,
+      "role": "wall-rubble"
+    },
+    "wall-rubble-3": {
+      "url": "/assets/audio/destruction/wall-rubble-3.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_008.mp3",
+      "atlasId": 2260,
+      "sourceStartSeconds": 1.93,
+      "duration": 3.3,
+      "loop": false,
+      "peak": 0.3323,
+      "role": "wall-rubble"
+    },
+    "wall-rubble-4": {
+      "url": "/assets/audio/destruction/wall-rubble-4.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_rubble_008.mp3",
+      "atlasId": 2261,
+      "sourceStartSeconds": 1.599,
+      "duration": 3.2,
+      "loop": false,
+      "peak": 0.331,
+      "role": "wall-rubble"
+    },
+    "wall-rubble-5": {
+      "url": "/assets/audio/destruction/wall-rubble-5.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Demolisher - Robot/Bluezone_BC0290_demolisher_debris_rubble_texture_004.mp3",
+      "atlasId": 2268,
+      "sourceStartSeconds": 0.111,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.3334,
+      "role": "wall-rubble"
+    },
+    "wall-detail-1": {
+      "url": "/assets/audio/destruction/wall-detail-1.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/DIRTCrsh_Stone Sand Trickle Reverberant 01_JSE_SD.mp3",
+      "atlasId": 2511,
+      "sourceStartSeconds": 10.719,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.2557,
+      "role": "wall-detail"
+    },
+    "wall-detail-2": {
+      "url": "/assets/audio/destruction/wall-detail-2.mp3",
+      "source": "Sonniss 2021-2023/Pole Position Production - The Stone & Sand Library/Small Crushed Rock - DROP - Thick - Stereo.mp3",
+      "atlasId": 2768,
+      "sourceStartSeconds": 0.933,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.2574,
+      "role": "wall-detail"
+    },
+    "wall-detail-3": {
+      "url": "/assets/audio/destruction/wall-detail-3.mp3",
+      "source": "Sonniss 2020/Wav Junction Sound Effects - Rocks/0228_Single_Small_Rocks_Tumble_Cliff_004.mp3",
+      "atlasId": 2070,
+      "sourceStartSeconds": 0.127,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2544,
+      "role": "wall-detail"
+    },
+    "wall-detail-4": {
+      "url": "/assets/audio/destruction/wall-detail-4.mp3",
+      "source": "Sonniss 2020/Wav Junction Sound Effects - Rocks/0242_Single_Small_Rocks_Tumble_Cliff_018.mp3",
+      "atlasId": 2071,
+      "sourceStartSeconds": 0.501,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.2585,
+      "role": "wall-detail"
+    },
+    "wall-detail-5": {
+      "url": "/assets/audio/destruction/wall-detail-5.mp3",
+      "source": "Sonniss 2020/The Sound Pack Tree - Construction & Tools/044315 - Lay Brick 15.mp3",
+      "atlasId": 2008,
+      "sourceStartSeconds": 0.072,
+      "duration": 0.8,
+      "loop": false,
+      "peak": 0.2617,
+      "role": "wall-detail"
+    },
+    "chain-1": {
+      "url": "/assets/audio/destruction/chain-1.mp3",
+      "source": "Sonniss 2021-2023/InspectorJ - Essentials 04 Chains/CHAINImpt_InsJ_Chains_Metal_Dropping_Close_01-03.mp3",
+      "atlasId": 2445,
+      "sourceStartSeconds": 0.81,
+      "duration": 1.2,
+      "loop": false,
+      "peak": 0.2642,
+      "role": "chain"
+    },
+    "chain-2": {
+      "url": "/assets/audio/destruction/chain-2.mp3",
+      "source": "Sonniss 2021-2023/InspectorJ - Essentials 04 Chains/CHAINMvmt_InsJ_Chains_Metal_Movement_Distant_Moderate_02-01.mp3",
+      "atlasId": 2446,
+      "sourceStartSeconds": 0.879,
+      "duration": 1.5,
+      "loop": false,
+      "peak": 0.2664,
+      "role": "chain"
+    },
+    "chain-3": {
+      "url": "/assets/audio/destruction/chain-3.mp3",
+      "source": "Sonniss 2021-2023/InspectorJ - Essentials 04 Chains/CHAINMvmt_InsJ_Chains_Metal_Movement_Distant_Short_01-02.mp3",
+      "atlasId": 2447,
+      "sourceStartSeconds": 0.618,
+      "duration": 1.3,
+      "loop": false,
+      "peak": 0.2606,
+      "role": "chain"
+    },
+    "chain-4": {
+      "url": "/assets/audio/destruction/chain-4.mp3",
+      "source": "Sonniss 2021-2023/InspectorJ - Essentials 04 Chains/CHAINMvmt_InsJ_Chains_Metal_Movement_Distant_Very-Short_03-01.mp3",
+      "atlasId": 2448,
+      "sourceStartSeconds": 0.527,
+      "duration": 1.1,
+      "loop": false,
+      "peak": 0.2676,
+      "role": "chain"
+    },
+    "chain-5": {
+      "url": "/assets/audio/destruction/chain-5.mp3",
+      "source": "Sonniss 2020/Conor Bradley - Metal Chains/Dog_Chain-Hits.mp3",
+      "atlasId": 920,
+      "sourceStartSeconds": 3.429,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.2745,
+      "role": "chain"
+    },
+    "metal-structure-1": {
+      "url": "/assets/audio/destruction/metal-structure-1.mp3",
+      "source": "Sonniss 2020/Bluezone - Cinematic Metal Impacts/Bluezone_BC0258_cinematic_metal_anvil_impact_005.mp3",
+      "atlasId": 808,
+      "sourceStartSeconds": 0,
+      "duration": 2.0,
+      "loop": false,
+      "peak": 0.3631,
+      "role": "metal-structure"
+    },
+    "metal-structure-2": {
+      "url": "/assets/audio/destruction/metal-structure-2.mp3",
+      "source": "Sonniss 2020/Bluezone - Cinematic Metal Impacts/Bluezone_BC0258_cinematic_metal_impact_050.mp3",
+      "atlasId": 809,
+      "sourceStartSeconds": 0,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.3608,
+      "role": "metal-structure"
+    },
+    "metal-structure-3": {
+      "url": "/assets/audio/destruction/metal-structure-3.mp3",
+      "source": "Sonniss 2020/Coll Anderson - AMBISONICS A - Metal Sound Design Elements/AMBISONIC_A SD INT Metal Impact Resonant Ring High Pitch 03 B.m4a",
+      "atlasId": 889,
+      "sourceStartSeconds": 0,
+      "duration": 1.6,
+      "loop": false,
+      "peak": 0.3626,
+      "role": "metal-structure"
+    },
+    "metal-structure-4": {
+      "url": "/assets/audio/destruction/metal-structure-4.mp3",
+      "source": "Sonniss 2020/Coll Anderson - Metal Movement/EFX INT Metal Impact Hubcap Rolling Ring Out 03 C.m4a",
+      "atlasId": 917,
+      "sourceStartSeconds": 0.178,
+      "duration": 1.8,
+      "loop": false,
+      "peak": 0.3612,
+      "role": "metal-structure"
+    },
+    "metal-structure-5": {
+      "url": "/assets/audio/destruction/metal-structure-5.mp3",
+      "source": "Sonniss 2020/Coll Anderson - Metal Movement/EFX INT Metal Impact Resonant Ring Movement Low Pitch 06 B AMBEO.m4a",
+      "atlasId": 918,
+      "sourceStartSeconds": 7.906,
+      "duration": 2.2,
+      "loop": false,
+      "peak": 0.3601,
+      "role": "metal-structure"
     }
-  }
+  },
+  "elementLayerCount": 80
 }
