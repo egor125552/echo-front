@@ -1,0 +1,311 @@
+{
+  "formatVersion": 1,
+  "sampleRate": 48000,
+  "channels": 1,
+  "categories": {
+    "pistol": {
+      "name": "Пистолет",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/pistol-01.mp3",
+          "source": "Sonniss 2020/Super Thump - Weapons of World War II - Designed/STDSGN_WoWW2_Wep_Pistol_Luger_Shot_X5.mp3",
+          "atlasId": 1953,
+          "sourceStartSeconds": 5.051,
+          "durationSeconds": 1.45,
+          "decodedPeak": 0.71338
+        },
+        {
+          "url": "/assets/audio/weapons/pistol-02.mp3",
+          "source": "Sonniss 2020/Super Thump - Weapons of World War II - Designed/STDSGN_WoWW2_Wep_Pistol_Luger_Shot_X5.mp3",
+          "atlasId": 1953,
+          "sourceStartSeconds": 9.921,
+          "durationSeconds": 1.45,
+          "decodedPeak": 0.71392
+        },
+        {
+          "url": "/assets/audio/weapons/pistol-03.mp3",
+          "source": "Sonniss 2020/Super Thump - Weapons of World War II - Designed/STDSGN_WoWW2_Wep_Pistol_Luger_Shot_X5.mp3",
+          "atlasId": 1953,
+          "sourceStartSeconds": 15.143,
+          "durationSeconds": 1.45,
+          "decodedPeak": 0.71151
+        }
+      ]
+    },
+    "pistol-light": {
+      "name": "Лёгкий пистолет",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/pistol-light-01.mp3",
+          "source": "Sonniss 2021-2023/Pole Position Production - Glock 17/Glock 17 - FIRING - Take 1 - 20m In Front - AB - MKH8020.mp3",
+          "atlasId": 2648,
+          "sourceStartSeconds": 8.485,
+          "durationSeconds": 1.7,
+          "decodedPeak": 0.71162
+        },
+        {
+          "url": "/assets/audio/weapons/pistol-light-02.mp3",
+          "source": "Sonniss 2021-2023/Pole Position Production - Glock 17/Glock 17 - FIRING - Take 1 - 20m In Front - AB - MKH8020.mp3",
+          "atlasId": 2648,
+          "sourceStartSeconds": 17.055,
+          "durationSeconds": 1.7,
+          "decodedPeak": 0.7103
+        },
+        {
+          "url": "/assets/audio/weapons/pistol-light-03.mp3",
+          "source": "Sonniss 2021-2023/Pole Position Production - Glock 17/Glock 17 - FIRING - Take 1 - 20m In Front - AB - MKH8020.mp3",
+          "atlasId": 2648,
+          "sourceStartSeconds": 26.381,
+          "durationSeconds": 1.7,
+          "decodedPeak": 0.70493
+        }
+      ]
+    },
+    "rifle": {
+      "name": "Автомат, одиночный звук",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/rifle-01.mp3",
+          "source": "Sonniss 2020/FLYSOUND - AK-74/AKSD0813 AK-74 spot A close burst 03 rounds.mp3",
+          "atlasId": 1005,
+          "sourceStartSeconds": 0.176,
+          "durationSeconds": 0.45,
+          "decodedPeak": 0.73189
+        }
+      ]
+    },
+    "submachine-gun": {
+      "name": "Пистолет-пулемёт, одиночный звук",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/submachine-gun-01.mp3",
+          "source": "Sonniss 2020/Pole Position - Thompson 1928A1 automatic submachine gun/1928A1, Firing, t2, Burst, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1525,
+          "sourceStartSeconds": 28.901,
+          "durationSeconds": 1.15,
+          "decodedPeak": 0.69665
+        }
+      ]
+    },
+    "marksman": {
+      "name": "Винтовка",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/marksman-01.mp3",
+          "source": "Sonniss 2020/Pole Position - Springfield 1903A3 bolt-action rifle/M1903A3, Firing, t2, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1507,
+          "sourceStartSeconds": 3.727,
+          "durationSeconds": 1.65,
+          "decodedPeak": 0.71111
+        },
+        {
+          "url": "/assets/audio/weapons/marksman-02.mp3",
+          "source": "Sonniss 2020/Pole Position - Springfield 1903A3 bolt-action rifle/M1903A3, Firing, t2, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1507,
+          "sourceStartSeconds": 8.151,
+          "durationSeconds": 1.65,
+          "decodedPeak": 0.80662
+        },
+        {
+          "url": "/assets/audio/weapons/marksman-03.mp3",
+          "source": "Sonniss 2020/Pole Position - Springfield 1903A3 bolt-action rifle/M1903A3, Firing, t2, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1507,
+          "sourceStartSeconds": 12.465,
+          "durationSeconds": 1.65,
+          "decodedPeak": 0.73771
+        }
+      ]
+    },
+    "sniper": {
+      "name": "Тяжёлая винтовка",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/sniper-01.mp3",
+          "source": "Sonniss 2020/FLYSOUND - Mosin Nagant/MN0104 MOSIN-NAGANT 1m close front right shots.mp3",
+          "atlasId": 1015,
+          "sourceStartSeconds": 8.655,
+          "durationSeconds": 2.25,
+          "decodedPeak": 0.74628
+        },
+        {
+          "url": "/assets/audio/weapons/sniper-02.mp3",
+          "source": "Sonniss 2020/FLYSOUND - Mosin Nagant/MN0104 MOSIN-NAGANT 1m close front right shots.mp3",
+          "atlasId": 1015,
+          "sourceStartSeconds": 15.669,
+          "durationSeconds": 2.25,
+          "decodedPeak": 0.73786
+        },
+        {
+          "url": "/assets/audio/weapons/sniper-03.mp3",
+          "source": "Sonniss 2020/FLYSOUND - Mosin Nagant/MN0104 MOSIN-NAGANT 1m close front right shots.mp3",
+          "atlasId": 1015,
+          "sourceStartSeconds": 33.539,
+          "durationSeconds": 2.25,
+          "decodedPeak": 0.71682
+        }
+      ]
+    },
+    "bolt-action": {
+      "name": "Винтовка с продольным затвором",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/bolt-action-01.mp3",
+          "source": "Sonniss 2020/Pole Position - Mauser Karabiner 98 kurz K98k bolt-action rifle/K98k, Firing, t2, MKH416.mp3",
+          "atlasId": 1437,
+          "sourceStartSeconds": 3.993,
+          "durationSeconds": 1.75,
+          "decodedPeak": 0.80107
+        },
+        {
+          "url": "/assets/audio/weapons/bolt-action-02.mp3",
+          "source": "Sonniss 2020/Pole Position - Mauser Karabiner 98 kurz K98k bolt-action rifle/K98k, Firing, t2, MKH416.mp3",
+          "atlasId": 1437,
+          "sourceStartSeconds": 12.377,
+          "durationSeconds": 1.75,
+          "decodedPeak": 0.73275
+        },
+        {
+          "url": "/assets/audio/weapons/bolt-action-03.mp3",
+          "source": "Sonniss 2020/Pole Position - Mauser Karabiner 98 kurz K98k bolt-action rifle/K98k, Firing, t2, MKH416.mp3",
+          "atlasId": 1437,
+          "sourceStartSeconds": 25.121,
+          "durationSeconds": 1.75,
+          "decodedPeak": 0.72823
+        }
+      ]
+    },
+    "shotgun": {
+      "name": "Дробовик",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/shotgun-01.mp3",
+          "source": "Sonniss 2020/Wav Junction Sound Effects - Shotguns/0003_Shotgun_Fire_3.mp3",
+          "atlasId": 2072,
+          "sourceStartSeconds": 0.445,
+          "durationSeconds": 2.3,
+          "decodedPeak": 0.74287
+        }
+      ]
+    },
+    "electro-rifle": {
+      "name": "Фантастическое оружие",
+      "kind": "single",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/electro-rifle-01.mp3",
+          "source": "Sonniss 2020/PMSFX - SCI-FI GunnerySCI-FI Gunnery/PM_SFG_VOL1_WEAPON_4_4_GUN_GUNSHOT_FUTURISTIC.mp3",
+          "atlasId": 1282,
+          "sourceStartSeconds": 0,
+          "durationSeconds": 1.52,
+          "decodedPeak": 0.70616
+        },
+        {
+          "url": "/assets/audio/weapons/electro-rifle-02.mp3",
+          "source": "Sonniss 2020/PMSFX - SCI-FI GunnerySCI-FI Gunnery/PM_SFG_VOL1_WEAPON_8_2_GUN_GUNSHOT_FUTURISTIC.mp3",
+          "atlasId": 1283,
+          "sourceStartSeconds": 0,
+          "durationSeconds": 1.5,
+          "decodedPeak": 0.70388
+        },
+        {
+          "url": "/assets/audio/weapons/electro-rifle-03.mp3",
+          "source": "Sonniss 2020/PMSFX - SCI-FI GunnerySCI-FI Gunnery/PM_SFG_VOL2_WEAPON_41_6_GUN_GUNSHOT_FUTURISTIC.mp3",
+          "atlasId": 1285,
+          "sourceStartSeconds": 0.14,
+          "durationSeconds": 1.2176,
+          "decodedPeak": 0.72427
+        }
+      ]
+    },
+    "rifle-burst": {
+      "name": "Короткая очередь автомата",
+      "kind": "burst",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/rifle-burst-01.mp3",
+          "source": "Sonniss 2020/FLYSOUND - AK-74/AKSD0813 AK-74 spot A close burst 03 rounds.mp3",
+          "atlasId": 1005,
+          "sourceStartSeconds": 0,
+          "durationSeconds": 0.63,
+          "decodedPeak": 0.70976
+        },
+        {
+          "url": "/assets/audio/weapons/rifle-burst-02.mp3",
+          "source": "Sonniss 2020/FLYSOUND - AK-74/AKSD0854 AK-74 spot D far burst 03 rounds.mp3",
+          "atlasId": 1006,
+          "sourceStartSeconds": 0,
+          "durationSeconds": 3.1,
+          "decodedPeak": 0.7042
+        }
+      ]
+    },
+    "submachine-gun-burst": {
+      "name": "Короткая очередь пистолета-пулемёта",
+      "kind": "burst",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/submachine-gun-burst-01.mp3",
+          "source": "Sonniss 2020/Pole Position - Thompson 1928A1 automatic submachine gun/1928A1, Firing, t2, Burst, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1525,
+          "sourceStartSeconds": 0.459,
+          "durationSeconds": 1.35,
+          "decodedPeak": 0.74055
+        },
+        {
+          "url": "/assets/audio/weapons/submachine-gun-burst-02.mp3",
+          "source": "Sonniss 2020/Pole Position - Thompson 1928A1 automatic submachine gun/1928A1, Firing, t2, Burst, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1525,
+          "sourceStartSeconds": 5.865,
+          "durationSeconds": 1.35,
+          "decodedPeak": 0.74189
+        },
+        {
+          "url": "/assets/audio/weapons/submachine-gun-burst-03.mp3",
+          "source": "Sonniss 2020/Pole Position - Thompson 1928A1 automatic submachine gun/1928A1, Firing, t2, Burst, 1m, Right, Above, MKH8060.mp3",
+          "atlasId": 1525,
+          "sourceStartSeconds": 11.343,
+          "durationSeconds": 1.35,
+          "decodedPeak": 0.73043
+        }
+      ]
+    },
+    "machine-gun-burst": {
+      "name": "Очередь пулемёта",
+      "kind": "burst",
+      "variants": [
+        {
+          "url": "/assets/audio/weapons/machine-gun-burst-01.mp3",
+          "source": "Sonniss 2020/Super Thump - Weapons of World War II - Designed/STDSGN_WoWW2_Wep_MG_M1919_Machinegun_Auto-Burst_Shot_X6.mp3",
+          "atlasId": 1952,
+          "sourceStartSeconds": 0.011,
+          "durationSeconds": 1.7,
+          "decodedPeak": 0.78397
+        },
+        {
+          "url": "/assets/audio/weapons/machine-gun-burst-02.mp3",
+          "source": "Sonniss 2020/Super Thump - Weapons of World War II - Designed/STDSGN_WoWW2_Wep_MG_M1919_Machinegun_Auto-Burst_Shot_X6.mp3",
+          "atlasId": 1952,
+          "sourceStartSeconds": 4.829,
+          "durationSeconds": 1.7,
+          "decodedPeak": 0.71545
+        },
+        {
+          "url": "/assets/audio/weapons/machine-gun-burst-03.mp3",
+          "source": "Sonniss 2020/Super Thump - Weapons of World War II - Designed/STDSGN_WoWW2_Wep_MG_M1919_Machinegun_Auto-Burst_Shot_X6.mp3",
+          "atlasId": 1952,
+          "sourceStartSeconds": 9.821,
+          "durationSeconds": 1.7,
+          "decodedPeak": 0.73676
+        }
+      ]
+    }
+  }
+}
