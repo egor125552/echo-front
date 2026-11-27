@@ -38,6 +38,7 @@ function positionOf(payload = {}) {
 export async function setup(ctx) {
   const input = ctx.services.get("input");
   const audio = ctx.services.get("audio");
+  const destructionAudio = ctx.services.has?.("destruction-audio") ? ctx.services.get("destruction-audio") : null;
   let interactHeld = false;
   let interactReleased = false;
   const dragLoops = new Map();
@@ -173,7 +174,7 @@ export async function setup(ctx) {
     const position = positionOf(payload);
 
     try {
-      const handle = await audio.playSpatial(DRAG_URL, position, {
+      const options = {
         radius: payload.radius ?? 46,
         gain,
         referenceDistance: 2.4,
@@ -183,7 +184,10 @@ export async function setup(ctx) {
         channel: `crate-drag:${crateId}`,
         replace: true,
         loop: true,
-      });
+      };
+      const handle = destructionAudio?.crateReady()
+        ? await destructionAudio.crateLoop(position, options)
+        : await audio.playSpatial(DRAG_URL, position, options);
       const latestPayload = dragInFlight.get(crateId) ?? payload;
       dragInFlight.delete(crateId);
       if (dragGeneration.get(crateId) !== generation) {
@@ -262,7 +266,7 @@ export async function setup(ctx) {
     if (now - (lastRattleAt.get(crateId) ?? -Infinity) < RATTLE_COOLDOWN_MS) return;
     lastRattleAt.set(crateId, now);
     try {
-      await audio.playSpatial(START_RATTLE_URL, positionOf(payload), {
+      const options = {
         radius: 22,
         gain: clamp(0.16 + (Number(payload.speed) || 0.3) * 0.14, 0.16, 0.34),
         referenceDistance: 2,
@@ -271,7 +275,8 @@ export async function setup(ctx) {
         occlusion: clamp(payload.occlusion, 0, 1),
         channel: `crate-rattle:${crateId}`,
         replace: true,
-      });
+      };
+      if (!destructionAudio?.crateStart(positionOf(payload), options)) await audio.playSpatial(START_RATTLE_URL, positionOf(payload), options);
     } catch (error) {
       console.error("Echo Front crate start audio error", error);
     }
@@ -333,7 +338,9 @@ export async function setup(ctx) {
       return;
     }
     if (packet.event === "crate:push-stop") {
-      fadeOutDrag(String(payload.crateId ?? ""), CRATE_FADE_OUT_MS);
+      const crateId = String(payload.crateId ?? "");
+      if(dragLoops.has(crateId)) destructionAudio?.crateStop(positionOf(payload), {radius:24,gain:.28,referenceDistance:2,rolloffFactor:.55,channel:`crate-stop:${crateId}`,replace:true});
+      fadeOutDrag(crateId, CRATE_FADE_OUT_MS);
       return;
     }
     if (packet.event === "crate:impact") void playImpact(payload);

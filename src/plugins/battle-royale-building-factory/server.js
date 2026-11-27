@@ -1,3 +1,4 @@
+import { gameWallPanels } from "../../game/game-wall-panels.js";
 import { BATTLE_ROYALE_BUILDINGS } from "../../config/battle-royale-buildings.js";
 
 export const manifest = {
@@ -267,9 +268,13 @@ export async function setup(ctx) {
   if (!Array.isArray(map.navigationBuildings)) map.navigationBuildings = [];
 
   function addWall(spec) {
-    const collider = physics.createWall(spec);
-    map.walls?.push?.({ ...spec, collider });
-    return collider;
+    let first = null;
+    for (const panel of gameWallPanels(spec)) {
+      const collider = physics.createWall(panel);
+      map.walls?.push?.({ ...panel, collider });
+      first ??= collider;
+    }
+    return first;
   }
 
   function buildOuterWalls(entry, floor, floorDoors, profile) {
@@ -294,6 +299,8 @@ export async function setup(ctx) {
         const common = {
           kind: isRoof ? "building-parapet" : "building-wall",
           parapet: isRoof,
+          glazing: !isRoof,
+          floorId: String(floor.id),
           buildingId: entry.id,
           material: floor.wallMaterial ?? entry.spec.wallMaterial ?? "concrete",
           accessibleName: isRoof ? "край крыши" : "стена",
@@ -818,6 +825,8 @@ export async function setup(ctx) {
   function stairAt(entry, position) {
     if (!entry || !position) return null;
     return entry.stairs.find((stair) => (
+      stair.collider?.isEnabled?.() !== false
+      &&
       finite(position.x) >= stair.bounds.minX - 0.2
       && finite(position.x) <= stair.bounds.maxX + 0.2
       && finite(position.z) >= stair.bounds.minZ - 0.2

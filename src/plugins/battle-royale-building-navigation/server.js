@@ -331,7 +331,7 @@ function exteriorDoorPoints(door, building, offset = 1.45) {
   };
 }
 
-function legacyBuildingTopology(map) {
+export function legacyBuildingTopology(map) {
   const building = map?.building;
   if (!building) return null;
   const upperY = Math.max(2, finite(building.upperY, 3.2));

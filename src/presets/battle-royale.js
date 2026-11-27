@@ -85,6 +85,7 @@ import * as shop from "../plugins/battle-royale-shop/server.js";
 import * as crateGenerator from "../plugins/battle-royale-crate-generator/server.js";
 import * as botVehicles from "../plugins/battle-royale-bot-vehicles/server.js";
 import * as tacticsInventory from "../plugins/battle-royale-tactics-inventory/server.js";
+import * as destruction from "../plugins/building-destruction/server.js";
 import * as specialOps from "../plugins/battle-royale-special-ops/server.js";
 import * as developerSettings from "../plugins/developer-settings/server.js";
 
@@ -174,6 +175,7 @@ export const battleRoyalePreset = [
   botVehicles,
   tacticsInventory,
   specialOps,
+  destruction,
   developerSettings,
 ];
 

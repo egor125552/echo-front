@@ -1,0 +1,319 @@
+{
+  "version": 1,
+  "sampleRate": 48000,
+  "channels": 1,
+  "layers": {
+    "glass-hit-1": {
+      "url": "/assets/audio/destruction/glass-hit-1.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Broken Glass/Bluezone_BC0274_glass_impact_break_002.mp3",
+      "atlasId": 2257,
+      "duration": 0.999,
+      "loop": false,
+      "peak": 0.4525
+    },
+    "glass-hit-2": {
+      "url": "/assets/audio/destruction/glass-hit-2.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Broken Glass/Bluezone_BC0274_glass_impact_break_small_014.mp3",
+      "atlasId": 2259,
+      "duration": 0.6,
+      "loop": false,
+      "peak": 0.4474
+    },
+    "glass-hit-3": {
+      "url": "/assets/audio/destruction/glass-hit-3.mp3",
+      "source": "Sonniss 2020/Eiravaein Works - 48Kilos/PaverTV,side,CRTTV,concretepaver,drop,impact,obliterate,glass,plastic,metal,shatter,crush,contained,dense.mp3",
+      "atlasId": 993,
+      "duration": 1.4,
+      "loop": false,
+      "peak": 0.3907
+    },
+    "glass-rain-1": {
+      "url": "/assets/audio/destruction/glass-rain-1.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Broken Glass/Bluezone_BC0274_glass_impact_break_falling_debris_004.mp3",
+      "atlasId": 2258,
+      "duration": 1.22,
+      "loop": false,
+      "peak": 0.2786
+    },
+    "glass-rain-2": {
+      "url": "/assets/audio/destruction/glass-rain-2.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_impact_glass_short_009.mp3",
+      "atlasId": 2263,
+      "duration": 0.78,
+      "loop": false,
+      "peak": 0.2773
+    },
+    "glass-rain-3": {
+      "url": "/assets/audio/destruction/glass-rain-3.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_rubble_glass_010.mp3",
+      "atlasId": 2262,
+      "duration": 2.1,
+      "loop": false,
+      "peak": 0.2547
+    },
+    "wood-crack-1": {
+      "url": "/assets/audio/destruction/wood-crack-1.mp3",
+      "source": "Sonniss 2020/Bluezone - Forest Creature Sound Effects/Bluezone_BC0269_creature_wood_texture_crack_heavy_rumble_006.mp3",
+      "atlasId": 823,
+      "duration": 2.8,
+      "loop": false,
+      "peak": 0.3976
+    },
+    "wood-crack-2": {
+      "url": "/assets/audio/destruction/wood-crack-2.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Forest Textures/Bluezone_BC0279_forest_tree_wood_texture_creaking_016.mp3",
+      "atlasId": 2282,
+      "duration": 2.48,
+      "loop": false,
+      "peak": 0.3774
+    },
+    "wood-fall-1": {
+      "url": "/assets/audio/destruction/wood-fall-1.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_scrap wood falling  interior perspective_Eneas Mentzel_Debris & Rubble_05.mp3",
+      "atlasId": 2392,
+      "duration": 2.62,
+      "loop": false,
+      "peak": 0.4159
+    },
+    "wood-fall-2": {
+      "url": "/assets/audio/destruction/wood-fall-2.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Forest Textures/Bluezone_BC0279_forest_wood_log_debris_falling_3_007.mp3",
+      "atlasId": 2283,
+      "duration": 1.61,
+      "loop": false,
+      "peak": 0.3988
+    },
+    "stone-hit-1": {
+      "url": "/assets/audio/destruction/stone-hit-1.mp3",
+      "source": "Sonniss 2020/PMSFX - Shattering Bricks/PM_SB_DESIGNED_IMPACT_116 Impact brick rock dirt gravel designed multi LFE.mp3",
+      "atlasId": 1290,
+      "duration": 2.5,
+      "loop": false,
+      "peak": 0.4108
+    },
+    "stone-hit-2": {
+      "url": "/assets/audio/destruction/stone-hit-2.mp3",
+      "source": "Sonniss 2020/PMSFX - Shattering Bricks/PM_SB_SOURCE_16 Impact brick rock dirt gravel single hit.mp3",
+      "atlasId": 1292,
+      "duration": 1.35,
+      "loop": false,
+      "peak": 0.3944
+    },
+    "stone-hit-3": {
+      "url": "/assets/audio/destruction/stone-hit-3.mp3",
+      "source": "Sonniss 2020/PMSFX - Shattering Bricks/PM_SB_SOURCE_61 Impact brick rock dirt gravel single hit.mp3",
+      "atlasId": 1293,
+      "duration": 2.5,
+      "loop": false,
+      "peak": 0.3897
+    },
+    "stone-fall-1": {
+      "url": "/assets/audio/destruction/stone-fall-1.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_008.mp3",
+      "atlasId": 2260,
+      "duration": 7.3,
+      "loop": false,
+      "peak": 0.3682
+    },
+    "stone-fall-2": {
+      "url": "/assets/audio/destruction/stone-fall-2.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_rubble_008.mp3",
+      "atlasId": 2261,
+      "duration": 6.676,
+      "loop": false,
+      "peak": 0.3736
+    },
+    "stone-fall-3": {
+      "url": "/assets/audio/destruction/stone-fall-3.mp3",
+      "source": "Sonniss 2021-2023/BluezoneCorp - Building Collapse/Bluezone_BC0275_building_collapse_debris_falling_rock_rubble_glass_010.mp3",
+      "atlasId": 2262,
+      "duration": 2.55,
+      "loop": false,
+      "peak": 0.3583
+    },
+    "dust-1": {
+      "url": "/assets/audio/destruction/dust-1.mp3",
+      "source": "Sonniss 2020/Tatak Audio - Rocks and Debris/Tatak_ROCKS_Falling Heavy Dusty Debris.mp3",
+      "atlasId": 1982,
+      "duration": 6.5,
+      "loop": false,
+      "peak": 0.2382
+    },
+    "dust-2": {
+      "url": "/assets/audio/destruction/dust-2.mp3",
+      "source": "Sonniss 2020/Tatak Audio - Rocks and Debris/Tatak_ROCKS_Pebbles Dust Tumbling Rolling Debris.mp3",
+      "atlasId": 1983,
+      "duration": 5.4,
+      "loop": false,
+      "peak": 0.256
+    },
+    "dust-3": {
+      "url": "/assets/audio/destruction/dust-3.mp3",
+      "source": "Sonniss 2020/Bluezone - Tank - Explosion Sound Effects/Bluezone_BC0271_debris_falling_rock_dust_002.mp3",
+      "atlasId": 856,
+      "duration": 2.47,
+      "loop": false,
+      "peak": 0.2805
+    },
+    "metal-hit-1": {
+      "url": "/assets/audio/destruction/metal-hit-1.mp3",
+      "source": "Sonniss 2020/Coll Anderson - AMBISONICS A - Metal Sound Design Elements/AMBISONIC_A SD INT Metal Iron Steel Drop Concrete 23 C.m4a",
+      "atlasId": 890,
+      "duration": 2.85,
+      "loop": false,
+      "peak": 0.4114
+    },
+    "metal-hit-2": {
+      "url": "/assets/audio/destruction/metal-hit-2.mp3",
+      "source": "Sonniss 2020/Pole Position - Car Destruction/Car_Destruction_Chassis_Impact_t36_Ext_Drop_on_Ground_Metal_Crash_Bounce_Various_MKH8060.mp3",
+      "atlasId": 1333,
+      "duration": 2.8,
+      "loop": false,
+      "peak": 0.4067
+    },
+    "metal-hit-3": {
+      "url": "/assets/audio/destruction/metal-hit-3.mp3",
+      "source": "Sonniss 2021-2023/InspectorJ - Essentials 04 Chains/CHAINImpt_InsJ_Chains_Metal_Dropping_Close_01-03.mp3",
+      "atlasId": 2445,
+      "duration": 2.05,
+      "loop": false,
+      "peak": 0.319
+    },
+    "metal-bend-1": {
+      "url": "/assets/audio/destruction/metal-bend-1.mp3",
+      "source": "Sonniss 2020/Alex Lane - Resonant Rusty Door/ResonantRustyDoor_scrape_short_05.mp3",
+      "atlasId": 702,
+      "duration": 4.16,
+      "loop": false,
+      "peak": 0.3131
+    },
+    "metal-bend-2": {
+      "url": "/assets/audio/destruction/metal-bend-2.mp3",
+      "source": "Sonniss 2020/Pole Position - The Junkyard Metal Library/Metal_Creak_Van_Door_Back_and_Forth_Various_CO100k.mp3",
+      "atlasId": 1520,
+      "duration": 3.9,
+      "loop": false,
+      "peak": 0.3127
+    },
+    "metal-rattle-1": {
+      "url": "/assets/audio/destruction/metal-rattle-1.mp3",
+      "source": "Sonniss 2021-2023/SmartSoundFX - Everyday Life 01/LADDER Metal Small Rattle.mp3",
+      "atlasId": 2838,
+      "duration": 5.2,
+      "loop": false,
+      "peak": 0.3039
+    },
+    "metal-rattle-2": {
+      "url": "/assets/audio/destruction/metal-rattle-2.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Metal Movements/METLMvmt_Metal Rattle 11_JSE_MM_Mono.mp3",
+      "atlasId": 2507,
+      "duration": 4.3,
+      "loop": false,
+      "peak": 0.2836
+    },
+    "metal-rattle-3": {
+      "url": "/assets/audio/destruction/metal-rattle-3.mp3",
+      "source": "Sonniss 2020/344 Audio - Practical Doors/Exterior Metal Door Gate Close, Rattle 2.mp3",
+      "atlasId": 683,
+      "duration": 1.845,
+      "loop": false,
+      "peak": 0.2932
+    },
+    "tile-break-1": {
+      "url": "/assets/audio/destruction/tile-break-1.mp3",
+      "source": "Sonniss 2021-2023/Eneas Mentzel - Debris & Rubble/DESTRCrsh_Smashing a ceramics tile on concrete  exterior_Eneas Mentzel_Debris & Rubble_04.mp3",
+      "atlasId": 2389,
+      "duration": 1.528,
+      "loop": false,
+      "peak": 0.3868
+    },
+    "tile-break-2": {
+      "url": "/assets/audio/destruction/tile-break-2.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMBrk_Ceramic Roof Tile Cracking_JSE_SD.mp3",
+      "atlasId": 2508,
+      "duration": 4.4,
+      "loop": false,
+      "peak": 0.383
+    },
+    "tile-fall-1": {
+      "url": "/assets/audio/destruction/tile-fall-1.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "duration": 4.4,
+      "loop": false,
+      "peak": 0.3146
+    },
+    "tile-fall-2": {
+      "url": "/assets/audio/destruction/tile-fall-2.mp3",
+      "source": "Sonniss 2021-2023/Justsoundeffects - Stones and Debris/CERMCrsh_Debris Falling On Ceramic Roof Tile With Metal Trash_JSE_SD.mp3",
+      "atlasId": 2509,
+      "duration": 6.3,
+      "loop": false,
+      "peak": 0.3056
+    },
+    "fire-low": {
+      "url": "/assets/audio/destruction/fire-low.wav",
+      "source": "Sonniss 2021-2023/Stefano Cremona - Pure Nature Ambiences/Campfire.mp3",
+      "atlasId": 2911,
+      "duration": 12.82,
+      "loop": true,
+      "peak": 0.32
+    },
+    "fire-crackle": {
+      "url": "/assets/audio/destruction/fire-crackle.wav",
+      "source": "Sonniss 2021-2023/Stefano Cremona - Pure Nature Ambiences/Campfire.mp3",
+      "atlasId": 2911,
+      "duration": 14.82,
+      "loop": true,
+      "peak": 0.34
+    },
+    "fire-pop": {
+      "url": "/assets/audio/destruction/fire-pop.mp3",
+      "source": "Sonniss 2021-2023/Stefano Cremona - Pure Nature Ambiences/Campfire.mp3",
+      "atlasId": 2911,
+      "duration": 2.7,
+      "loop": false,
+      "peak": 0.3113
+    },
+    "crate-mass": {
+      "url": "/assets/audio/destruction/crate-mass.wav",
+      "source": "Sonniss 2020/Coll Anderson - Metal Movement/EFX INT Metal Drag Slide Fast In Smash 02 A.mp3",
+      "atlasId": 916,
+      "duration": 3.02,
+      "loop": true,
+      "peak": 0.38
+    },
+    "crate-scrape": {
+      "url": "/assets/audio/destruction/crate-scrape.wav",
+      "source": "Sonniss 2021-2023/Sonic Bat - Videogame Foley Essentials Vol. I/SBvfe1_Dragging Metal Plate 012.mp3",
+      "atlasId": 2883,
+      "duration": 2.92,
+      "loop": true,
+      "peak": 0.4
+    },
+    "crate-grit": {
+      "url": "/assets/audio/destruction/crate-grit.wav",
+      "source": "Sonniss 2020/Wav Junction Sound Effects - Rocks/0093_Rock_Quick_Drag_On_Rock_003.mp3",
+      "atlasId": 2068,
+      "duration": 1.42,
+      "loop": true,
+      "peak": 0.29
+    },
+    "crate-start": {
+      "url": "/assets/audio/destruction/crate-start.mp3",
+      "source": "Sonniss 2020/Coll Anderson - AMBISONICS A - Metal Sound Design Elements/AMBISONIC_A SD INT Metal Iron Steel Drop Concrete 23 C.m4a",
+      "atlasId": 890,
+      "duration": 0.45,
+      "loop": false,
+      "peak": 0.353
+    },
+    "crate-stop": {
+      "url": "/assets/audio/destruction/crate-stop.mp3",
+      "source": "Sonniss 2020/344 Audio - Practical Doors/Exterior Metal Door Gate Close, Rattle 2.mp3",
+      "atlasId": 683,
+      "duration": 0.8,
+      "loop": false,
+      "peak": 0.3512
+    }
+  }
+}

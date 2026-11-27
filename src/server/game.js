@@ -55,6 +55,7 @@ function shouldForwardEvent(eventName) {
     || name.startsWith("navigation:")
     || name.startsWith("injury:")
     || name.startsWith("crate:")
+    || name.startsWith("building:")
     || name.startsWith("shop:")
     || name.startsWith("tactics:")
     || name.startsWith("inventory:")

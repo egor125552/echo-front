@@ -1,3 +1,4 @@
+import { gameWallPanels } from "../../game/game-wall-panels.js";
 export const WORLD_HALF_SIZE = 400;
 export const BOUNDARY_HALF_THICKNESS = 1;
 export const UPPER_FLOOR_Y = 3.2;
@@ -273,9 +274,13 @@ export async function setup(ctx) {
     const enriched = { ...spec };
     if (!enriched.accessibleName && enriched.kind === "building-wall") enriched.accessibleName = "стена";
     if (!enriched.accessibleName && enriched.kind === "world-boundary") enriched.accessibleName = "граница мира";
-    const collider = physics.createWall(enriched);
-    walls.push({ ...enriched, collider });
-    return collider;
+    let first = null;
+    for (const panel of gameWallPanels(enriched)) {
+      const collider = physics.createWall(panel);
+      walls.push({ ...panel, collider });
+      first ??= collider;
+    }
+    return first;
   };
 
   let groundCollider = null;
@@ -296,11 +301,11 @@ export async function setup(ctx) {
     addWall({ kind: "world-boundary", side: "west", x: -WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
     addWall({ kind: "world-boundary", side: "east", x: WORLD_HALF_SIZE, z: 0, hx: BOUNDARY_HALF_THICKNESS, hz: WORLD_HALF_SIZE, height: 10 });
 
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.minX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, z: BUILDING_CENTER_Z - 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, z: BUILDING_CENTER_Z + 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING.minX, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING.maxX, z: BUILDING_CENTER_Z - 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING.maxX, z: BUILDING_CENTER_Z + 6.6, hx: 0.3, hz: 5.4, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING_CENTER_X, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
 
     const floorBottomY = UPPER_FLOOR_Y - 0.18;
     addWall({ kind: "building-floor", material: "concrete", x: BUILDING_CENTER_X - 4, y: floorBottomY, z: BUILDING_CENTER_Z, hx: 11, hz: 12, height: 0.18 });
@@ -323,10 +328,10 @@ export async function setup(ctx) {
     const stairCollider = physics.createRamp(stairSpec);
     walls.push({ ...stairSpec, collider: stairCollider });
 
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
-    addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING.minX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING.maxX, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z, hx: 0.3, hz: 12, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.minZ, hx: 15, hz: 0.3, height: 2.8 });
+    addWall({ kind: "building-wall", glazing: true, material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING.maxZ, hx: 15, hz: 0.3, height: 2.8 });
     addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z + 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
     addWall({ kind: "building-wall", material: "concrete", x: BUILDING_CENTER_X, y: UPPER_FLOOR_Y, z: BUILDING_CENTER_Z - 6.6, hx: 0.25, hz: 5.4, height: 2.8 });
   } finally {
@@ -439,7 +444,7 @@ export async function setup(ctx) {
 
   function setDoorOpen(doorId, open, entityId = null, now = Date.now()) {
     const door = doors.find((entry) => entry.id === doorId);
-    if (!door) return false;
+    if (!door || door.destroyed) return false;
     const desired = Boolean(open);
     if (door.open === desired) return false;
     door.open = desired;
@@ -460,6 +465,7 @@ export async function setup(ctx) {
   function interact({ entityId, x, y = 0, z, now = Date.now() }) {
     const actor = { x, y, z };
     const nearbyDoor = doors
+      .filter(door => !door.destroyed)
       .map((door) => ({ door, distance: distance3(actor, door) }))
       .filter((entry) => entry.distance <= 2.4)
       .sort((a, b) => a.distance - b.distance)[0];

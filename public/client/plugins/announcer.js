@@ -80,6 +80,7 @@ export async function setup(ctx) {
   let lastZone = null;
   let lastZoneWarningAt = 0;
   let lastBunkerPrompt = null;
+  let lastFireWarningAt = -Infinity;
   let lastCannonRangeAnnounceAt = -Infinity;
   const lastBotKillfeedByKiller = new Map();
 
@@ -110,6 +111,7 @@ export async function setup(ctx) {
     lastSelf = null;
     lastZone = null;
     lastZoneWarningAt = 0;
+    lastFireWarningAt = -Infinity;
     if (network.tutorial) return;
     if (mode === "battle-royale") {
       announce(
@@ -162,6 +164,11 @@ export async function setup(ctx) {
           });
         }
       }
+    }
+    if (self.alive && !snapshot?.spectator?.active && performance.now()-lastFireWarningAt>12000
+      && snapshot?.destruction?.fires?.some(f=>Math.hypot(f.x-self.x,f.y-(self.y??0),f.z-self.z)<4)) {
+      lastFireWarningAt=performance.now();
+      announce("Рядом пожар. Отойдите от огня.", {interrupt:false,repeat:true});
     }
     const bunkerPrompt = snapshot?.specialOps?.nearbyBunkerPrompt ?? null;
     if (bunkerPrompt && bunkerPrompt !== lastBunkerPrompt) {

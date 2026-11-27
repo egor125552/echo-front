@@ -18,6 +18,7 @@ import * as accessibleMenus from "../plugins/accessible-menus.js";
 import * as speechDiagnostics from "../plugins/speech-diagnostics.js";
 import * as spatialAudio from "../plugins/spatial-audio.js";
 import * as architecturalOcclusion from "../plugins/architectural-occlusion.js";
+import * as destructionAudio from "../plugins/building-destruction-audio.js";
 import * as crateInteraction from "../plugins/battle-royale-crate-interaction.js";
 import * as audioResilience from "../plugins/audio-resilience.js";
 import * as navigation from "../plugins/battle-royale-navigation.js";
@@ -68,6 +69,7 @@ export const echoFrontClientPreset = [
   speechDiagnostics,
   spatialAudio,
   architecturalOcclusion,
+  destructionAudio,
   crateInteraction,
   audioResilience,
   navigation,

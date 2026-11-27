@@ -239,7 +239,7 @@ export async function setup(ctx) {
     if (!from || !target) return [];
     const buildings = allNavigationBuildings(map);
     const stairWallsForSegment = (a, b) => (map.walls ?? []).filter((wall) => {
-      if (wall?.kind !== "building-stair") return false;
+      if (wall?.kind !== "building-stair" || wall.destroyed) return false;
       const stairBuilding = buildings.find((entry) => (
         wall.buildingId ? entry.id === String(wall.buildingId) : insideRect(wall, entry, 0.1)
       ));
