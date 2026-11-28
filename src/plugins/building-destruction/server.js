@@ -295,9 +295,11 @@ export async function setup(ctx) {
     if ((rank[summary.stage] ?? 0) <= (rank[prev] ?? 0)) return;
     groupStage.set(group, summary.stage);
     if (summary.stage === "breached" || summary.stage === "collapsed") {
+      const style = groupParts[0]?.style ?? "interior";
       ctx.events.emit("building:collapse", {
         buildingId: group,
         buildingName: resolveBuildingName(group),
+        style,
         stage: summary.stage,
         major: Boolean(major || summary.stage === "collapsed"),
         brokenCount: summary.broken,
@@ -795,6 +797,7 @@ export async function setup(ctx) {
       list.push({
         id: group,
         name: resolveBuildingName(group),
+        style: groupParts[0]?.style ?? "interior",
         stage: groupStage.get(group) ?? evalSummary.stage,
         broken: evalSummary.broken,
         total: evalSummary.total,

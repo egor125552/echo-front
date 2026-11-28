@@ -186,12 +186,15 @@ export async function setup(ctx) {
       if (idx === 0) {
         weapons.grant(bot.id, "rifle");
         weapons.grant(bot.id, "marksman");
+        weapons.selectById?.(bot.id, "rifle");
       } else if (idx === 1) {
         weapons.grant(bot.id, "marksman");
         weapons.grant(bot.id, "rifle");
+        weapons.selectById?.(bot.id, "marksman");
       } else if (idx === 2) {
         weapons.grant(bot.id, "sniper");
         weapons.grant(bot.id, "rifle");
+        weapons.selectById?.(bot.id, "sniper");
       }
       if (humanTransform) {
         const angle = (idx * Math.PI * 2) / Math.max(1, chosen.length);

@@ -885,7 +885,7 @@ export async function setup(ctx) {
       armorService?.grantPlates?.(bot.id, 8);
       if (!weapons.grant(bot.id, "sniper")) weapons.restock?.(bot.id, "sniper", 10);
       if (!weapons.grant(bot.id, "marksman")) weapons.restock?.(bot.id, "marksman", 24);
-      weapons.restock?.(bot.id, "rifle", 60);
+      if (!weapons.grant(bot.id, "rifle")) weapons.restock?.(bot.id, "rifle", 60);
       ctx.events.emit("loot:picked", {
         crateId: bestCrate.id,
         entityId: bot.id,
@@ -908,9 +908,7 @@ export async function setup(ctx) {
       const alreadyHasWeapon = Boolean(inv?.items?.some((item) => item.id === targetWeaponId));
       if (!alreadyHasWeapon) {
         weapons.grant(bot.id, targetWeaponId);
-        const updatedInv = ctx.components.get(bot.id, "Weapons");
-        const slot = updatedInv?.items?.findIndex((item) => item.id === targetWeaponId) ?? -1;
-        if (slot >= 0) weapons.select(bot.id, slot - (updatedInv.selected ?? 0));
+        weapons.selectById?.(bot.id, targetWeaponId);
         ctx.events.emit("loot:picked", {
           crateId: bestCrate.id,
           entityId: bot.id,

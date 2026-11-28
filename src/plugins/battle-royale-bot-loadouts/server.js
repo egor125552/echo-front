@@ -9,13 +9,18 @@ export const manifest = {
 const ARMOR_LEVELS = [150, 150, 150, 150];
 const RESERVE_LEVELS = [3, 3, 4, 4];
 
+export const RARE_MARKSMAN_SERIAL = 12;
+export const RARE_RIFLE_SERIAL = 24;
+
 export function createBotLoadout(serial, team) {
-  const marksman = serial % 2 === 0;
   const armorCurrent = ARMOR_LEVELS[serial % ARMOR_LEVELS.length];
   const armorReserve = RESERVE_LEVELS[serial % RESERVE_LEVELS.length];
-  const botWeapons = marksman
-    ? ["marksman", "rifle", "pistol"]
-    : ["rifle", "pistol"];
+  let botWeapons = ["pistol"];
+  if (serial === RARE_MARKSMAN_SERIAL) {
+    botWeapons = ["marksman", "pistol"];
+  } else if (serial === RARE_RIFLE_SERIAL) {
+    botWeapons = ["rifle", "pistol"];
+  }
   return {
     id: `br-bot-${serial}`,
     kind: "bot",

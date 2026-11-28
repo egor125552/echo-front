@@ -14,7 +14,13 @@ import {
 import { detectNearbyCover } from "../src/game/crouch-squad-inventory.js";
 import { hapticCueForGameEvent } from "../public/client/plugins/haptic-feedback.js";
 import { encodeSnapshotMessage, decodeSnapshotMessage } from "../public/client/snapshot-delta.js";
-import { setup as setupDestructionAudio } from "../public/client/plugins/building-destruction-audio.js";
+import {
+  assetUrlForKey,
+  listAllDestructionAudioKeys,
+  setup as setupDestructionAudio,
+} from "../public/client/plugins/building-destruction-audio.js";
+import fs from "node:fs";
+import path from "node:path";
 
 test("pure destruction model: 185m Mini-Nuke reaches past 80m, glass overpressure shatters up to ~260m, debris flies outward, upper floors cascade, and aim blast-zone solver detects buildings", () => {
   const origin = { x: 0, y: 0, z: 0 };
@@ -381,6 +387,7 @@ test("client building-destruction-audio recovers from cold iOS Safari cache and 
     payload: {
       buildingId: "warehouse",
       buildingName: "Склад",
+      style: "industrial",
       stage: "collapsed",
       x: 60,
       y: 2,
@@ -391,9 +398,145 @@ test("client building-destruction-audio recovers from cold iOS Safari cache and 
   });
 
   await new Promise((r) => setTimeout(r, 1300));
-  assert.ok(played.length >= 4, `Cold-cache collapse must decode & play multi-layer sounds, got ${played.length}`);
-  assert.ok(played.some((p) => p.opts.gain >= 1.4), "Full collapse primary layer must play with high gain (>=1.4) to cut through nuke tail");
+  assert.ok(played.length >= 8, `Cold-cache industrial collapse must decode & play rich multi-layer sequence, got ${played.length}`);
+  assert.ok(played.some((p) => p.opts.gain >= 1.5), "Full collapse primary layer must play with high gain (>=1.5) to cut through nuke tail");
+  assert.ok(played.some((p) => p.opts.radius >= 680), "Collapse layers must carry 680m spatial radius");
+  assert.ok(played.some((p) => p.url.includes("wall-heavy")), "Full collapse must play wall-heavy impact layer");
+  assert.ok(played.some((p) => p.url.includes("metal-structure")), "Industrial collapse must play metal-structure layer");
   assert.ok(played.some((p) => p.url.includes("stone-fall")), "Full collapse must play recorded stone-fall collapse layer");
+  assert.ok(played.some((p) => p.url.includes("wall-rubble")), "Full collapse must play wall-rubble layer");
+  assert.ok(played.some((p) => p.url.includes("roof-fall")), "Full collapse must play roof-fall layer");
+  assert.ok(played.some((p) => p.url.includes("chain")), "Industrial full collapse must play chain rattle layer");
+  assert.ok(played.some((p) => p.url.includes("dust")), "Full collapse must play dust cloud layer");
   ctx.events.emit("network:disconnected");
 });
+
+test("all 174 destruction audio files on disk are registered with zero orphans and non-zero size", () => {
+  const dir = path.resolve(process.cwd(), "public/assets/audio/destruction");
+  const diskFiles = fs.readdirSync(dir).filter((f) => /\.(mp3|wav)$/i.test(f)).sort();
+  const keys = listAllDestructionAudioKeys();
+  const referencedFiles = keys.map((k) => path.basename(assetUrlForKey(k))).sort();
+
+  assert.equal(diskFiles.length, 174, `Expected 174 audio files on disk, found ${diskFiles.length}`);
+  assert.deepEqual(referencedFiles, diskFiles, "Registered destruction audio keys must match all 174 files on disk 1:1");
+
+  for (const file of diskFiles) {
+    const stat = fs.statSync(path.join(dir, file));
+    assert.ok(stat.size > 1000, `Audio file ${file} looks empty or corrupted (${stat.size} bytes)`);
+  }
+});
+
+test("client building-destruction-audio triggers specialized element layers on break, stage=collapse, strain, debris, and ruin ambience", async () => {
+  const played = [];
+  const listeners = new Map();
+  const services = new Map();
+
+  const fakeAudio = {
+    load(url) {
+      return Promise.resolve({ url, duration: 0.25 });
+    },
+    playSpatialBuffer(buffer, pos, opts) {
+      played.push({ url: buffer.url, pos, opts });
+      const endedListeners = [];
+      setTimeout(() => {
+        for (const fn of endedListeners) fn();
+      }, 20);
+      return {
+        source: {
+          addEventListener(name, fn) {
+            if (name === "ended") endedListeners.push(fn);
+          },
+          stop() {},
+        },
+        update() {},
+        setGain() {},
+        updateOcclusion() {},
+        fadeOut() {},
+      };
+    },
+  };
+  services.set("audio", fakeAudio);
+  services.set("network", { playerId: "p1" });
+
+  const ctx = {
+    services: {
+      get: (k) => services.get(k),
+      provide: (k, v) => services.set(k, v),
+    },
+    events: {
+      on(name, fn) {
+        const list = listeners.get(name) ?? [];
+        list.push(fn);
+        listeners.set(name, list);
+      },
+      emit(name, payload) {
+        for (const fn of listeners.get(name) ?? []) fn(payload);
+      },
+    },
+  };
+
+  await setupDestructionAudio(ctx);
+  await services.get("destruction-audio").warm();
+  assert.equal(services.get("destruction-audio").assetCount(), 174);
+
+  const emitMat = (payload) => ctx.events.emit("game:event", { event: "building:material", payload });
+
+  // 1. Window break -> glass-hit + window-frame + glass-rain + glass-detail
+  emitMat({ id: "win-1", buildingId: "residence", element: "building-window", material: "glass", style: "interior", stage: "break", intensity: 0.9, x: 10, y: 1.5, z: 0, now: 1000 });
+  // 2. Industrial door break -> door-impact + door-hinge + chain
+  emitMat({ id: "door-1", buildingId: "warehouse", element: "building-door", material: "metal", style: "industrial", stage: "break", intensity: 0.95, x: 20, y: 1.2, z: 0, now: 1001 });
+  // 3. Cascading upper floor (stage === "collapse"!) -> floor-break + floor-creak + beam-fall + roof-fall + dust
+  emitMat({ id: "flr-1", buildingId: "two-storey-house", element: "building-floor", material: "wood", style: "multi-level", stage: "collapse", major: true, intensity: 0.98, x: 30, y: 3.6, z: 0, now: 1002 });
+  // 4. Timber wall break -> wall-heavy + wall-rubble + wall-detail + beam-strain + beam-fall + dust
+  emitMat({ id: "wall-1", buildingId: "forest-hut", element: "building-wall", material: "wood", style: "timber", stage: "break", intensity: 0.92, x: 40, y: 1.5, z: 0, now: 1003 });
+  // 5. Stair collapse -> stair-hit + stair-rattle + chain + metal-rattle
+  emitMat({ id: "stair-1", buildingId: "two-storey-house", element: "building-stair", material: "metal", style: "multi-level", stage: "collapse", intensity: 0.94, x: 50, y: 2.0, z: 0, now: 1004 });
+  // 6. Industrial roof parapet break -> roof-break + roof-fall + metal-structure
+  emitMat({ id: "roof-1", buildingId: "warehouse", element: "building-parapet", material: "stone", style: "industrial", stage: "break", intensity: 0.9, x: 60, y: 6.4, z: 0, now: 1005 });
+
+  await new Promise((r) => setTimeout(r, 420));
+
+  const urls = played.map((p) => p.url);
+  const mustInclude = [
+    "window-frame",
+    "glass-rain",
+    "glass-detail",
+    "door-impact",
+    "door-hinge",
+    "chain",
+    "floor-break",
+    "floor-creak",
+    "beam-fall",
+    "beam-strain",
+    "wall-heavy",
+    "wall-rubble",
+    "wall-detail",
+    "stair-hit",
+    "stair-rattle",
+    "roof-break",
+    "roof-fall",
+    "metal-structure",
+    "dust",
+  ];
+  for (const token of mustInclude) {
+    assert.ok(urls.some((u) => u.includes(token)), `Expected specialized layer "${token}" to play across destruction events`);
+  }
+
+  // 7. Ruin ambience near collapsed warehouse emits spatial settling/creak cue using real snapshot.entities format
+  const countBeforeAmbience = played.length;
+  ctx.events.emit("game:snapshot", {
+    mode: "battle-royale",
+    entities: [{ id: "p1", x: 58, y: 0, z: 2, alive: true }],
+    destruction: {
+      fires: [],
+      buildings: [
+        { id: "warehouse", name: "Склад", style: "industrial", stage: "collapsed", x: 60, y: 2, z: 0 },
+      ],
+    },
+  });
+  assert.ok(played.length > countBeforeAmbience, "Standing near collapsed ruins must emit subtle settling/creaking ambience cue");
+
+  ctx.events.emit("network:disconnected");
+});
+
 

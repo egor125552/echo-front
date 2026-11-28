@@ -168,14 +168,26 @@ test("Juggernaut heavy armor resists sniper and never shatters 600 armor in one 
   assert.equal(jugFar.armorBroke, false);
 });
 
-test("enemy bot initial loadouts never include sniper rifles (max marksman/rifle)", () => {
+test("enemy bot initial loadouts are pistols by default with only 2 rare bots starting with marksman or rifle (and zero snipers)", () => {
+  let marksmanCount = 0;
+  let rifleCount = 0;
+  let pistolOnlyCount = 0;
   for (let serial = 1; serial <= 120; serial += 1) {
     const loadout = createBotLoadout(serial, Math.ceil(serial / 2));
     assert(!loadout.weapons.includes("sniper"), `Enemy bot ${serial} unexpectedly spawned with sniper: ${loadout.weapons}`);
     for (const weaponId of loadout.weapons) {
       assert(["marksman", "rifle", "pistol"].includes(weaponId), `Unexpected drop weapon: ${weaponId}`);
     }
+    if (loadout.weapons.includes("marksman")) marksmanCount += 1;
+    else if (loadout.weapons.includes("rifle")) rifleCount += 1;
+    else {
+      assert.deepEqual(loadout.weapons, ["pistol"], `Default enemy bot ${serial} should start with pistol only`);
+      pistolOnlyCount += 1;
+    }
   }
+  assert.equal(marksmanCount, 1, "Exactly one rare enemy bot should start with a marksman rifle");
+  assert.equal(rifleCount, 1, "Exactly one rare enemy bot should start with an assault rifle");
+  assert.equal(pistolOnlyCount, 118, "All other enemy bots should start with pistol only");
 });
 
 test("New Match button visibility toggles properly when eliminated, spectating, redeployed, or ended", () => {
@@ -214,14 +226,29 @@ test("live Battle Royale: zero enemy bots spawn with snipers, squad win emits sq
     const joined = game.api.connectHuman(PLAYER);
     assert(joined.squadmates.length === 3, `Expected 3 squadmates, got ${joined.squadmates.length}`);
 
-    // 1. Verify ZERO enemy bots dropped/spawned with a sniper rifle
+    // 1. Verify enemy bots start with pistols (at most 2 rare enemies with marksman/rifle, zero snipers)
+    // and player's 3 squadmates start armed with their primary weapons selected
     const enemyBots = entities.all().filter((e) => e.bot && teams.teamOf(e.id) !== joined.team);
     assert(enemyBots.length > 50, "Expected enemy bots in Battle Royale");
+    let enemyUpgraded = 0;
     for (const bot of enemyBots) {
       const inv = game.host.components.get(bot.id, "Weapons");
       const ids = inv?.items?.map((w) => w.id) ?? [];
       assert(!ids.includes("sniper"), `Enemy bot ${bot.id} dropped with sniper rifle: ${ids.join(",")}`);
+      if (ids.includes("marksman") || ids.includes("rifle")) {
+        enemyUpgraded += 1;
+      } else {
+        assert.deepEqual(ids, ["pistol"], `Enemy bot ${bot.id} should drop with pistol only, got ${ids.join(",")}`);
+      }
     }
+    assert(enemyUpgraded >= 1 && enemyUpgraded <= 2, `Expected 1-2 rare enemy bots with rifle/marksman, got ${enemyUpgraded}`);
+
+    const expectedMatePrimaries = ["rifle", "marksman", "sniper"];
+    joined.squadmates.forEach((mateId, idx) => {
+      const mateInv = game.host.components.get(mateId, "Weapons");
+      const activeId = mateInv?.items?.[mateInv.selected]?.id;
+      assert.equal(activeId, expectedMatePrimaries[idx], `Squadmate ${idx + 1} should start holding ${expectedMatePrimaries[idx]}, got ${activeId}`);
+    });
 
     // 2. Live projectile falloff + Juggernaut sniper durability check
     const shooterId = enemyBots[0].id;
